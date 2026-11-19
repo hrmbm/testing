@@ -1,7 +1,7 @@
-import { TEMPLATE_URL, CV_BUCKET } from './config.js';
-import { supabase } from './supabase.js';
-import { computeDisc } from './disc-engine.js';
-import { esc } from './common.js';
+import { TEMPLATE_URL, CV_BUCKET } from './config.js?v=20261120-hrga-workspace-02';
+import { supabase } from './supabase.js?v=20261120-hrga-workspace-02';
+import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-02';
+import { esc } from './common.js?v=20261120-hrga-workspace-02';
 
 const printDate = d => new Date(d || Date.now()).toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'});
 const getDiscSubmission = record => Array.isArray(record?.disc_submissions) ? record.disc_submissions[0] : record?.disc_submissions;

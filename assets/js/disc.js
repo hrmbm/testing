@@ -1,6 +1,6 @@
-import { supabase, isConfigured } from './supabase.js';
-import { QUESTIONS } from './disc-engine.js';
-import { $, esc, cacheCandidateNik, getCachedCandidateNik, clearCachedCandidateNik, setBusy } from './common.js';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-02';
+import { QUESTIONS } from './disc-engine.js?v=20261120-hrga-workspace-02';
+import { $, esc, cacheCandidateNik, getCachedCandidateNik, clearCachedCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-02';
 
 const root=$('#disc-app');
 let nik='';

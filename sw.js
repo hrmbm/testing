@@ -1,5 +1,5 @@
-/* HR&GA Workspace app cache worker — version 20261120-hrga-workspace-01. */
-const BUILD = '20261120-hrga-workspace-01';
+/* HR&GA Workspace app cache worker — version 20261120-hrga-workspace-02. */
+const BUILD = '20261120-hrga-workspace-02';
 const APP_ASSET_CACHE = `hrga-workspace-app-assets-${BUILD}`;
 const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 
@@ -27,20 +27,25 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Do not cache form HTML. A navigation must always ask the host for the
-  // current build; UI assets are separately versioned in their import URLs.
+  // Do not cache navigation HTML so GitHub Pages always serves current build markup.
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(new Request(request, { cache: 'no-store' })));
+    event.respondWith(fetch(new Request(request, { cache: 'no-cache' })).catch(() => caches.match(request)));
     return;
   }
 
   if (!url.pathname.includes('/assets/') || !/\.(?:js|css)$/i.test(url.pathname)) return;
   event.respondWith((async () => {
     const cache = await caches.open(APP_ASSET_CACHE);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    const response = await fetch(request, { cache: 'no-store' });
-    if (response.ok && response.type !== 'opaque') await cache.put(request, response.clone());
-    return response;
+    try {
+      const response = await fetch(request, { cache: 'no-cache' });
+      if (response.ok && response.type !== 'opaque') {
+        await cache.put(request, response.clone());
+      }
+      return response;
+    } catch {
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      throw new Error('Asset unavailable offline');
+    }
   })());
 });

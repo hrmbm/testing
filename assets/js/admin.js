@@ -1,9 +1,9 @@
-import { supabase, isConfigured } from './supabase.js';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js';
-import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-01';
-import { printApplication } from './print.js';
-import { computeDisc } from './disc-engine.js';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-01';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-02';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js?v=20261120-hrga-workspace-02';
+import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-02';
+import { printApplication } from './print.js?v=20261120-hrga-workspace-02';
+import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-02';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-02';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -188,7 +188,7 @@ function renderDashboard() {
   const recent = applicants.slice(0,7);
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Ringkasan ruang kerja">
-      <img class="atelier-hero-img" src="src/assets/images/interior_atelier_banner_1795130274598.jpg" alt="Showroom dan studio interior PT. Mitra Binamandiri Makmur" referrerpolicy="no-referrer">
+      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="Showroom dan studio interior PT. Mitra Binamandiri Makmur">
       <div class="atelier-hero-scrim" aria-hidden="true"></div>
       <div class="atelier-hero-content">
         <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
