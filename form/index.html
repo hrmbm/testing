@@ -7,20 +7,20 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <meta name="theme-color" content="#016172">
-  <meta name="pk-build" content="20261119-portal-karir-06">
-  <title>Formulir Lamaran · Portal Karir</title>
-  <link rel="stylesheet" href="../assets/css/app.css?v=20261119-portal-karir-06">
-  <link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261119-portal-karir-06">
+  <meta name="pk-build" content="20261120-hrga-workspace-01">
+  <title>Application Form | HR&GA Workspace</title>
+  <link rel="stylesheet" href="../assets/css/app.css?v=20261120-hrga-workspace-01">
+  <link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261120-hrga-workspace-01">
 </head>
 <body class="candidate-page">
   <main class="candidate-wrap">
-    <header class="candidate-brand"><img class="brand-logo" src="../assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur"><span class="candidate-brand-copy">PORTAL REKRUTMEN<small>PT. MITRA BINAMANDIRI MAKMUR</small></span></header>
+    <header class="candidate-brand"><img class="brand-logo" src="../assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur"><span class="candidate-brand-copy">HR&GA WORKSPACE</span></header>
     <div id="candidate-app" class="candidate-content"></div>
   </main>
   <script type="module">
-    const BUILD = '20261119-portal-karir-06';
+    const BUILD = '20261120-hrga-workspace-01';
     const BUILD_KEY = 'portal-karir-static-build';
-    const APP_CACHE_PREFIXES = ['portal-karir-app-assets-', 'portal-karir-app-shell-'];
+    const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 
     // Run before applicant.js: remove stale UI caches on a build change while
     // preserving candidate drafts, region catalog cache, and the current OCR
@@ -31,7 +31,7 @@
         if ('caches' in window) {
           const names = await caches.keys();
           await Promise.all(names
-            .filter(name => APP_CACHE_PREFIXES.some(prefix => name.startsWith(prefix)) && name !== `portal-karir-app-assets-${BUILD}`)
+            .filter(name => APP_CACHE_PREFIXES.some(prefix => name.startsWith(prefix)) && name !== `hrga-workspace-app-assets-${BUILD}`)
             .map(name => caches.delete(name)));
           await caches.delete('portal-karir-ocr-models-v2');
         }

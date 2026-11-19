@@ -1,5 +1,5 @@
 /**
- * Portal Karir browser-only OCR.
+ * HR&GA Workspace browser-only OCR.
  * PP-OCRv6 tiny is selected for mobile: ~6.3 MB combined model assets.
  * Model archives are cached with Cache Storage when available. Candidate images
  * are passed to PaddleOCR in-page and are never uploaded by this module.

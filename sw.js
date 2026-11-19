@@ -1,7 +1,7 @@
-/* Portal Karir app cache worker — version 20261119-portal-karir-06. */
-const BUILD = '20261119-portal-karir-06';
-const APP_ASSET_CACHE = `portal-karir-app-assets-${BUILD}`;
-const APP_CACHE_PREFIXES = ['portal-karir-app-assets-', 'portal-karir-app-shell-'];
+/* HR&GA Workspace app cache worker — version 20261120-hrga-workspace-01. */
+const BUILD = '20261120-hrga-workspace-01';
+const APP_ASSET_CACHE = `hrga-workspace-app-assets-${BUILD}`;
+const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();

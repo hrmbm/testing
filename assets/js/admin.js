@@ -1,9 +1,9 @@
 import { supabase, isConfigured } from './supabase.js';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js';
-import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261119-portal-karir-06';
+import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-01';
 import { printApplication } from './print.js';
 import { computeDisc } from './disc-engine.js';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261119-portal-karir-06';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-01';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -21,13 +21,19 @@ let stage2PositionsCache = [];
 let adminEditorBinding = null;
 
 const TITLES = {
-  dashboard: 'Dashboard', stage1: 'Rekrutmen Tahap 1', stage2: 'Rekrutmen Tahap 2',
-  stage3: 'Rekrutmen Tahap 3', employees: 'Tracking Karyawan', print: 'Cetak Lamaran',
-  reports: 'Laporan Rekrutmen', settings: 'Pengaturan Portal'
+  dashboard: 'Dashboard', stage1: 'Lead Register', filterSettings: 'Filter Settings',
+  stage2: 'Candidate List', stage3: 'DISC Assessment', tracking: 'Recruitment Tracking',
+  employees: 'Employee Directory', print: 'Application Print', reports: 'Recruitment Reports',
+  settings: 'Recruitment Settings', attendanceSuite: 'Attendance Suite',
+  attendanceCalendar: 'Calendar Settings', attendanceStaffHoliday: 'Conditional Holiday Schedule',
+  attendanceStaffManagement: 'Staff Attendance Management', attendanceStaffReports: 'Staff Reports',
+  attendanceDriverSchedule: 'Manual Driver Schedule', attendanceDriverManagement: 'Driver Attendance Management',
+  attendanceDriverReports: 'Driver Reports', vehicleManagement: 'Vehicle Management',
+  vehicleDatabase: 'Vehicle Database', vehicleExpenses: 'Vehicle Expenses', vehicleReports: 'Vehicle Reports'
 };
 const stageLabel = {
-  stage1_pending: 'Tahap 1', application_submitted: 'Tahap 2', disc_completed: 'Tahap 3',
-  stage4_pending: 'Tahap 4', hired: 'Karyawan', rejected: 'Tidak dilanjutkan'
+  stage1_pending: 'Lead Register', application_submitted: 'Form Submitted', disc_completed: 'DISC Completed',
+  stage4_pending: 'Further Review', hired: 'Employee', rejected: 'Not Proceeding'
 };
 const stageClass = {
   stage1_pending: 'gray', application_submitted: 'blue', disc_completed: 'green',
@@ -54,17 +60,13 @@ function statusPill(stage) {
 function fmtAge(applicant) {
   return applicant?.application_data?.umur ? `${esc(applicant.application_data.umur)} th` : '—';
 }
-function header(title, subtitle, actions = '') {
-  // The page title already lives in the single persistent top bar. Keep only
-  // the page context and actions here to avoid a second oversized title.
-  const description = $('#page-description');
-  if (description) description.textContent = subtitle || '';
-  return `<div class="page-intro"><p class="page-description">${esc(subtitle||'')}</p><div class="page-actions">${actions}</div></div>`;
+function header(_title, _subtitle, actions = '') {
+  return actions ? `<div class="page-intro"><div class="page-actions">${actions}</div></div>` : '';
 }
-function tableToolbar(placeholder = 'Cari nama / NIK…', title = 'Daftar kandidat', subtitle = 'Data lamaran tersimpan') {
-  return `<div class="panel-head"><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><div class="table-search"><input id="table-search" type="search" placeholder="${esc(placeholder)}"></div></div>`;
+function tableToolbar(placeholder = 'Search candidates…', title = 'Candidate List', _subtitle = '') {
+  return `<div class="panel-head"><h3>${esc(title)}</h3><div class="table-search"><input id="table-search" type="search" placeholder="${esc(placeholder)}"></div></div>`;
 }
-function emptyRow(columns, message = 'Belum ada data') {
+function emptyRow(columns, message = 'No data available') {
   return `<tr><td colspan="${columns}" class="table-empty">${esc(message)}</td></tr>`;
 }
 function getEmployeeForApplicant(applicant) {
@@ -169,59 +171,67 @@ function renderDashboard() {
   const submitted = stage2 + stage3 + stage4 + hired;
   const discDone = stage3 + stage4 + hired;
   const stages = [
-    ['Menunggu Tahap 2', stage1, 'stage-muted'],
-    ['Formulir Tahap 2', stage2, 'stage-blue'],
-    ['Tes DISC selesai', stage3, 'stage-teal'],
-    ['Tahap lanjutan', stage4, 'stage-gold'],
-    ['Karyawan', hired, 'stage-green'],
-    ['Tidak dilanjutkan', rejected, 'stage-muted']
+    ['Lead Register', stage1, 'stage-muted'],
+    ['Form Submitted', stage2, 'stage-blue'],
+    ['DISC Completed', stage3, 'stage-teal'],
+    ['Further Review', stage4, 'stage-gold'],
+    ['Employees', hired, 'stage-green'],
+    ['Not Proceeding', rejected, 'stage-muted']
   ];
-  const max = Math.max(1, ...stages.map(item => item[1]));
   const positionCounts = new Map();
   applicants.forEach(item => {
-    const position = String(item.position || 'Belum ditentukan').trim();
+    const position = String(item.position || 'Unspecified').trim();
     positionCounts.set(position, (positionCounts.get(position) || 0) + 1);
   });
   const topPositions = [...positionCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
   const maxPosition = Math.max(1, ...topPositions.map(item=>item[1]));
   const recent = applicants.slice(0,7);
-  content.innerHTML = header('Dashboard', 'Ringkasan proses rekrutmen dan aktivitas kandidat') + `
-    <section class="dashboard-metrics" aria-label="Ringkasan kandidat">
-      <article class="stat-card"><div class="stat-top">Total kandidat <span class="metric-mark">01</span></div><div class="stat-number">${total}</div><div class="stat-note">Seluruh data kandidat</div></article>
-      <article class="stat-card"><div class="stat-top">Formulir masuk <span class="metric-mark">02</span></div><div class="stat-number">${submitted}</div><div class="stat-note">Tahap 2 dan proses berikutnya</div></article>
-      <article class="stat-card"><div class="stat-top">Tes DISC selesai <span class="metric-mark">03</span></div><div class="stat-number">${discDone}</div><div class="stat-note">Kandidat dengan hasil DISC</div></article>
-      <article class="stat-card"><div class="stat-top">Karyawan <span class="metric-mark">04</span></div><div class="stat-number">${hired}</div><div class="stat-note">Tercatat pada tracking karyawan</div></article>
+  content.innerHTML = `
+    <section class="workspace-modules" aria-label="Workspace modules">
+      <button type="button" class="workspace-module" data-view="attendanceSuite" data-module="attendance">
+        <span class="workspace-module-icon">▦</span><span class="workspace-module-copy"><b>Attendance Suite</b><span>CALENDAR & WORKFORCE</span></span><span class="workspace-module-arrow">↗</span>
+      </button>
+      <button type="button" class="workspace-module" data-view="vehicleManagement" data-module="vehicle">
+        <span class="workspace-module-icon">⌑</span><span class="workspace-module-copy"><b>Vehicle Management</b><span>FLEET & EXPENSES</span></span><span class="workspace-module-arrow">↗</span>
+      </button>
     </section>
-    <div class="dashboard-v2-grid">
+    <section class="dashboard-metrics" aria-label="Recruitment metrics">
+      <article class="stat-card"><div class="stat-top">Total Applicants <span class="metric-mark">01</span></div><div class="stat-number">${total}</div><div class="stat-note">All recorded applications</div></article>
+      <article class="stat-card"><div class="stat-top">Forms Submitted <span class="metric-mark">02</span></div><div class="stat-number">${submitted}</div><div class="stat-note">Candidate forms received</div></article>
+      <article class="stat-card"><div class="stat-top">DISC Completed <span class="metric-mark">03</span></div><div class="stat-number">${discDone}</div><div class="stat-note">Completed assessments</div></article>
+      <article class="stat-card"><div class="stat-top">Employees <span class="metric-mark">04</span></div><div class="stat-number">${hired}</div><div class="stat-note">Employee records</div></article>
+    </section>
+    <div id="recruitment-routemap" class="dashboard-v2-grid">
       <section class="panel dashboard-process-panel">
-        <div class="panel-head"><div><h3>Alur rekrutmen</h3><p>Distribusi kandidat berdasarkan tahap terakhir</p></div><span class="dashboard-total">${total} kandidat</span></div>
+        <div class="panel-head"><h3>Recruitment Routemap</h3><span class="dashboard-total">${total} applicants</span></div>
         <div class="dashboard-process-list">${stages.map(([label,value,tone])=>`<div class="dashboard-process-row"><div class="dashboard-process-copy"><span>${esc(label)}</span><b>${value}</b></div><div class="dashboard-process-track"><span class="${tone}" style="width:${total?Math.min(100,value/total*100):0}%"></span></div></div>`).join('')}</div>
       </section>
       <section class="panel dashboard-position-panel">
-        <div class="panel-head"><div><h3>Kandidat per posisi</h3><p>Posisi dengan jumlah lamaran terbanyak</p></div></div>
-        <div class="dashboard-position-list">${topPositions.length?topPositions.map(([name,value])=>`<div class="dashboard-position-row"><div><span>${esc(name)}</span><div class="dashboard-process-track"><span style="width:${value/maxPosition*100}%"></span></div></div><b>${value}</b></div>`).join(''):'<div class="dashboard-empty">Belum ada data posisi.</div>'}</div>
+        <div class="panel-head"><h3>Applicants by Position</h3></div>
+        <div class="dashboard-position-list">${topPositions.length?topPositions.map(([name,value])=>`<div class="dashboard-position-row"><div><span>${esc(name)}</span><div class="dashboard-process-track"><span style="width:${value/maxPosition*100}%"></span></div></div><b>${value}</b></div>`).join(''):'<div class="dashboard-empty">No position data</div>'}</div>
       </section>
     </div>
     <section class="panel table-panel dashboard-recent-panel">
-      <div class="panel-head"><div><h3>Kandidat terbaru</h3><p>Data yang terakhir masuk ke Portal Karir</p></div><button class="btn btn-secondary" id="refresh-dashboard">Muat ulang <span aria-hidden="true">↻</span></button></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>KANDIDAT</th><th>POSISI</th><th>USIA</th><th>STATUS</th><th>AKSI</th></tr></thead><tbody>${applicantRows(recent, 'print')}</tbody></table></div>
+      <div class="panel-head"><h3>Recent Applicants</h3><button class="btn btn-secondary" id="refresh-dashboard">Refresh ↻</button></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>APPLICANT</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${applicantRows(recent, 'print')}</tbody></table></div>
     </section>`;
   bindPrint();
   $('#refresh-dashboard')?.addEventListener('click', () => loadView('dashboard'));
+  $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));
 }
 
 function stage1ExperienceColumns(rows){return [...new Set(rows.flatMap(row=>Object.keys(row.experience_details||{})))].sort();}
 function stage1RowsHtml(rows,keys){
- if(!rows.length)return emptyRow(9+keys.length,'Belum ada lamaran Tahap 1');
+ if(!rows.length)return emptyRow(9+keys.length,'No leads found');
  return rows.map(row=>{
   const details=row.experience_details||{};
   return `<tr><td><b>${esc(row.full_name)}</b></td><td>${esc(row.position)}</td><td>${esc(row.city||'—')}</td>
    <td>${esc(row.district||'—')}</td><td>${esc(row.whatsapp||'—')}</td>
    ${keys.map(key=>`<td>${esc(displayApplicationValue(details[key]))}</td>`).join('')}
    <td><span class="status-pill blue">${esc(row.status||'received')}</span></td><td data-sort-value="${esc(row.created_at||'')}">${esc(idDate(row.created_at))}</td>
-   <td><button class="icon-btn" data-stage1-cv="${esc(row.id)}">Lihat CV</button></td>
-   <td><div class="row-actions"><button class="icon-btn" data-stage1-wa="${esc(row.id)}">Kirim Tahap 2</button>
-   <button class="icon-btn" data-stage1-status="${esc(row.id)}">Tandai ditinjau</button></div></td></tr>`;
+   <td><button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button></td>
+   <td><div class="row-actions"><button class="icon-btn" data-stage1-wa="${esc(row.id)}">Send to Stage 2</button>
+   <button class="icon-btn" data-stage1-status="${esc(row.id)}">Mark Reviewed</button></div></td></tr>`;
  }).join('');
 }
 async function renderStage1(){
@@ -230,14 +240,14 @@ async function renderStage1(){
   .order('created_at',{ascending:false}).limit(500);
  if(error)throw error;
  const rows=data||[],keys=stage1ExperienceColumns(rows);
- const headers=['NAMA','POSISI','KABUPATEN / KOTA','KECAMATAN','WHATSAPP',
-  ...keys.map(key=>applicationFieldLabel(key).toLocaleUpperCase('id')),'STATUS','TANGGAL','CV','AKSI'];
+ const headers=['APPLICANT','POSITION','CITY','DISTRICT','WHATSAPP',
+  ...keys.map(key=>applicationFieldLabel(key).toLocaleUpperCase('id')),'STATUS','SUBMITTED','CV','ACTIONS'];
  const paint=query=>{
   const filtered=rows.filter(row=>`${row.full_name} ${row.whatsapp} ${row.position} ${row.city} ${row.district} ${JSON.stringify(row.experience_details||{})}`.toLocaleLowerCase('id').includes(query));
   $('#stage1-rows').innerHTML=stage1RowsHtml(filtered,keys);bindStage1Actions(rows);
  };
- content.innerHTML=header('Rekrutmen Tahap 1','Data awal dari /apply · ringkasan lamaran dikirim ke WhatsApp HR 08133193313; HR dapat meneruskan kandidat ke Tahap 2')+
-  `<section class="panel table-panel">${tableToolbar('Cari nama / WhatsApp / posisi / pengalaman…')}
+ content.innerHTML=header('Lead Register','Data awal dari /apply · ringkasan lamaran dikirim ke WhatsApp HR 08133193313; HR dapat meneruskan kandidat ke Tahap 2')+
+  `<section class="panel table-panel">${tableToolbar('Search name / WhatsApp / position…', 'Lead Register')}
    <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headers.map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody id="stage1-rows">${stage1RowsHtml(rows,keys)}</tbody></table></div></section>`;
  bindSearch('#table-search',paint);bindStage1Actions(rows);
 }
@@ -267,11 +277,25 @@ function bindStage1Actions(rows){
  }));
 }
 async function renderSettings(){
-  const {data,error}=await supabase.from('portal_settings').select('value').eq('key','ktp_ocr_enabled').maybeSingle();if(error)throw error;
+  const {data,error}=await supabase.from('portal_settings').select('value').eq('key','ktp_ocr_enabled').maybeSingle();
+  if(error)throw error;
   const enabled=data?.value===true;
-  content.innerHTML=header('Pengaturan Portal','Kontrol fitur kandidat')+`<section class="panel" style="padding:22px;max-width:760px"><div style="display:flex;justify-content:space-between;align-items:center;gap:20px"><div><h3 style="margin:0 0 6px">Pemindaian KTP (OCR)</h3><p class="subtle" style="margin:0">Jika nonaktif, kandidat langsung mengisi seluruh data KTP secara manual.</p></div><label style="display:flex;align-items:center;gap:10px;font-weight:700"><input id="ocr-feature-toggle" type="checkbox" ${enabled?'checked':''}> ${enabled?'Aktif':'Nonaktif'}</label></div><p class="mini-note" style="margin-top:14px">Mode awal: nonaktif. Kode OCR tetap tersedia untuk diaktifkan kembali.</p></section>`;
-  $('#ocr-feature-toggle').addEventListener('change',async e=>{const value=e.target.checked;const {error}=await supabase.from('portal_settings').upsert({key:'ktp_ocr_enabled',value,updated_at:new Date().toISOString()},{onConflict:'key'});if(error){e.target.checked=!value;say(error.message);}else{say(value?'OCR diaktifkan.':'OCR dinonaktifkan.');loadView('settings');}});
+  content.innerHTML=`<section class="panel" style="padding:20px;max-width:700px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px">
+      <h3 style="margin:0;color:var(--teal-dark);font-size:13px">ID Card Scanning (OCR)</h3>
+      <label style="display:flex;align-items:center;gap:9px;font-size:10px;font-weight:800;color:var(--teal-dark)">
+        <span>${enabled?'Enabled':'Disabled'}</span><input id="ocr-feature-toggle" type="checkbox" ${enabled?'checked':''}>
+      </label>
+    </div>
+  </section>`;
+  $('#ocr-feature-toggle').addEventListener('change',async event=>{
+    const value=event.target.checked;
+    const {error}=await supabase.from('portal_settings').upsert({key:'ktp_ocr_enabled',value,updated_at:new Date().toISOString()},{onConflict:'key'});
+    if(error){event.target.checked=!value;say(error.message);}
+    else{say(value?'OCR enabled.':'OCR disabled.');loadView('settings');}
+  });
 }
+
 function bindBackgroundCheck(){
  $$('[data-bg-check]').forEach(button=>button.addEventListener('click',async()=>{
   const id=button.dataset.bgCheck,select=$(`[data-bg-value="${id}"]`);if(!select)return;
@@ -345,13 +369,13 @@ function stage2RowHtml(row,keys){
    <option value="passed" ${row.background_check_status==='passed'?'selected':''}>Lolos</option>
    <option value="failed" ${row.background_check_status==='failed'?'selected':''}>Tidak lolos</option>
   </select></td><td><div class="row-actions stage2-actions"><button class="icon-btn" data-bg-check="${esc(row.id)}">Simpan kelayakan DISC</button>
-   <button class="icon-btn" data-stage2-edit="${esc(row.id)}">Edit</button><button class="icon-btn danger" data-stage2-delete="${esc(row.id)}">Hapus</button></div></td></tr>`;
+   <button class="icon-btn" data-stage2-edit="${esc(row.id)}">Edit</button><button class="icon-btn danger" data-stage2-delete="${esc(row.id)}">Delete</button></div></td></tr>`;
 }
 function openSignedDocumentInNewTab(bucket,path,label,button){
  // Open the blank tab synchronously inside the click handler so popup blockers
  // do not turn a single-click action into a second-click workflow.
  const tab=window.open('about:blank','_blank');
- if(!tab){say('Tab dokumen diblokir browser. Izinkan pop-up untuk Portal Karir lalu coba lagi.');return;}
+ if(!tab){say('Tab dokumen diblokir browser. Izinkan pop-up untuk HR&GA Workspace lalu coba lagi.');return;}
  try{tab.opener=null;tab.document.title=`Menyiapkan ${label}`;tab.document.body.innerHTML=`<p style="font:14px Arial,sans-serif;padding:24px;color:#243238">Menyiapkan dokumen…</p>`;}catch{}
  const original=button?.textContent;
  if(button){button.disabled=true;button.textContent='Membuka…';}
@@ -392,7 +416,7 @@ async function savePositionList(positions){
 }
 function positionManagerHtml(positions){
  return `<section class="panel position-manager"><div class="panel-head"><div><h3>Daftar Lowongan</h3><p>Perubahan digunakan oleh pilihan posisi di /form dan /apply.</p></div></div>
-  <div class="position-manager-body"><div id="position-rows">${positions.map((position,index)=>`<div class="position-row"><input class="input" maxlength="100" data-position-index="${index}" value="${esc(position)}" aria-label="Nama posisi ${index+1}"><button type="button" class="icon-btn" data-position-delete="${index}" ${positions.length===1?'disabled':''}>Hapus</button></div>`).join('')}</div>
+  <div class="position-manager-body"><div id="position-rows">${positions.map((position,index)=>`<div class="position-row"><input class="input" maxlength="100" data-position-index="${index}" value="${esc(position)}" aria-label="Nama posisi ${index+1}"><button type="button" class="icon-btn" data-position-delete="${index}" ${positions.length===1?'disabled':''}>Delete</button></div>`).join('')}</div>
   <div class="position-add-row"><input class="input" id="new-position" maxlength="100" placeholder="Nama posisi baru"><button type="button" class="btn btn-secondary" id="add-position">Tambah posisi</button></div>
   <div class="position-manager-foot"><small>Nama posisi akan menjadi pilihan resmi kandidat.</small><button type="button" class="btn btn-primary" id="save-positions">Simpan daftar posisi</button></div></div></section>`;
 }
@@ -420,7 +444,7 @@ function candidateEditModal() {
  modal=document.createElement('div');
  modal.id='candidate-edit-modal';modal.className='modal-backdrop hidden';
  modal.innerHTML=`<section class="employee-modal-card candidate-edit-card" role="dialog" aria-modal="true" aria-labelledby="candidate-edit-title">
-  <div class="employee-modal-head candidate-edit-head"><div><small>REKRUTMEN TAHAP 2</small><h2 id="candidate-edit-title">Koreksi data kandidat</h2><p id="candidate-edit-summary">Formulir mengikuti tampilan pengisian kandidat.</p></div><button type="button" class="modal-close" id="candidate-edit-close" aria-label="Tutup">×</button></div>
+  <div class="employee-modal-head candidate-edit-head"><div><small>RECRUITMENT · CANDIDATE REVIEW</small><h2 id="candidate-edit-title">Edit Candidate</h2><p id="candidate-edit-summary"></p></div><button type="button" class="modal-close" id="candidate-edit-close" aria-label="Tutup">×</button></div>
   <div id="candidate-edit-form-slot" class="candidate-edit-form-slot"></div>
   <div id="candidate-edit-error" class="form-error candidate-edit-error" role="alert"></div>
   <div class="employee-modal-actions candidate-edit-footer"><button type="button" class="btn btn-secondary" id="candidate-edit-cancel">Batal</button><button type="button" class="btn btn-primary" id="candidate-edit-save">Simpan perubahan</button></div>
@@ -512,10 +536,10 @@ async function renderStage2(){
  const allRows=applicants.filter(row=>row.stage!=='stage1_pending'&&row.stage!=='rejected');
  const positions=await loadPositionList(),keys=stage2FieldKeys(allRows);
  stage2PositionsCache=positions.slice();
- const renderRows=rows=>rows.length?rows.map(row=>stage2RowHtml(row,keys)).join(''):emptyRow(7+keys.length,'Belum ada formulir Tahap 2');
- const columns=['KANDIDAT','POSISI',...keys.map(key=>applicationFieldLabel(key).toLocaleUpperCase('id')),'FOTO KTP','CV','STATUS FORM','BACKGROUND CHECK','AKSI'];
- content.innerHTML=header('Rekrutmen Tahap 2','Seluruh field tersimpan, lampiran KTP/CV, dan kelayakan DISC · NIK adalah identitas utama')+
-  `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Cari nama / NIK / posisi / data lain…','Daftar Kandidat','Formulir Tahap 2 · susunan kolom mengikuti urutan formulir')}
+ const renderRows=rows=>rows.length?rows.map(row=>stage2RowHtml(row,keys)).join(''):emptyRow(7+keys.length,'No candidate forms');
+ const columns=['APPLICANT','POSITION',...keys.map(key=>applicationFieldLabel(key).toLocaleUpperCase('id')),'ID CARD','CV','FORM STATUS','BACKGROUND CHECK','ACTIONS'];
+ content.innerHTML=header('Candidate List','Seluruh field tersimpan, lampiran KTP/CV, dan kelayakan DISC · NIK adalah identitas utama')+
+  `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Search name / NIK / position…','Candidate List')}
    <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${columns.map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`+
   positionManagerHtml(positions);
  bindPositionManager(positions);
@@ -528,9 +552,9 @@ async function renderStage2(){
 
 function renderStage3(){
  const rows=applicants.filter(row=>getDiscForApplicant(row)||row.stage==='disc_completed'||row.stage==='hired');
- content.innerHTML=header('Rekrutmen Tahap 3','Grafik DISC dan pola kepribadian dihitung dari rumus DISC Portal Karir')+
-  `<section class="panel table-panel">${tableToolbar()}<div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table">
-   <thead><tr><th>KANDIDAT / NIK</th><th>POSISI</th><th>USIA</th><th>STATUS</th><th>GRAFIK DISC (G1 · G2 · G3)</th><th>NAMA KEPRIBADIAN / POLA ALAMI</th><th>AKSI</th></tr></thead>
+ content.innerHTML=header('DISC Assessment','Grafik DISC dan pola kepribadian dihitung dari rumus DISC HR&GA Workspace')+
+  `<section class="panel table-panel">${tableToolbar('Search candidates…','DISC Assessment')}<div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table">
+   <thead><tr><th>APPLICANT / NIK</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>DISC GRAPHS (G1 · G2 · G3)</th><th>PERSONALITY / NATURAL PATTERN</th><th>ACTIONS</th></tr></thead>
    <tbody id="candidate-rows">${applicantRows(rows,'both')}</tbody></table></div></section>`;
  const repaint=query=>{
   $('#candidate-rows').innerHTML=applicantRows(rows.filter(row=>`${row.full_name} ${row.nik} ${row.position}`.toLocaleLowerCase('id').includes(query)),'both');
@@ -554,9 +578,9 @@ function employeeRows(rows) {
 }
 
 function renderEmployees() {
-  content.innerHTML = header('Tracking Karyawan', 'Data karyawan yang telah dipindahkan dari proses rekrutmen', '<button id="export-employees" class="btn btn-primary">Unduh XLSX ↓</button>') + `
-    <section class="panel table-panel">${tableToolbar('Cari nama / nomor karyawan…')}<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>NAMA KARYAWAN</th><th>NOMOR</th><th>DEPARTEMEN</th><th>POSISI</th><th>STATUS</th><th>TANGGAL MASUK</th><th>AKSI</th></tr></thead>
+  content.innerHTML = header('Employee Tracking', 'Data karyawan yang telah dipindahkan dari proses rekrutmen', '<button id="export-employees" class="btn btn-primary">Unduh XLSX ↓</button>') + `
+    <section class="panel table-panel">${tableToolbar('Search employee / number…', 'Employee List')}<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>EMPLOYEE</th><th>EMPLOYEE NO.</th><th>DEPARTMENT</th><th>POSITION</th><th>STATUS</th><th>JOIN DATE</th><th>ACTIONS</th></tr></thead>
       <tbody id="employee-rows">${employeeRows(employees)}</tbody>
     </table></div></section>`;
   bindSearch('#table-search', query => {
@@ -612,7 +636,7 @@ function templateManagerHtml(migrationError = null) {
         <input id="template-file" class="input" type="file" accept=".html,text/html" required>
         <button class="btn btn-primary" type="submit">Simpan & aktifkan</button>
       </form>
-      <div class="template-history"><div class="template-history-title">Riwayat versi tersimpan</div><div class="table-wrap"><table class="data-table"><thead><tr><th>FILE MASTER</th><th>TANGGAL</th><th>STATUS</th><th>AKSI</th></tr></thead><tbody>${history}</tbody></table></div></div>`;
+      <div class="template-history"><div class="template-history-title">Riwayat versi tersimpan</div><div class="table-wrap"><table class="data-table"><thead><tr><th>MASTER FILE</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${history}</tbody></table></div></div>`;
   return `<section class="panel template-manager">
     <div class="panel-head"><div><h3>Master HTML lamaran</h3><p>Desain dapat diganti tanpa mengubah struktur data formulir</p></div><span class="status-pill ${active ? 'green' : 'blue'}">${active ? 'Versi tersimpan' : 'Master bawaan'}</span></div>
     <div class="template-manager-body">${controls}</div>
@@ -620,9 +644,9 @@ function templateManagerHtml(migrationError = null) {
 }
 
 function renderPrint() {
-  content.innerHTML = header('Cetak Lamaran', 'Dokumen disusun otomatis: Lamaran · CV · DISC') + `
+  content.innerHTML = header('Application Print', 'Dokumen disusun otomatis: Lamaran · CV · DISC') + `
     <section class="panel table-panel">${tableToolbar()}<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>KANDIDAT</th><th>POSISI</th><th>TAHAP</th><th>DISC</th><th>DOKUMEN</th></tr></thead>
+      <thead><tr><th>APPLICANT</th><th>POSITION</th><th>STAGE</th><th>DISC</th><th>DOCUMENTS</th></tr></thead>
       <tbody id="candidate-rows">${renderPrintRows(applicants)}</tbody>
     </table></div></section>
     <div id="template-manager-slot"></div>`;
@@ -662,11 +686,11 @@ async function renderReports() {
     const protectedText = /^\s*[=+@-]/.test(text) ? "'" + text : text;
     return '"' + protectedText.replace(/"/g, '""') + '"';
   };
-  content.innerHTML = header('Laporan Rekrutmen', 'Ringkasan data aktual dari lamaran Tahap 1, kandidat, DISC, dan karyawan',
+  content.innerHTML = header('Recruitment Reports', 'Ringkasan data aktual dari lamaran Tahap 1, kandidat, DISC, dan karyawan',
     '<button id="export-recruitment-report" class="btn btn-primary">Unduh CSV ↓</button>') + `
     <div class="stat-grid">${counts.map(([label,value]) => `<article class="stat-card"><div class="stat-top">${esc(label)}</div><div class="stat-number">${value}</div><div class="stat-note">Data tersimpan</div></article>`).join('')}</div>
     <section class="panel table-panel"><div class="panel-head"><div><h3>Distribusi posisi</h3><p>Gabungan lamaran awal dan formulir kandidat</p></div><span class="status-pill blue">${positions.size} posisi</span></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>POSISI</th><th>JUMLAH</th></tr></thead><tbody>${[...positions.entries()].sort((a,b)=>b[1]-a[1]).map(([name,total])=>`<tr><td>${esc(name)}</td><td>${total}</td></tr>`).join('') || emptyRow(2)}</tbody></table></div></section>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>POSITION</th><th>COUNT</th></tr></thead><tbody>${[...positions.entries()].sort((a,b)=>b[1]-a[1]).map(([name,total])=>`<tr><td>${esc(name)}</td><td>${total}</td></tr>`).join('') || emptyRow(2)}</tbody></table></div></section>
     <section class="panel table-panel"><div class="panel-head"><div><h3>Catatan laporan</h3><p>Ringkasan dibangun dari data yang saat ini tersimpan</p></div></div><div class="panel-body"><p class="subtle">Lamaran Tahap 1 merupakan alur publik terpisah. Kandidat baru dihitung pada Tahap 2 setelah formulir kandidat lengkap dikirim. Angka tidak menggandakan hasil DISC atau status karyawan.</p></div></section>`;
   $('#export-recruitment-report').addEventListener('click', () => {
     const rows = [['Kategori','Jumlah'], ...counts];
@@ -686,8 +710,8 @@ async function renderReports() {
   });
 }
 
-function renderPlaceholder(title, subtitle) {
-  content.innerHTML = header(title, subtitle) + `<section class="panel placeholder-panel"><div><div class="placeholder-symbol">◌</div><h2>Belum tersedia</h2><p>Area ini disiapkan untuk pengembangan berikutnya.</p></div></section>`;
+function renderPlaceholder(_title) {
+  content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol">◌</div><span class="status-pill gray">Coming soon</span></div></section>`;
 }
 
 function bindPrint() {
@@ -868,7 +892,7 @@ async function exportEmployees() {
     say(error.message || 'File XLSX gagal dibuat.');
   } finally {
     button.disabled = false;
-    button.textContent = 'Unduh XLSX ↓';
+    button.textContent = 'Export XLSX ↓';
   }
 }
 
@@ -963,7 +987,8 @@ async function loadView(view) {
   $('#page-title').textContent = TITLES[view] || 'Dashboard';
   content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol">◌</div><h2>Memuat data</h2></div></section>';
   try {
-    await refreshData();
+    const dataViews = new Set(['dashboard','stage1','stage2','stage3','employees','print','settings','reports']);
+    if (dataViews.has(view)) await refreshData();
     if (view === 'dashboard') renderDashboard();
     else if (view === 'stage1') await renderStage1();
     else if (view === 'stage2') renderStage2();
@@ -972,7 +997,8 @@ async function loadView(view) {
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
     else if (view === 'reports') await renderReports();
-    else renderPlaceholder('Halaman tidak ditemukan', 'Menu tidak dikenali');
+    else if (TITLES[view]) renderPlaceholder(TITLES[view]);
+    else renderPlaceholder('Page not found');
   } catch (error) {
     content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol">!</div><h2>Data tidak dapat dimuat</h2><p>${esc(error.message || 'Periksa koneksi Supabase.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Coba lagi</button></div></section>`;
     $('#retry-load')?.addEventListener('click', () => loadView(view));
@@ -1041,9 +1067,9 @@ $('#login-form').addEventListener('submit', async event => {
     $('#login-pin').value = '';
   } catch (error) {
     console.error('Username/PIN login failed:', error);
-    errorBox.textContent = error.message || 'Login gagal. Periksa username dan PIN.';
+    errorBox.textContent = error.message || 'Sign-in failed. Check your username and password.';
     button.disabled = false;
-    button.textContent = 'Masuk ↗';
+    button.textContent = 'Sign In ↗';
   }
 });
 
@@ -1057,7 +1083,7 @@ $('#logout-btn').addEventListener('click', async () => {
   loginView.classList.remove('hidden');
   $('#login-pin').value = '';
   const loginButton = $('#login-form button[type="submit"]');
-  if (loginButton) { loginButton.disabled = false; loginButton.textContent = 'Masuk ↗'; }
+  if (loginButton) { loginButton.disabled = false; loginButton.textContent = 'Sign In ↗'; }
   currentUserId = null;
 });
 

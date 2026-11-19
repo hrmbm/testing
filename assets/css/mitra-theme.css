@@ -1,4 +1,4 @@
-/* Identitas visual Portal Rekrutmen — diselaraskan dengan HR Management System mitra.html */
+/* Identitas visual HR&GA Workspace — diselaraskan dengan HR Management System mitra.html */
 :root{
   --ink:#243238;
   --ink-2:#36535a;
@@ -271,7 +271,7 @@ body.candidate-page{background:var(--cream);color:var(--text)}
  .candidate-edit-card{padding:18px}
 }
 
-/* Portal Karir · clean HR workspace refinement (non-Stage-1 logic) */
+/* HR&GA Workspace · clean HR workspace refinement (non-Stage-1 logic) */
 .admin-page{background:var(--cream);color:var(--text)}
 .admin-shell{grid-template-columns:236px minmax(0,1fr);background:var(--cream)}
 .sidebar{padding:22px 16px 18px;background:linear-gradient(180deg,#016172 0%,#014b59 100%)}

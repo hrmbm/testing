@@ -1,6 +1,6 @@
 import { supabase, isConfigured } from './supabase.js?v=20261116-manual-default-07';
 import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261116-manual-default-07';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261119-portal-karir-06';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-01';
 import { extractKtpText, formatKtpAddress } from './ktp-ocr.js?v=20261116-manual-default-07';
 import { recognizeWithPaddle } from './ocr-engine.js?v=20261116-manual-default-07';
 
@@ -1090,13 +1090,13 @@ async function processPhotoFile(file){
   finally{const input=$('#ktp-fallback-input');if(input)input.value='';}
 }
 function showEntryModeChoice(){
-  root.innerHTML=`<div class="step-top"><span class="stage-kicker">PORTAL KARIR</span><span class="step-number">IDENTITAS</span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pilih cara mengisi identitas</h1><p class="candidate-sub">Anda dapat memindai KTP atau mengisi seluruh data secara manual.</p><div class="candidate-actions"><button type="button" class="btn btn-primary" id="choose-ocr">Pindai KTP</button><button type="button" class="btn btn-secondary" id="choose-manual">Isi manual</button></div></section>`;
+  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pilih cara mengisi identitas</h1><p class="candidate-sub">Anda dapat memindai KTP atau mengisi seluruh data secara manual.</p><div class="candidate-actions"><button type="button" class="btn btn-primary" id="choose-ocr">Pindai KTP</button><button type="button" class="btn btn-secondary" id="choose-manual">Isi manual</button></div></section>`;
   $('#choose-ocr').addEventListener('click',showKtpScreen);
   $('#choose-manual').addEventListener('click',showForm);
 }
 function showKtpScreen(){
   ocrRunGeneration++;ocrAttempts=0;ocrBusy=false;ocrFieldConfidence={};ocrMappingData=null;activeCaptureMode='camera';closeCropImage();
-  root.innerHTML=`<div class="step-top"><span class="stage-kicker">PORTAL KARIR</span><span class="step-number">IDENTITAS</span></div><div class="wizard-progress"><span style="width:8%"></span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pindai KTP</h1><div id="ktp-camera-area"><div class="ktp-camera-frame" id="ktp-camera-frame" data-camera-state="loading"><video id="ktp-video" autoplay muted playsinline webkit-playsinline></video><div class="ktp-camera-placeholder" id="ktp-camera-placeholder" role="status"><strong>Mengaktifkan kamera…</strong></div><div class="ktp-guide" id="ktp-guide" aria-hidden="true"></div></div><div class="camera-status" id="camera-status" aria-live="polite"></div><div id="ktp-fallback" class="ktp-fallback" hidden><span>Kamera tidak tersedia. Pilih foto dari perangkat.</span></div><input type="file" id="ktp-fallback-input" accept="image/jpeg,image/png,image/webp" hidden><div class="candidate-actions camera-actions"><button type="button" class="btn btn-primary" id="capture-ktp" disabled>Ambil foto</button><button type="button" class="btn btn-secondary" id="select-ktp-photo">Pilih foto</button></div></div><div id="ktp-crop-editor" hidden></div><div class="ocr-loading-panel" id="ocr-loading" hidden aria-live="polite"><div class="ocr-spinner" aria-hidden="true"></div><strong id="ocr-loading-text">Memproses foto KTP</strong><span id="ocr-attempt-count">Percobaan 1 dari 3</span><small id="ocr-progress">Menyiapkan pemindai…</small></div><div class="ocr-status" id="ocr-status" aria-live="polite"></div><button type="button" class="manual-entry" id="manual-entry" hidden aria-hidden="true" tabindex="-1">Lanjut isi data secara manual</button></section>`;
+  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><div class="wizard-progress"><span style="width:8%"></span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pindai KTP</h1><div id="ktp-camera-area"><div class="ktp-camera-frame" id="ktp-camera-frame" data-camera-state="loading"><video id="ktp-video" autoplay muted playsinline webkit-playsinline></video><div class="ktp-camera-placeholder" id="ktp-camera-placeholder" role="status"><strong>Mengaktifkan kamera…</strong></div><div class="ktp-guide" id="ktp-guide" aria-hidden="true"></div></div><div class="camera-status" id="camera-status" aria-live="polite"></div><div id="ktp-fallback" class="ktp-fallback" hidden><span>Kamera tidak tersedia. Pilih foto dari perangkat.</span></div><input type="file" id="ktp-fallback-input" accept="image/jpeg,image/png,image/webp" hidden><div class="candidate-actions camera-actions"><button type="button" class="btn btn-primary" id="capture-ktp" disabled>Ambil foto</button><button type="button" class="btn btn-secondary" id="select-ktp-photo">Pilih foto</button></div></div><div id="ktp-crop-editor" hidden></div><div class="ocr-loading-panel" id="ocr-loading" hidden aria-live="polite"><div class="ocr-spinner" aria-hidden="true"></div><strong id="ocr-loading-text">Memproses foto KTP</strong><span id="ocr-attempt-count">Percobaan 1 dari 3</span><small id="ocr-progress">Menyiapkan pemindai…</small></div><div class="ocr-status" id="ocr-status" aria-live="polite"></div><button type="button" class="manual-entry" id="manual-entry" hidden aria-hidden="true" tabindex="-1">Lanjut isi data secara manual</button></section>`;
   startCamera();
   $('#capture-ktp').addEventListener('click',async()=>{
     if(ocrBusy||ocrAttempts>=3)return;
@@ -1229,7 +1229,7 @@ async function loadApplicationPositions(){
 }
 async function init(){
   if(!isConfigured){
-    root.innerHTML='<section class="candidate-card"><h1 class="candidate-title">Portal Karir</h1><p class="candidate-sub">Server belum terhubung.</p></section>';return;
+    root.innerHTML='<section class="candidate-card"><h1 class="candidate-title">HR&GA Workspace</h1><p class="candidate-sub">Server belum terhubung.</p></section>';return;
   }
   await loadApplicationPositions();
   const localDraft=readLocalDraft();
@@ -1267,6 +1267,6 @@ if(root){
     const form=$('#application-form');if(document.visibilityState==='hidden'&&form)writeLocalDraft(form);
   });
   init().catch(error=>{
-    stopCamera();root.innerHTML=`<section class="candidate-card"><h1 class="candidate-title">Portal Karir</h1><p class="candidate-sub">${esc(error.message||'Formulir belum dapat dimuat.')}</p></section>`;
+    stopCamera();root.innerHTML=`<section class="candidate-card"><h1 class="candidate-title">HR&GA Workspace</h1><p class="candidate-sub">${esc(error.message||'Formulir belum dapat dimuat.')}</p></section>`;
   });
 }
