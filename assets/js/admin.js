@@ -45,7 +45,7 @@ function say(message) {
   if (!element) {
     element = document.createElement('div');
     element.id = 'admin-toast';
-    element.style.cssText = 'position:fixed;right:22px;bottom:22px;z-index:1000;padding:12px 16px;background:#016172;color:#fff;border-radius:10px;font:12px Arial,Helvetica,sans-serif;box-shadow:0 8px 25px rgba(1,97,114,.22);max-width:min(480px,calc(100vw - 32px))';
+    element.className = 'admin-toast';
     document.body.append(element);
   }
   element.textContent = message;
@@ -189,17 +189,17 @@ function renderDashboard() {
   content.innerHTML = `
     <section class="workspace-modules" aria-label="Workspace modules">
       <button type="button" class="workspace-module" data-view="attendanceSuite" data-module="attendance">
-        <span class="workspace-module-icon">▦</span><span class="workspace-module-copy"><b>Attendance Suite</b><span>CALENDAR & WORKFORCE</span></span><span class="workspace-module-arrow">↗</span>
+        <span class="workspace-module-icon" aria-hidden="true">▦</span><span class="workspace-module-copy"><b>Attendance Suite</b><span>Calendar &amp; Workforce</span></span><span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
       <button type="button" class="workspace-module" data-view="vehicleManagement" data-module="vehicle">
-        <span class="workspace-module-icon">⌑</span><span class="workspace-module-copy"><b>Vehicle Management</b><span>FLEET & EXPENSES</span></span><span class="workspace-module-arrow">↗</span>
+        <span class="workspace-module-icon" aria-hidden="true">⌑</span><span class="workspace-module-copy"><b>Vehicle Management</b><span>Fleet &amp; Expenses</span></span><span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
     </section>
     <section class="dashboard-metrics" aria-label="Recruitment metrics">
-      <article class="stat-card"><div class="stat-top">Total Applicants <span class="metric-mark">01</span></div><div class="stat-number">${total}</div><div class="stat-note">All recorded applications</div></article>
-      <article class="stat-card"><div class="stat-top">Forms Submitted <span class="metric-mark">02</span></div><div class="stat-number">${submitted}</div><div class="stat-note">Candidate forms received</div></article>
-      <article class="stat-card"><div class="stat-top">DISC Completed <span class="metric-mark">03</span></div><div class="stat-number">${discDone}</div><div class="stat-note">Completed assessments</div></article>
-      <article class="stat-card"><div class="stat-top">Employees <span class="metric-mark">04</span></div><div class="stat-number">${hired}</div><div class="stat-note">Employee records</div></article>
+      <article class="stat-card"><div class="stat-top">Total Applicants</div><div class="stat-number">${total}</div><div class="stat-note">All recorded applications</div></article>
+      <article class="stat-card"><div class="stat-top">Forms Submitted</div><div class="stat-number">${submitted}</div><div class="stat-note">Candidate forms received</div></article>
+      <article class="stat-card"><div class="stat-top">DISC Completed</div><div class="stat-number">${discDone}</div><div class="stat-note">Completed assessments</div></article>
+      <article class="stat-card"><div class="stat-top">Employees</div><div class="stat-number">${hired}</div><div class="stat-note">Employee records</div></article>
     </section>
     <div id="recruitment-routemap" class="dashboard-v2-grid">
       <section class="panel dashboard-process-panel">
@@ -280,11 +280,15 @@ async function renderSettings(){
   const {data,error}=await supabase.from('portal_settings').select('value').eq('key','ktp_ocr_enabled').maybeSingle();
   if(error)throw error;
   const enabled=data?.value===true;
-  content.innerHTML=`<section class="panel" style="padding:20px;max-width:700px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px">
-      <h3 style="margin:0;color:var(--teal-dark);font-size:13px">ID Card Scanning (OCR)</h3>
-      <label style="display:flex;align-items:center;gap:9px;font-size:10px;font-weight:800;color:var(--teal-dark)">
-        <span>${enabled?'Enabled':'Disabled'}</span><input id="ocr-feature-toggle" type="checkbox" ${enabled?'checked':''}>
+  content.innerHTML=`<section class="panel settings-panel">
+    <div class="settings-row">
+      <div>
+        <h3 class="settings-title">ID Card Scanning (OCR)</h3>
+        <p class="settings-sub">Aktifkan pemindaian KTP otomatis untuk formulir kandidat Tahap 2.</p>
+      </div>
+      <label class="settings-toggle" for="ocr-feature-toggle">
+        <span>${enabled?'Enabled':'Disabled'}</span>
+        <input id="ocr-feature-toggle" type="checkbox" ${enabled?'checked':''}>
       </label>
     </div>
   </section>`;

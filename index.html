@@ -16,34 +16,33 @@
   </div>
 
   <div id="login-view" class="login-screen">
-    <section class="login-art" aria-label="The Butterfly Effect">
-      <div class="login-art-ambient"></div>
+    <section class="login-art" aria-label="PT. Mitra Binamandiri Makmur">
+      <img class="login-hero-photo" src="src/assets/images/login_architecture_1795129548527.jpg" alt="PT. Mitra Binamandiri Makmur headquarters interior">
+      <div class="login-art-scrim" aria-hidden="true"></div>
       <div class="login-brand-lockup">
-        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="Mitra">
-        <span>HR&GA<br><b>WORKSPACE</b></span>
+        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+        <span>HR&amp;GA Workspace</span>
       </div>
-      <div class="login-artwork" aria-hidden="true"><img src="assets/img/workspace-login-art.svg" alt=""></div>
-      <div class="login-quote-wrap">
-        <span class="login-quote-kicker">THE BUTTERFLY EFFECT</span>
-        <blockquote class="login-quote">“The flutter of a butterfly’s wings in the Amazon rainforest can set a storm in motion in California.”</blockquote>
-      </div>
-      <div class="login-domain-icons" aria-label="Workspace areas">
-        <div class="domain-icon"><span class="domain-icon-glyph">♙</span><span>PEOPLE</span></div>
-        <div class="domain-icon"><span class="domain-icon-glyph">▦</span><span>ATTENDANCE</span></div>
-        <div class="domain-icon"><span class="domain-icon-glyph">⌑</span><span>FLEET</span></div>
-        <div class="domain-icon"><span class="domain-icon-glyph">◇</span><span>OPERATIONS</span></div>
+      <div class="login-editorial-copy">
+        <p class="login-editorial-kicker">PT. Mitra Binamandiri Makmur</p>
+        <h2 class="login-editorial-title">Sistem Terpadu SDM, Rekrutmen &amp; Operasional</h2>
+        <p class="login-editorial-sub">Pengelolaan kandidat, absensi karyawan, serta armada operasional dalam satu ruang kerja terstruktur.</p>
       </div>
     </section>
 
     <section class="login-panel">
       <div class="login-box">
-        <span class="eyebrow muted">THE ART OF HUMAN RESOURCES & GENERAL AFFAIRS</span>
-        <h1>HR&GA Workspace</h1>
+        <div class="login-mobile-brand">
+          <img class="brand-logo brand-logo-dark" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+        </div>
+        <p class="eyebrow muted">Portal Administrasi</p>
+        <h1>Masuk ke HR&amp;GA Workspace</h1>
+        <p class="login-lead">Gunakan username dan PIN akses resmi untuk mengelola data rekrutmen dan operasional.</p>
         <form id="login-form" autocomplete="on">
           <label class="field-label" for="login-user">Username</label>
-          <input id="login-user" class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Enter username">
+          <input id="login-user" class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Masukkan username">
           <label class="field-label" for="login-pin">Access PIN</label>
-          <input id="login-pin" class="input" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="current-password" required placeholder="Enter PIN">
+          <input id="login-pin" class="input" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="current-password" required placeholder="Masukkan PIN">
           <button class="btn btn-primary full" type="submit">Sign In <span aria-hidden="true">↗</span></button>
           <div id="login-error" class="form-error" role="alert"></div>
         </form>
@@ -54,19 +53,19 @@
   <div id="admin-shell" class="admin-shell hidden">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="Mitra">
-        <div class="sidebar-brand-name">HR&GA<br><b>WORKSPACE</b></div>
+        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+        <div class="sidebar-brand-name">HR&amp;GA <b>Workspace</b></div>
       </div>
       <nav id="admin-nav" class="side-nav" aria-label="Main navigation">
         <button class="nav-item active" data-view="dashboard"><span class="nav-icon">▦</span>Dashboard</button>
 
-        <div class="nav-group-title">RECRUITMENT</div>
-        <div class="nav-subgroup-label">RAW SOURCING</div>
+        <div class="nav-group-title">Recruitment</div>
+        <div class="nav-subgroup-label">Raw Sourcing</div>
         <button class="nav-item nav-child" data-view="stage1"><span class="nav-icon">◷</span>Lead Register</button>
         <button class="nav-item nav-child" data-view="filterSettings"><span class="nav-icon">⚙</span>Filter Settings</button>
         <a class="nav-item nav-child nav-link" href="apply/" target="_blank" rel="noopener"><span class="nav-icon">↗</span>Application Portal</a>
 
-        <div class="nav-subgroup-label">PROPOSALS</div>
+        <div class="nav-subgroup-label">Proposals</div>
         <button class="nav-item nav-child" data-view="stage2"><span class="nav-icon">▤</span>Candidate List</button>
         <button class="nav-item nav-child" data-view="stage3"><span class="nav-icon">◈</span>DISC Assessment</button>
         <a class="nav-item nav-child nav-link" href="spm/" target="_blank" rel="noopener"><span class="nav-icon">↗</span>SPM Assessment</a>
@@ -75,32 +74,31 @@
         <button class="nav-item nav-child" data-view="reports"><span class="nav-icon">▥</span>Recruitment Reports</button>
         <button class="nav-item nav-child" data-view="tracking"><span class="nav-icon">⌁</span>Tracking</button>
 
-        <div class="nav-group-title">ATTENDANCE SUITE</div>
+        <div class="nav-group-title">Attendance Suite</div>
         <button class="nav-item" data-view="attendanceCalendar"><span class="nav-icon">▦</span>Calendar Settings</button>
-        <div class="nav-subgroup-label">STAFF</div>
+        <div class="nav-subgroup-label">Staff</div>
         <button class="nav-item nav-child" data-view="attendanceStaffHoliday"><span class="nav-icon">◇</span>Conditional Holiday Schedule</button>
         <button class="nav-item nav-child" data-view="attendanceStaffManagement"><span class="nav-icon">✓</span>Attendance Management</button>
         <button class="nav-item nav-child" data-view="attendanceStaffReports"><span class="nav-icon">▥</span>Reports</button>
         <button class="nav-item nav-child" data-view="employees"><span class="nav-icon">♙</span>Employee Directory</button>
-        <div class="nav-subgroup-label">DRIVERS</div>
+        <div class="nav-subgroup-label">Drivers</div>
         <button class="nav-item nav-child" data-view="attendanceDriverSchedule"><span class="nav-icon">◷</span>Manual Driver Schedule</button>
         <button class="nav-item nav-child" data-view="attendanceDriverManagement"><span class="nav-icon">✓</span>Attendance Management</button>
         <button class="nav-item nav-child" data-view="attendanceDriverReports"><span class="nav-icon">▥</span>Reports</button>
 
-        <div class="nav-group-title">VEHICLE MANAGEMENT</div>
+        <div class="nav-group-title">Vehicle Management</div>
         <button class="nav-item" data-view="vehicleDatabase"><span class="nav-icon">⌑</span>Vehicle Database</button>
         <button class="nav-item" data-view="vehicleExpenses"><span class="nav-icon">◫</span>Vehicle Expenses</button>
         <button class="nav-item" data-view="vehicleReports"><span class="nav-icon">▥</span>Reports</button>
       </nav>
       <div class="sidebar-bottom">
-        <div class="sidebar-status"><span class="status-dot"></span>Connected</div>
-        <button id="logout-btn" class="logout-btn">Sign Out <span>↗</span></button>
+        <button id="logout-btn" class="logout-btn">Sign Out <span aria-hidden="true">↗</span></button>
       </div>
     </aside>
     <main class="admin-main">
       <header class="admin-topbar">
-        <div><div class="eyebrow muted">HR&GA WORKSPACE</div><div id="page-title" class="topbar-title">Dashboard</div></div>
-        <div class="topbar-right"><span class="live-label"><span class="status-dot"></span>Live</span><div class="profile-chip"><span class="profile-avatar">HR</span><span><b id="admin-name">HR Admin</b><small>Administrator</small></span></div></div>
+        <div class="topbar-left"><div class="eyebrow muted">PT. Mitra Binamandiri Makmur</div><div id="page-title" class="topbar-title">Dashboard</div></div>
+        <div class="topbar-right"><div class="profile-chip"><span class="profile-avatar">HR</span><span><b id="admin-name">HR Admin</b><small>Administrator</small></span></div></div>
       </header>
       <section id="admin-content" class="admin-content"></section>
     </main>
