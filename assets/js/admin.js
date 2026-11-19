@@ -187,19 +187,38 @@ function renderDashboard() {
   const maxPosition = Math.max(1, ...topPositions.map(item=>item[1]));
   const recent = applicants.slice(0,7);
   content.innerHTML = `
+    <section class="dashboard-atelier-hero" aria-label="Ringkasan ruang kerja">
+      <img class="atelier-hero-img" src="src/assets/images/interior_atelier_banner_1795130274598.jpg" alt="Showroom dan studio interior PT. Mitra Binamandiri Makmur" referrerpolicy="no-referrer">
+      <div class="atelier-hero-scrim" aria-hidden="true"></div>
+      <div class="atelier-hero-content">
+        <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
+        <h1 class="atelier-hero-title">Selamat datang, ${esc(adminDisplayName)}</h1>
+        <div class="atelier-hero-meta">
+          <span><b>${total}</b> kandidat tercatat</span>
+          <span aria-hidden="true">·</span>
+          <span><b>${submitted}</b> formulir masuk</span>
+          <span aria-hidden="true">·</span>
+          <span><b>${hired}</b> karyawan aktif</span>
+        </div>
+      </div>
+    </section>
     <section class="workspace-modules" aria-label="Workspace modules">
       <button type="button" class="workspace-module" data-view="attendanceSuite" data-module="attendance">
-        <span class="workspace-module-icon" aria-hidden="true">▦</span><span class="workspace-module-copy"><b>Attendance Suite</b><span>Calendar &amp; Workforce</span></span><span class="workspace-module-arrow" aria-hidden="true">↗</span>
+        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="m9 16 2 2 4-4"/></svg></span>
+        <span class="workspace-module-copy"><b>Attendance Suite</b><span>Calendar &amp; Workforce</span></span>
+        <span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
       <button type="button" class="workspace-module" data-view="vehicleManagement" data-module="vehicle">
-        <span class="workspace-module-icon" aria-hidden="true">⌑</span><span class="workspace-module-copy"><b>Vehicle Management</b><span>Fleet &amp; Expenses</span></span><span class="workspace-module-arrow" aria-hidden="true">↗</span>
+        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+        <span class="workspace-module-copy"><b>Vehicle Management</b><span>Fleet &amp; Expenses</span></span>
+        <span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
     </section>
     <section class="dashboard-metrics" aria-label="Recruitment metrics">
-      <article class="stat-card"><div class="stat-top">Total Applicants</div><div class="stat-number">${total}</div><div class="stat-note">All recorded applications</div></article>
-      <article class="stat-card"><div class="stat-top">Forms Submitted</div><div class="stat-number">${submitted}</div><div class="stat-note">Candidate forms received</div></article>
-      <article class="stat-card"><div class="stat-top">DISC Completed</div><div class="stat-number">${discDone}</div><div class="stat-note">Completed assessments</div></article>
-      <article class="stat-card"><div class="stat-top">Employees</div><div class="stat-number">${hired}</div><div class="stat-note">Employee records</div></article>
+      <article class="stat-card"><div class="stat-top"><span>Total Applicants</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span></div><div class="stat-number">${total}</div><div class="stat-note">All recorded applications</div></article>
+      <article class="stat-card"><div class="stat-top"><span>Forms Submitted</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span></div><div class="stat-number">${submitted}</div><div class="stat-note">Candidate forms received</div></article>
+      <article class="stat-card"><div class="stat-top"><span>DISC Completed</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span></div><div class="stat-number">${discDone}</div><div class="stat-note">Completed assessments</div></article>
+      <article class="stat-card"><div class="stat-top"><span>Employees</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span></div><div class="stat-number">${hired}</div><div class="stat-note">Employee records</div></article>
     </section>
     <div id="recruitment-routemap" class="dashboard-v2-grid">
       <section class="panel dashboard-process-panel">
@@ -692,7 +711,7 @@ async function renderReports() {
   };
   content.innerHTML = header('Recruitment Reports', 'Ringkasan data aktual dari lamaran Tahap 1, kandidat, DISC, dan karyawan',
     '<button id="export-recruitment-report" class="btn btn-primary">Unduh CSV ↓</button>') + `
-    <div class="stat-grid">${counts.map(([label,value]) => `<article class="stat-card"><div class="stat-top">${esc(label)}</div><div class="stat-number">${value}</div><div class="stat-note">Data tersimpan</div></article>`).join('')}</div>
+    <div class="stat-grid reports-stat-grid">${counts.map(([label,value]) => `<article class="stat-card"><div class="stat-top">${esc(label)}</div><div class="stat-number">${value}</div><div class="stat-note">Data tersimpan</div></article>`).join('')}</div>
     <section class="panel table-panel"><div class="panel-head"><div><h3>Distribusi posisi</h3><p>Gabungan lamaran awal dan formulir kandidat</p></div><span class="status-pill blue">${positions.size} posisi</span></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>POSITION</th><th>COUNT</th></tr></thead><tbody>${[...positions.entries()].sort((a,b)=>b[1]-a[1]).map(([name,total])=>`<tr><td>${esc(name)}</td><td>${total}</td></tr>`).join('') || emptyRow(2)}</tbody></table></div></section>
     <section class="panel table-panel"><div class="panel-head"><div><h3>Catatan laporan</h3><p>Ringkasan dibangun dari data yang saat ini tersimpan</p></div></div><div class="panel-body"><p class="subtle">Lamaran Tahap 1 merupakan alur publik terpisah. Kandidat baru dihitung pada Tahap 2 setelah formulir kandidat lengkap dikirim. Angka tidak menggandakan hasil DISC atau status karyawan.</p></div></section>`;
@@ -714,8 +733,8 @@ async function renderReports() {
   });
 }
 
-function renderPlaceholder(_title) {
-  content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol">◌</div><span class="status-pill gray">Coming soon</span></div></section>`;
+function renderPlaceholder(title) {
+  content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div><h2>${esc(title || 'Modul Dalam Pengembangan')}</h2><p>Modul ini disiapkan untuk pengelolaan operasional terintegrasi.</p></div></section>`;
 }
 
 function bindPrint() {
@@ -989,7 +1008,7 @@ async function loadView(view) {
   activeView = view;
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#page-title').textContent = TITLES[view] || 'Dashboard';
-  content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol">◌</div><h2>Memuat data</h2></div></section>';
+  content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Memuat data</h2></div></section>';
   try {
     const dataViews = new Set(['dashboard','stage1','stage2','stage3','employees','print','settings','reports']);
     if (dataViews.has(view)) await refreshData();
@@ -1004,7 +1023,7 @@ async function loadView(view) {
     else if (TITLES[view]) renderPlaceholder(TITLES[view]);
     else renderPlaceholder('Page not found');
   } catch (error) {
-    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol">!</div><h2>Data tidak dapat dimuat</h2><p>${esc(error.message || 'Periksa koneksi Supabase.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Coba lagi</button></div></section>`;
+    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h2>Data tidak dapat dimuat</h2><p>${esc(error.message || 'Periksa koneksi Supabase.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Coba lagi</button></div></section>`;
     $('#retry-load')?.addEventListener('click', () => loadView(view));
   }
 }
@@ -1028,6 +1047,19 @@ async function openAdmin(session) {
   shell.classList.remove('hidden');
   await loadView('dashboard');
 }
+
+$('#toggle-pin-visibility')?.addEventListener('click', () => {
+  const input = $('#login-pin');
+  const btn = $('#toggle-pin-visibility');
+  if (!input || !btn) return;
+  const visible = input.type === 'text';
+  input.type = visible ? 'password' : 'text';
+  btn.setAttribute('aria-pressed', String(!visible));
+  btn.setAttribute('aria-label', visible ? 'Tampilkan PIN' : 'Sembunyikan PIN');
+  btn.innerHTML = visible
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+});
 
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
