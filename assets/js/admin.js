@@ -1,7 +1,7 @@
 import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-02';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js?v=20261120-hrga-workspace-02';
 import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-02';
-import { printApplication } from './print.js?v=20261120-hrga-workspace-03';
+import { printApplication } from './print.js?v=20261120-hrga-workspace-04';
 import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-02';
 import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-02';
 

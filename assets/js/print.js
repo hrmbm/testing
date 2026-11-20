@@ -214,6 +214,40 @@ function discReportHtml(record, result) {
   </section>`;
 }
 
+function fitMasterDocument(targetDoc) {
+  const root = targetDoc.getElementById('applicationForm');
+  if (!root) return;
+  const win = targetDoc.defaultView || window;
+  const canvas = targetDoc.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  root.querySelectorAll('input[type="date"]').forEach(field => {
+    if (!field.value) field.setAttribute('data-print-empty', 'true');
+    else field.removeAttribute('data-print-empty');
+  });
+  root.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), textarea').forEach(field => {
+    if (!field.value) return;
+    field.style.fontSize = '';
+    const computed = win.getComputedStyle(field);
+    if (field.tagName === 'TEXTAREA') {
+      let size = parseFloat(computed.fontSize) || 7.9;
+      while (field.scrollHeight > field.clientHeight + 1 && size > 6.2) {
+        size = Math.max(6.2, size - 0.35);
+        field.style.fontSize = `${size.toFixed(2)}px`;
+      }
+      return;
+    }
+    const baseSize = parseFloat(computed.fontSize) || 8;
+    const available = Math.max(12, field.clientWidth - (parseFloat(computed.paddingLeft) || 0) - (parseFloat(computed.paddingRight) || 0) - 3);
+    if (ctx) {
+      ctx.font = `${computed.fontWeight} ${baseSize}px ${computed.fontFamily}`;
+      const textWidth = ctx.measureText(field.value).width;
+      if (textWidth > available) {
+        field.style.fontSize = `${Math.max(5.8, baseSize * available / textWidth).toFixed(2)}px`;
+      }
+    }
+  });
+}
+
 export async function printApplication(record) {
   if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
   const tab = window.open('', '_blank');
@@ -334,6 +368,7 @@ export async function printApplication(record) {
     const images = [...tab.document.images];
     await Promise.all(images.map(image => image.decode?.().catch(() => null)));
     if (tab.document.fonts?.ready) await tab.document.fonts.ready;
+    fitMasterDocument(tab.document);
     tab.focus();
     setTimeout(() => { try { tab.print(); } catch { /* browser print UI */ } }, 350);
   } catch (error) {
