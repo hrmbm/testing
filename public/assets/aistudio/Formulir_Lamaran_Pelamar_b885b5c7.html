@@ -1,0 +1,1630 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="form-template" content="FORM RECRUITMENT" />
+  <meta name="form-code" content="FRM-HRD-REC-001 Rev.02" />
+  <title>Formulir Lamaran Kerja | PT. Mitra Binamandiri Makmur</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Playfair+Display:ital,wght@0,600;0,700;1,500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink-primary: #0f172a;
+      --ink-secondary: #334155;
+      --ink-muted: #64748b;
+      --navy-exec: #0f1e36;
+      --navy-mid: #1a3052;
+      --navy-soft: #f4f6fa;
+      --gold-brass: #b08d57;
+      --gold-light: #d4b475;
+      --gold-wash: #fbf8f1;
+      --line-hairline: #d4dbe4;
+      --line-strong: #94a3b8;
+      --th-bg: #eef2f7;
+      --paper: #ffffff;
+      --desk-bg: #151c28;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--desk-bg);
+      color: var(--ink-primary);
+      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .font-serif-display { font-family: "Playfair Display", Georgia, serif; }
+    .font-mono-code {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+
+    /* Sticky Standalone Toolbar */
+    .toolbar-shell {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      border-bottom: 1px solid rgba(176, 141, 87, 0.35);
+      background: rgba(11, 21, 38, 0.95);
+      backdrop-filter: blur(8px);
+    }
+    .toolbar-inner {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 10px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 16px;
+    }
+    .toolbar-brand {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #ffffff;
+      white-space: nowrap;
+    }
+    .toolbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #cbd5e1;
+    }
+    .toolbar-dot { color: var(--gold-brass); }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 13px;
+      border: 1px solid rgba(100, 116, 139, 0.7);
+      border-radius: 4px;
+      background: #15243d;
+      color: #f1f5f9;
+      font: 600 12px/1.2 "Plus Jakarta Sans", sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 150ms ease, border-color 150ms ease;
+    }
+    .btn-ghost:hover {
+      background: #1c3050;
+      border-color: rgba(176, 141, 87, 0.75);
+    }
+    .btn-gold {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 15px;
+      border: 1px solid var(--gold-light);
+      border-radius: 4px;
+      background: linear-gradient(180deg, #c8a263 0%, #a67f43 100%);
+      color: #0b1526;
+      font: 700 12px/1.2 "Plus Jakarta Sans", sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    }
+    .btn-gold:hover {
+      background: linear-gradient(180deg, #d4b073 0%, #b38c4e 100%);
+    }
+
+    /* Executive A4 Sheet Presentation */
+    .sheets-canvas {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      padding: 28px 16px 48px;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(176, 141, 87, 0.08) 0%, transparent 55%),
+        linear-gradient(180deg, #161e2b 0%, #101620 100%);
+      min-height: calc(100vh - 54px);
+    }
+    .sheet {
+      position: relative;
+      width: 100%;
+      max-width: 920px;
+      background: var(--paper);
+      padding: 30px 36px 46px;
+      box-shadow:
+        0 24px 60px -12px rgba(4, 9, 20, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      color: var(--ink-primary);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* Header */
+    .doc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--navy-exec);
+      position: relative;
+    }
+    .doc-header::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -5px;
+      height: 1px;
+      background: var(--gold-brass);
+    }
+    .company-title {
+      margin: 0 0 4px;
+      color: var(--navy-exec);
+      font-size: 16.5px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    .company-detail {
+      color: var(--ink-secondary);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .header-badges {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .doc-type {
+      padding: 5px 12px;
+      border: 1px solid var(--navy-exec);
+      background: var(--navy-exec);
+      color: #f8f5ee;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .doc-code {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10.5px;
+      color: var(--ink-muted);
+      font-weight: 500;
+    }
+    .doc-main-title {
+      margin: 14px 0 10px;
+      color: var(--navy-exec);
+      font-family: "Playfair Display", Georgia, serif;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      line-height: 1.2;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .roleline {
+      display: grid;
+      grid-template-columns: 168px 1fr;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 8px 14px;
+      border: 1px solid var(--line-hairline);
+      background: linear-gradient(90deg, var(--gold-wash) 0%, #f8fafc 45%, #ffffff 100%);
+    }
+    .roleline strong {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy-exec);
+    }
+    .roleline input {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--navy-exec);
+    }
+
+    /* Sections */
+    .section {
+      margin-top: 12px;
+      break-inside: avoid;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 28px;
+      padding: 5px 10px;
+      background: var(--navy-exec);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      border-bottom: 1.5px solid var(--gold-brass);
+    }
+    .section-title .letter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 2px;
+      background: var(--gold-brass);
+      color: #ffffff;
+      font-size: 11.5px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    /* Data Pribadi */
+    .fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 24px;
+      row-gap: 6px;
+      margin-top: 8px;
+    }
+    .field {
+      display: grid;
+      grid-template-columns: 38% minmax(0, 1fr);
+      align-items: end;
+      gap: 8px;
+      min-width: 0;
+      min-height: 26px;
+    }
+    .field label {
+      color: var(--ink-secondary);
+      font-size: 11.5px;
+      font-weight: 600;
+      line-height: 1.25;
+      padding-bottom: 3px;
+    }
+
+    /* Inputs & Textareas */
+    .sheet input:not([type]),
+    .sheet input[type="text"],
+    .sheet input[type="email"],
+    .sheet input[type="tel"],
+    .sheet input[type="date"],
+    .sheet textarea,
+    .sheet select {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      padding: 3px 4px;
+      border: 0;
+      border-bottom: 1px solid var(--line-hairline);
+      border-radius: 0;
+      outline: none;
+      background: transparent;
+      color: var(--ink-primary);
+      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.35;
+      transition: border-color 150ms ease, background-color 150ms ease;
+    }
+    .sheet input:focus,
+    .sheet select:focus,
+    .sheet textarea:focus {
+      border-bottom-color: var(--gold-brass);
+      background: var(--gold-wash);
+    }
+    .sheet textarea {
+      resize: vertical;
+      border: 1px solid var(--line-hairline);
+      border-radius: 2px;
+      padding: 8px 10px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      background: #fcfcfd;
+    }
+    .sheet textarea:focus {
+      border-color: var(--gold-brass);
+      background: var(--gold-wash);
+    }
+    .sheet textarea.inline-wrap-field {
+      resize: none;
+      border: 0;
+      border-bottom: 1px solid var(--line-hairline);
+      border-radius: 0;
+      padding: 2px 4px;
+      background: transparent;
+      font-size: 11.5px;
+      font-weight: 500;
+      line-height: 1.3;
+      overflow: hidden;
+      min-height: 22px;
+    }
+    .sheet textarea.inline-wrap-field:focus {
+      border-bottom-color: var(--gold-brass);
+      background: var(--gold-wash);
+    }
+
+    /* Preserved Exact Table Proportions & Flexible Auto-Grow Rows */
+    table.aligned-grid {
+      width: 100%;
+      margin-top: 6px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid var(--line-strong);
+    }
+    table.aligned-grid th,
+    table.aligned-grid td {
+      min-width: 0;
+      height: 27px;
+      padding: 4px 6px;
+      border: 1px solid var(--line-hairline);
+      vertical-align: middle;
+    }
+    table.aligned-grid th {
+      background: var(--th-bg);
+      color: var(--navy-exec);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: left;
+      letter-spacing: 0.02em;
+      border-bottom: 1.5px solid var(--line-strong);
+    }
+    table.aligned-grid td {
+      font-size: 11.5px;
+      background: #ffffff;
+    }
+    table.aligned-grid tbody tr:nth-child(even) td {
+      background: #fafbfd;
+    }
+    table.aligned-grid td textarea.cell-wrap {
+      width: 100%;
+      border: 0;
+      border-bottom: 0;
+      background: transparent;
+      font-size: 11.5px;
+      font-weight: 500;
+      resize: none;
+      overflow: hidden;
+      min-height: 20px;
+      padding: 2px 2px;
+      display: block;
+      line-height: 1.35;
+    }
+    table.aligned-grid td textarea.cell-wrap:focus {
+      background: var(--gold-wash);
+    }
+
+    .table-label {
+      font-weight: 700;
+      color: var(--navy-exec);
+      line-height: 1.25;
+    }
+    .subhead {
+      margin: 9px 0 3px;
+      color: var(--navy-exec);
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+    .marital-status-box {
+      display: grid;
+      grid-template-columns: 41% 59%;
+      align-items: center;
+      border: 1px solid var(--line-strong);
+      border-bottom: none;
+      background: var(--navy-soft);
+      min-height: 30px;
+      padding: 4px 8px;
+    }
+    .marital-label {
+      font-weight: 700;
+      font-size: 11.5px;
+      color: var(--navy-exec);
+    }
+    .inline-options {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--ink-primary);
+    }
+    .inline-options label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      padding-bottom: 0;
+    }
+    .sheet input[type="checkbox"],
+    .sheet input[type="radio"] {
+      width: 13px;
+      height: 13px;
+      margin: 0;
+      accent-color: var(--navy-exec);
+      cursor: pointer;
+    }
+    .no-major {
+      color: var(--ink-muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    .hobby-box {
+      min-height: 54px;
+      margin-top: 6px;
+      font-size: 12px;
+    }
+    .page-footer {
+      margin-top: 18px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line-hairline);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--ink-muted);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    /* Page 2 */
+    .continuation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--navy-exec);
+      position: relative;
+    }
+    .continuation-header::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -5px;
+      height: 1px;
+      background: var(--gold-brass);
+    }
+    .continuation-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--navy-exec);
+      letter-spacing: 0.04em;
+    }
+    .continuation-sub {
+      font-size: 11px;
+      color: var(--ink-muted);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .work-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .work-card {
+      border: 1px solid var(--line-hairline);
+      border-radius: 2px;
+      padding: 8px 12px;
+      background: #ffffff;
+    }
+    .work-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: -8px -12px 8px;
+      padding: 5px 12px;
+      background: var(--th-bg);
+      color: var(--navy-exec);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      border-bottom: 1px solid var(--line-hairline);
+    }
+    .work-fields {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      column-gap: 14px;
+      row-gap: 6px;
+    }
+    .work-field-row {
+      display: flex;
+      flex-direction: column;
+      min-height: 36px;
+    }
+    .work-field-row label {
+      font-size: 10.5px;
+      color: var(--ink-muted);
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .work-field-row input {
+      font-size: 11.5px;
+      padding: 2px 0;
+      border-bottom: 1px solid var(--line-hairline);
+      text-overflow: ellipsis;
+    }
+    .expectation-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 24px;
+      row-gap: 6px;
+      margin-top: 8px;
+    }
+    .expectation-fields .wide {
+      grid-column: 1 / -1;
+      grid-template-columns: 18.5% minmax(0, 1fr);
+    }
+    .answer-block { margin-top: 8px; }
+    .answer-block .subhead { margin: 0 0 4px; font-size: 11.5px; }
+    .answer { min-height: 52px; font-size: 11.5px; }
+
+    .declaration {
+      margin-top: 8px;
+      padding: 10px 14px;
+      border: 1px solid var(--line-hairline);
+      background: var(--navy-soft);
+      color: var(--ink-secondary);
+      font-size: 11.5px;
+      line-height: 1.5;
+    }
+    .consent-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--ink-primary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Executive Attestation Panel & Sleek Electronic Signature Badge */
+    .approval-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: stretch;
+      gap: 18px;
+      margin-top: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--line-strong);
+      background: linear-gradient(135deg, #fbfcfe 0%, #ffffff 55%, #fbf8f1 100%);
+    }
+    .approval-left {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .approval-label {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--navy-exec);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .sig-preview-wrap {
+      padding: 6px 4px;
+    }
+    .sig-preview-text {
+      font-family: "Playfair Display", Georgia, serif;
+      font-style: italic;
+      font-size: 22px;
+      line-height: 1.2;
+      color: var(--navy-exec);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding-right: 16px;
+    }
+    .sig-underline {
+      width: 192px;
+      height: 8px;
+      color: var(--gold-brass);
+      margin-top: 2px;
+      display: block;
+    }
+    .approval-name-input {
+      font-weight: 700 !important;
+      color: var(--navy-exec) !important;
+      font-size: 13px !important;
+      border-bottom: 1.5px solid var(--line-strong) !important;
+    }
+    .approval-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 4px;
+      font-size: 11px;
+      color: #475569;
+    }
+    .approval-date-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+    }
+    .approval-date-input {
+      width: auto !important;
+      border-bottom: 1px solid #cbd5e1 !important;
+      padding: 0 !important;
+      font-size: 11px !important;
+    }
+    .status-approved {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 700;
+      color: var(--navy-exec);
+    }
+    .status-pending {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .esig-badge {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-radius: 4px;
+      border: 1px solid rgba(176, 141, 87, 0.55);
+      background: var(--navy-exec);
+      padding: 12px 16px;
+      color: #ffffff;
+      align-self: center;
+    }
+    .esig-icon-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+      border-radius: 4px;
+      border: 1px solid rgba(212, 180, 117, 0.5);
+      background: #162947;
+      color: #e2c68d;
+    }
+    .esig-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #ffffff;
+      white-space: nowrap;
+    }
+    .esig-sub {
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: #e2c68d;
+    }
+
+    @media (max-width: 760px) {
+      .toolbar-meta { display: none; }
+      .sheets-canvas { padding: 14px 10px 32px; gap: 18px; }
+      .sheet { padding: 18px 16px 28px; }
+      .doc-header, .continuation-header { flex-direction: column; align-items: flex-start; }
+      .header-badges { align-items: flex-start; }
+      .roleline { grid-template-columns: 1fr; gap: 4px; }
+      .fields, .expectation-fields { grid-template-columns: 1fr; }
+      .expectation-fields .wide { grid-template-columns: 38% minmax(0, 1fr); }
+      .work-fields { grid-template-columns: 1fr 1fr; }
+      .work-span-2, .work-span-3 { grid-column: 1 / -1 !important; }
+      .marital-status-box { grid-template-columns: 1fr; gap: 4px; padding: 6px 8px; }
+      .table-scroll-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .table-scroll-wrap table.aligned-grid { min-width: 580px; }
+      .approval-panel { grid-template-columns: 1fr; }
+    }
+
+    @page { size: A4 portrait; margin: 0; }
+    @media print {
+      html, body {
+        width: 210mm;
+        margin: 0;
+        padding: 0;
+        background: #ffffff !important;
+      }
+      .no-print { display: none !important; }
+      .sheets-canvas {
+        display: block;
+        padding: 0;
+        margin: 0;
+        background: #ffffff !important;
+        min-height: auto;
+      }
+      .sheet {
+        width: 210mm;
+        max-width: 210mm;
+        height: 297mm;
+        margin: 0;
+        padding: 7.5mm 9mm 9mm;
+        box-shadow: none;
+        border-radius: 0;
+        overflow: hidden;
+        font-size: 9.8px;
+        line-height: 1.25;
+        page-break-after: always;
+        break-after: page;
+      }
+      .sheet:last-child { page-break-after: auto; break-after: auto; }
+      .doc-header { padding-bottom: 6px; }
+      .company-title { font-size: 13.5px; }
+      .company-detail { font-size: 8.5px; }
+      .doc-type { font-size: 9px; padding: 3px 8px; }
+      .doc-code { font-size: 8.2px; }
+      .doc-main-title { margin: 7px 0 6px; font-size: 17px; }
+      .roleline { grid-template-columns: 38mm 1fr; padding: 4px 8px; margin-bottom: 6px; }
+      .roleline strong, .roleline input { font-size: 10px; }
+      .section { margin-top: 5px; }
+      .section-title { min-height: 20px; padding: 2.5px 7px; font-size: 9.8px; }
+      .section-title .letter { width: 15px; height: 15px; font-size: 9px; }
+      .fields { column-gap: 14px; row-gap: 2.5px; margin-top: 4px; }
+      .field { min-height: 17px; }
+      .field label { font-size: 9.3px; padding-bottom: 1px; }
+      .sheet input:not([type]),
+      .sheet input[type="text"],
+      .sheet input[type="email"],
+      .sheet input[type="tel"],
+      .sheet input[type="date"],
+      .sheet textarea,
+      .sheet select { font-size: 9.5px; padding: 1.5px 2px; }
+      table.aligned-grid { margin-top: 3px; }
+      table.aligned-grid th, table.aligned-grid td { height: 18px; padding: 1.5px 4px; }
+      table.aligned-grid th { font-size: 8.8px; }
+      table.aligned-grid td, table.aligned-grid td textarea.cell-wrap { font-size: 9.2px; border-bottom: 0; }
+      table.aligned-grid td textarea.cell-wrap,
+      .sheet textarea.inline-wrap-field {
+        min-height: 15px;
+        font-size: 9.2px;
+        line-height: 1.25;
+        padding: 1px 2px;
+      }
+      .subhead { margin: 4px 0 1.5px; font-size: 9.2px; }
+      .marital-status-box { min-height: 20px; padding: 1px 6px; }
+      .marital-label, .inline-options { font-size: 9.2px; }
+      .hobby-box { min-height: 11mm; height: 11mm; margin-top: 3px; padding: 4px 6px; }
+      .work-grid { gap: 5px; margin-top: 4px; }
+      .work-card { padding: 4px 6px; }
+      .work-head { margin: -4px -6px 4px; padding: 2.5px 6px; font-size: 8.8px; }
+      .work-fields { row-gap: 2px; column-gap: 8px; }
+      .work-field-row { min-height: 22px; }
+      .work-field-row label { font-size: 8.2px; }
+      .work-field-row input { font-size: 9.2px; }
+      .expectation-fields { row-gap: 3px; margin-top: 4px; }
+      .answer-block { margin-top: 4px; }
+      .answer-block .subhead { font-size: 9.2px; margin-bottom: 2px; }
+      .answer { min-height: 10mm; height: 10mm; padding: 4px 6px; }
+      .declaration { margin-top: 4px; padding: 5px 8px; font-size: 8.8px; }
+      .consent-row { margin-top: 5px; font-size: 9.3px; }
+      .approval-panel { margin-top: 5px; padding: 7px 10px; gap: 12px; }
+      .approval-label { font-size: 8.5px; }
+      .sig-preview-text { font-size: 16px; }
+      .sig-underline { width: 144px; height: 6px; }
+      .approval-name-input { font-size: 10.5px !important; }
+      .approval-meta-row, .approval-date-input { font-size: 8.5px !important; }
+      .esig-badge { padding: 8px 12px; gap: 10px; }
+      .esig-icon-box { width: 32px; height: 32px; }
+      .esig-title { font-size: 9.5px; }
+      .esig-sub { font-size: 8px; }
+      .page-footer {
+        position: absolute;
+        right: 9mm;
+        bottom: 4.5mm;
+        left: 9mm;
+        margin-top: 0;
+        font-size: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar-shell no-print">
+    <div class="toolbar-inner">
+      <div class="toolbar-brand">PT. Mitra Binamandiri Makmur</div>
+      <div class="toolbar-meta">
+        <span>Formulir Rekrutmen</span>
+        <span class="toolbar-dot" aria-hidden="true">·</span>
+        <span class="font-mono-code">FRM-HRD-REC-001</span>
+      </div>
+      <div class="toolbar-actions">
+        <button type="button" class="btn-ghost" id="btnLoadSample">Muat Contoh</button>
+        <button type="button" class="btn-ghost" id="btnResetEmpty">Kosongkan Isian</button>
+        <button type="button" class="btn-gold" id="btnPrint">Cetak / Simpan PDF</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="sheets-canvas">
+    <form id="applicationForm" autocomplete="off" onsubmit="return false;" style="display:contents;">
+      <!-- HALAMAN 1 -->
+      <section aria-label="Halaman 1 dari 2" class="sheet page1">
+        <header class="doc-header">
+          <div>
+            <div class="company-title">PT. MITRA BINAMANDIRI MAKMUR</div>
+            <div class="company-detail">
+              Jl. Raya Gunung Gangsir – Pandaan, Ds. Randupitu, Kec. Gempol, Kab. Pasuruan, Jawa Timur (FACTORY)<br />
+              Tel. 62-343-632266 / 632366 · Fax 62-343-642127 · OFFICE: +62 31 9953 3330 · mitra@mitrabina.com
+            </div>
+          </div>
+          <div class="header-badges">
+            <div class="doc-type">FORM RECRUITMENT</div>
+            <div class="doc-code">FRM-HRD-REC-001 · Rev. 02</div>
+          </div>
+        </header>
+
+        <h1 class="doc-main-title">FORMULIR LAMARAN KERJA</h1>
+
+        <div class="roleline">
+          <strong>Posisi yang dilamar</strong>
+          <input aria-label="Posisi yang dilamar" id="posisi" name="posisi" type="text" value="" />
+        </div>
+
+        <!-- A. DATA PRIBADI -->
+        <section aria-labelledby="heading-a" class="section">
+          <div class="section-title" id="heading-a"><span class="letter">A</span> DATA PRIBADI</div>
+          <div class="fields">
+            <div class="field">
+              <label for="nama">Nama lengkap</label>
+              <input id="nama" name="nama" type="text" value="" />
+            </div>
+            <div class="field">
+              <label for="nik">No. KTP</label>
+              <input id="nik" name="nik" type="text" class="tabular-nums" value="" />
+            </div>
+            <div class="field" style="align-items: start;">
+              <label for="alamat_asal" style="padding-top: 4px;">Alamat asal</label>
+              <textarea id="alamat_asal" name="alamat_asal" rows="1" class="inline-wrap-field"></textarea>
+            </div>
+            <div class="field" style="align-items: start;">
+              <label for="domisili" style="padding-top: 4px;">Domisili sekarang</label>
+              <textarea id="domisili" name="domisili" rows="1" class="inline-wrap-field"></textarea>
+            </div>
+            <div class="field">
+              <label for="tempat_lahir">Tempat lahir</label>
+              <input id="tempat_lahir" name="tempat_lahir" type="text" value="" />
+            </div>
+            <div class="field">
+              <label for="tanggal_lahir">Tanggal lahir</label>
+              <input id="tanggal_lahir" name="tanggal_lahir" type="date" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label for="umur">Umur (tahun)</label>
+              <input id="umur" inputmode="numeric" name="umur" type="text" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label>Jenis kelamin</label>
+              <span class="inline-options">
+                <label for="gender_l"><input id="gender_l" name="gender" type="radio" value="L" /> Laki-laki</label>
+                <label for="gender_p"><input id="gender_p" name="gender" type="radio" value="P" /> Perempuan</label>
+              </span>
+            </div>
+            <div class="field">
+              <label for="tinggi">Tinggi badan (cm)</label>
+              <input id="tinggi" inputmode="decimal" name="tinggi" type="text" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label for="berat">Berat badan (kg)</label>
+              <input id="berat" inputmode="decimal" name="berat" type="text" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label for="gol_darah">Golongan darah</label>
+              <input id="gol_darah" name="gol_darah" type="text" value="" />
+            </div>
+            <div class="field">
+              <label for="agama">Agama</label>
+              <input id="agama" name="agama" type="text" value="" />
+            </div>
+            <div class="field">
+              <label for="warga_negara">Warga negara</label>
+              <input id="warga_negara" name="warga_negara" type="text" value="" />
+            </div>
+            <div class="field">
+              <label for="telepon">No. telepon / HP</label>
+              <input id="telepon" name="telepon" type="tel" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" value="" />
+            </div>
+          </div>
+        </section>
+
+        <!-- B. SUSUNAN KELUARGA -->
+        <section aria-labelledby="heading-b" class="section">
+          <div class="section-title" id="heading-b"><span class="letter">B</span> SUSUNAN KELUARGA</div>
+
+          <div class="subhead">1. Orang tua</div>
+          <div class="table-scroll-wrap">
+            <table class="aligned-grid">
+              <colgroup>
+                <col style="width: 14%;" />
+                <col style="width: 34%;" />
+                <col style="width: 8%;" />
+                <col style="width: 18%;" />
+                <col style="width: 26%;" />
+              </colgroup>
+              <thead>
+                <tr><th>Hubungan</th><th>Nama</th><th>Umur</th><th>Pendidikan</th><th>Pekerjaan</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="table-label">Ayah</td>
+                  <td><textarea aria-label="Nama ayah" id="ayah_nama" name="ayah_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur ayah" id="ayah_umur" name="ayah_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan ayah" id="ayah_pendidikan" name="ayah_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan ayah" id="ayah_pekerjaan" name="ayah_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Ibu</td>
+                  <td><textarea aria-label="Nama ibu" id="ibu_nama" name="ibu_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur ibu" id="ibu_umur" name="ibu_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan ibu" id="ibu_pendidikan" name="ibu_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan ibu" id="ibu_pekerjaan" name="ibu_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="subhead">2. Saudara kandung (termasuk pelamar)</div>
+          <div class="table-scroll-wrap">
+            <table class="aligned-grid">
+              <colgroup>
+                <col style="width: 14%;" />
+                <col style="width: 27%;" />
+                <col style="width: 7%;" />
+                <col style="width: 8%;" />
+                <col style="width: 18%;" />
+                <col style="width: 26%;" />
+              </colgroup>
+              <thead>
+                <tr><th>No. / Hub</th><th>Nama</th><th>L/P</th><th>Umur</th><th>Pendidikan</th><th>Pekerjaan</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="table-label">Saudara 1</td>
+                  <td><textarea aria-label="Nama saudara 1" id="saudara1_nama" name="saudara1_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin saudara 1" id="saudara1_lp" name="saudara1_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur saudara 1" id="saudara1_umur" name="saudara1_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan saudara 1" id="saudara1_pendidikan" name="saudara1_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan saudara 1" id="saudara1_pekerjaan" name="saudara1_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Saudara 2</td>
+                  <td><textarea aria-label="Nama saudara 2" id="saudara2_nama" name="saudara2_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin saudara 2" id="saudara2_lp" name="saudara2_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur saudara 2" id="saudara2_umur" name="saudara2_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan saudara 2" id="saudara2_pendidikan" name="saudara2_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan saudara 2" id="saudara2_pekerjaan" name="saudara2_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Saudara 3</td>
+                  <td><textarea aria-label="Nama saudara 3" id="saudara3_nama" name="saudara3_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin saudara 3" id="saudara3_lp" name="saudara3_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur saudara 3" id="saudara3_umur" name="saudara3_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan saudara 3" id="saudara3_pendidikan" name="saudara3_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan saudara 3" id="saudara3_pekerjaan" name="saudara3_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="subhead">3. Status perkawinan &amp; 4. Suami / istri dan anak</div>
+          <div class="table-scroll-wrap">
+            <div class="marital-status-box">
+              <span class="marital-label">Status perkawinan:</span>
+              <div class="inline-options">
+                <label><input name="status_kawin" type="radio" value="Belum kawin" /> Belum kawin</label><label><input name="status_kawin" type="radio" value="Kawin" /> Kawin</label><label><input name="status_kawin" type="radio" value="Cerai hidup" /> Cerai hidup</label><label><input name="status_kawin" type="radio" value="Cerai mati" /> Cerai mati</label>
+              </div>
+            </div>
+
+            <table class="aligned-grid" style="margin-top: 0;">
+              <colgroup>
+                <col style="width: 14%;" />
+                <col style="width: 27%;" />
+                <col style="width: 7%;" />
+                <col style="width: 8%;" />
+                <col style="width: 18%;" />
+                <col style="width: 26%;" />
+              </colgroup>
+              <thead>
+                <tr><th>Hubungan</th><th>Nama</th><th>L/P</th><th>Umur</th><th>Pendidikan</th><th>Pekerjaan</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="table-label">Suami / Istri</td>
+                  <td><textarea aria-label="Nama pasangan" id="pasangan_nama" name="pasangan_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin pasangan" id="pasangan_lp" name="pasangan_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur pasangan" id="pasangan_umur" name="pasangan_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan pasangan" id="pasangan_pendidikan" name="pasangan_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan pasangan" id="pasangan_pekerjaan" name="pasangan_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Anak 1</td>
+                  <td><textarea aria-label="Nama anak 1" id="anak1_nama" name="anak1_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin anak 1" id="anak1_lp" name="anak1_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur anak 1" id="anak1_umur" name="anak1_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan anak 1" id="anak1_pendidikan" name="anak1_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan anak 1" id="anak1_pekerjaan" name="anak1_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Anak 2</td>
+                  <td><textarea aria-label="Nama anak 2" id="anak2_nama" name="anak2_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin anak 2" id="anak2_lp" name="anak2_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur anak 2" id="anak2_umur" name="anak2_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan anak 2" id="anak2_pendidikan" name="anak2_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan anak 2" id="anak2_pekerjaan" name="anak2_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Anak 3</td>
+                  <td><textarea aria-label="Nama anak 3" id="anak3_nama" name="anak3_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jenis kelamin anak 3" id="anak3_lp" name="anak3_lp" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Umur anak 3" id="anak3_umur" name="anak3_umur" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pendidikan anak 3" id="anak3_pendidikan" name="anak3_pendidikan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan anak 3" id="anak3_pekerjaan" name="anak3_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- C. PENDIDIKAN FORMAL -->
+        <section aria-labelledby="heading-c" class="section">
+          <div class="section-title" id="heading-c"><span class="letter">C</span> PENDIDIKAN FORMAL</div>
+          <div class="table-scroll-wrap">
+            <table class="aligned-grid">
+              <colgroup>
+                <col style="width: 14%;" />
+                <col style="width: 34%;" />
+                <col style="width: 15%;" />
+                <col style="width: 21%;" />
+                <col style="width: 16%;" />
+              </colgroup>
+              <thead>
+                <tr><th>Tingkat</th><th>Nama Instansi</th><th>Kota</th><th>Jurusan</th><th>Tahun Lulus</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="table-label">SD</td>
+                  <td><textarea aria-label="Nama instansi SD" id="sd_instansi" name="sd_instansi" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Kota SD" id="sd_kota" name="sd_kota" rows="1" class="cell-wrap"></textarea></td>
+                  <td class="no-major">—</td>
+                  <td><textarea aria-label="Tahun lulus SD" id="sd_lulus" name="sd_lulus" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">SMP</td>
+                  <td><textarea aria-label="Nama instansi SMP" id="smp_instansi" name="smp_instansi" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Kota SMP" id="smp_kota" name="smp_kota" rows="1" class="cell-wrap"></textarea></td>
+                  <td class="no-major">—</td>
+                  <td><textarea aria-label="Tahun lulus SMP" id="smp_lulus" name="smp_lulus" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">SMA / Sederajat</td>
+                  <td><textarea aria-label="Nama instansi SMA" id="sma_instansi" name="sma_instansi" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Kota SMA" id="sma_kota" name="sma_kota" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jurusan SMA" id="sma_jurusan" name="sma_jurusan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Tahun lulus SMA" id="sma_lulus" name="sma_lulus" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Diploma (D1–D4)</td>
+                  <td><textarea aria-label="Nama instansi Diploma" id="diploma_instansi" name="diploma_instansi" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Kota Diploma" id="diploma_kota" name="diploma_kota" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jurusan Diploma" id="diploma_jurusan" name="diploma_jurusan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Tahun lulus Diploma" id="diploma_lulus" name="diploma_lulus" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label">Universitas (S1/S2)</td>
+                  <td><textarea aria-label="Nama universitas" id="universitas_instansi" name="universitas_instansi" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Kota universitas" id="universitas_kota" name="universitas_kota" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Jurusan universitas" id="universitas_jurusan" name="universitas_jurusan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Tahun lulus universitas" id="universitas_lulus" name="universitas_lulus" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- D. KEMAMPUAN BERBAHASA -->
+        <section aria-labelledby="heading-d" class="section">
+          <div class="section-title" id="heading-d"><span class="letter">D</span> KEMAMPUAN BERBAHASA (SELAIN BAHASA INDONESIA)</div>
+          <div class="table-scroll-wrap">
+            <table class="aligned-grid">
+              <colgroup>
+                <col style="width: 28%;" />
+                <col style="width: 24%;" />
+                <col style="width: 24%;" />
+                <col style="width: 24%;" />
+              </colgroup>
+              <thead>
+                <tr><th>Jenis Bahasa</th><th>Berbicara</th><th>Membaca</th><th>Menulis</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><textarea aria-label="Bahasa 1" id="bahasa1" name="bahasa1" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Berbicara bahasa 1" id="bahasa1_bicara" name="bahasa1_bicara" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Membaca bahasa 1" id="bahasa1_baca" name="bahasa1_baca" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Menulis bahasa 1" id="bahasa1_tulis" name="bahasa1_tulis" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                </tr>
+                <tr>
+                  <td><textarea aria-label="Bahasa 2" id="bahasa2" name="bahasa2" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Berbicara bahasa 2" id="bahasa2_bicara" name="bahasa2_bicara" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Membaca bahasa 2" id="bahasa2_baca" name="bahasa2_baca" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Menulis bahasa 2" id="bahasa2_tulis" name="bahasa2_tulis" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                </tr>
+                <tr>
+                  <td><textarea aria-label="Bahasa 3" id="bahasa3" name="bahasa3" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Berbicara bahasa 3" id="bahasa3_bicara" name="bahasa3_bicara" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Membaca bahasa 3" id="bahasa3_baca" name="bahasa3_baca" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Menulis bahasa 3" id="bahasa3_tulis" name="bahasa3_tulis" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                </tr>
+                <tr>
+                  <td><textarea aria-label="Bahasa 4" id="bahasa4" name="bahasa4" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Berbicara bahasa 4" id="bahasa4_bicara" name="bahasa4_bicara" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Membaca bahasa 4" id="bahasa4_baca" name="bahasa4_baca" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                  <td><textarea aria-label="Menulis bahasa 4" id="bahasa4_tulis" name="bahasa4_tulis" rows="1" class="cell-wrap" placeholder="Dasar / Menengah / Mahir"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- E. HOBBY -->
+        <section aria-labelledby="heading-e" class="section">
+          <div class="section-title" id="heading-e"><span class="letter">E</span> HOBBY / KEGEMARAN</div>
+          <textarea aria-label="Hobi" class="hobby-box" id="hobby" name="hobby"></textarea>
+        </section>
+
+        <footer class="page-footer">
+          <span>PT. MITRA BINAMANDIRI MAKMUR · FORM RECRUITMENT</span>
+          <span class="tabular-nums">HALAMAN 1 / 2</span>
+        </footer>
+      </section>
+
+      <!-- HALAMAN 2 -->
+      <section aria-label="Halaman 2 dari 2" class="sheet page2">
+        <header class="continuation-header">
+          <div class="continuation-title">PT. MITRA BINAMANDIRI MAKMUR · FORM RECRUITMENT</div>
+          <div class="continuation-sub">FORMULIR LAMARAN KERJA (LANJUTAN HALAMAN 2)</div>
+        </header>
+
+        <!-- F. PENGALAMAN KERJA -->
+        <section aria-labelledby="heading-f" class="section">
+          <div class="section-title" id="heading-f"><span class="letter">F</span> RIWAYAT PENGALAMAN KERJA</div>
+          <div class="work-grid">
+            <div class="work-card">
+              <div class="work-head">
+                <span>PENGALAMAN KERJA 1</span>
+                <span style="font-weight: 600; color: #64748b;">(Terakhir)</span>
+              </div>
+              <div class="work-fields">
+                <div class="work-field-row work-span-2" style="grid-column: span 2;">
+                  <label for="kerja1_perusahaan">Nama Perusahaan</label>
+                  <input id="kerja1_perusahaan" name="kerja1_perusahaan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_periode">Periode</label>
+                  <input id="kerja1_periode" name="kerja1_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_durasi">Durasi</label>
+                  <input id="kerja1_durasi" name="kerja1_durasi" placeholder="3 Tahun" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_jabatan">Jabatan</label>
+                  <input id="kerja1_jabatan" name="kerja1_jabatan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_usaha">Jenis Usaha</label>
+                  <input id="kerja1_usaha" name="kerja1_usaha" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_jumlah">Jumlah Karyawan</label>
+                  <input id="kerja1_jumlah" name="kerja1_jumlah" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_atasan">Nama Atasan Langsung</label>
+                  <input id="kerja1_atasan" name="kerja1_atasan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja1_gaji">Gaji Terakhir (Rp)</label>
+                  <input id="kerja1_gaji" name="kerja1_gaji" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row work-span-3" style="grid-column: span 3;">
+                  <label for="kerja1_alasan">Alasan Berhenti</label>
+                  <input id="kerja1_alasan" name="kerja1_alasan" value="" />
+                </div>
+              </div>
+            </div>
+            <div class="work-card">
+              <div class="work-head">
+                <span>PENGALAMAN KERJA 2</span>
+                
+              </div>
+              <div class="work-fields">
+                <div class="work-field-row work-span-2" style="grid-column: span 2;">
+                  <label for="kerja2_perusahaan">Nama Perusahaan</label>
+                  <input id="kerja2_perusahaan" name="kerja2_perusahaan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_periode">Periode</label>
+                  <input id="kerja2_periode" name="kerja2_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_durasi">Durasi</label>
+                  <input id="kerja2_durasi" name="kerja2_durasi" placeholder="3 Tahun" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_jabatan">Jabatan</label>
+                  <input id="kerja2_jabatan" name="kerja2_jabatan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_usaha">Jenis Usaha</label>
+                  <input id="kerja2_usaha" name="kerja2_usaha" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_jumlah">Jumlah Karyawan</label>
+                  <input id="kerja2_jumlah" name="kerja2_jumlah" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_atasan">Nama Atasan Langsung</label>
+                  <input id="kerja2_atasan" name="kerja2_atasan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja2_gaji">Gaji Terakhir (Rp)</label>
+                  <input id="kerja2_gaji" name="kerja2_gaji" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row work-span-3" style="grid-column: span 3;">
+                  <label for="kerja2_alasan">Alasan Berhenti</label>
+                  <input id="kerja2_alasan" name="kerja2_alasan" value="" />
+                </div>
+              </div>
+            </div>
+            <div class="work-card">
+              <div class="work-head">
+                <span>PENGALAMAN KERJA 3</span>
+                
+              </div>
+              <div class="work-fields">
+                <div class="work-field-row work-span-2" style="grid-column: span 2;">
+                  <label for="kerja3_perusahaan">Nama Perusahaan</label>
+                  <input id="kerja3_perusahaan" name="kerja3_perusahaan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_periode">Periode</label>
+                  <input id="kerja3_periode" name="kerja3_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_durasi">Durasi</label>
+                  <input id="kerja3_durasi" name="kerja3_durasi" placeholder="3 Tahun" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_jabatan">Jabatan</label>
+                  <input id="kerja3_jabatan" name="kerja3_jabatan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_usaha">Jenis Usaha</label>
+                  <input id="kerja3_usaha" name="kerja3_usaha" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_jumlah">Jumlah Karyawan</label>
+                  <input id="kerja3_jumlah" name="kerja3_jumlah" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_atasan">Nama Atasan Langsung</label>
+                  <input id="kerja3_atasan" name="kerja3_atasan" value="" />
+                </div>
+                <div class="work-field-row">
+                  <label for="kerja3_gaji">Gaji Terakhir (Rp)</label>
+                  <input id="kerja3_gaji" name="kerja3_gaji" class="tabular-nums" value="" />
+                </div>
+                <div class="work-field-row work-span-3" style="grid-column: span 3;">
+                  <label for="kerja3_alasan">Alasan Berhenti</label>
+                  <input id="kerja3_alasan" name="kerja3_alasan" value="" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- G. EKSPEKTASI -->
+        <section aria-labelledby="heading-g" class="section">
+          <div class="section-title" id="heading-g"><span class="letter">G</span> EKSPEKTASI</div>
+          <div class="expectation-fields">
+            <div class="field">
+              <label for="mulai_kerja">Tanggal mulai bisa bekerja</label>
+              <input id="mulai_kerja" name="mulai_kerja" type="date" class="tabular-nums" value="" />
+            </div>
+            <div class="field">
+              <label for="gaji_harapan">Gaji yang diharapkan (Rp)</label>
+              <input id="gaji_harapan" name="gaji_harapan" type="text" class="tabular-nums" value="" />
+            </div>
+            <div class="field wide">
+              <label for="fasilitas_harapan">Fasilitas lain yang diharapkan</label>
+              <input id="fasilitas_harapan" name="fasilitas_harapan" type="text" value="" />
+            </div>
+          </div>
+        </section>
+
+        <!-- H. REFERENSI -->
+        <section aria-labelledby="heading-h" class="section">
+          <div class="section-title" id="heading-h"><span class="letter">H</span> REFERENSI (Hubungan profesional atau akademis)</div>
+          <div class="table-scroll-wrap">
+            <table class="aligned-grid">
+              <colgroup>
+                <col style="width: 6%;" />
+                <col style="width: 22%;" />
+                <col style="width: 26%;" />
+                <col style="width: 16%;" />
+                <col style="width: 16%;" />
+                <col style="width: 14%;" />
+              </colgroup>
+              <thead>
+                <tr><th>No.</th><th>Nama</th><th>Alamat</th><th>Telepon</th><th>Pekerjaan</th><th>Hubungan</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="table-label" style="text-align: center;">1</td>
+                  <td><textarea aria-label="Nama referensi 1" id="referensi1_nama" name="referensi1_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Alamat referensi 1" id="referensi1_alamat" name="referensi1_alamat" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Telepon referensi 1" id="referensi1_telepon" name="referensi1_telepon" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan referensi 1" id="referensi1_pekerjaan" name="referensi1_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Hubungan referensi 1" id="referensi1_hubungan" name="referensi1_hubungan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+                <tr>
+                  <td class="table-label" style="text-align: center;">2</td>
+                  <td><textarea aria-label="Nama referensi 2" id="referensi2_nama" name="referensi2_nama" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Alamat referensi 2" id="referensi2_alamat" name="referensi2_alamat" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Telepon referensi 2" id="referensi2_telepon" name="referensi2_telepon" rows="1" class="cell-wrap tabular-nums"></textarea></td>
+                  <td><textarea aria-label="Pekerjaan referensi 2" id="referensi2_pekerjaan" name="referensi2_pekerjaan" rows="1" class="cell-wrap"></textarea></td>
+                  <td><textarea aria-label="Hubungan referensi 2" id="referensi2_hubungan" name="referensi2_hubungan" rows="1" class="cell-wrap"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- I. PERTANYAAN TERBUKA -->
+        <section aria-labelledby="heading-i" class="section">
+          <div class="section-title" id="heading-i"><span class="letter">I</span> PERTANYAAN TERBUKA</div>
+          <div class="answer-block">
+            <div class="subhead">1. Apa yang Anda ketahui tentang perusahaan kami?</div>
+            <textarea aria-label="Jawaban pertanyaan 1" class="answer" id="jawaban1" name="jawaban1"></textarea>
+          </div>
+          <div class="answer-block">
+            <div class="subhead">2. Ceritakan tentang pribadi Anda.</div>
+            <textarea aria-label="Jawaban pertanyaan 2" class="answer" id="jawaban2" name="jawaban2"></textarea>
+          </div>
+          <div class="answer-block">
+            <div class="subhead">3. Apa yang akan Anda lakukan untuk perusahaan kami jika diterima?</div>
+            <textarea aria-label="Jawaban pertanyaan 3" class="answer" id="jawaban3" name="jawaban3"></textarea>
+          </div>
+        </section>
+
+        <!-- J. PERNYATAAN & PERSETUJUAN -->
+        <section aria-labelledby="heading-j" class="section">
+          <div class="section-title" id="heading-j"><span class="letter">J</span> PERNYATAAN &amp; PERSETUJUAN</div>
+          <div class="declaration">
+            Dengan ini saya menyatakan semua pernyataan di atas adalah benar adanya. Jika di kemudian hari ternyata terbukti saya membuat pernyataan palsu, maka saya bersedia dikenakan sanksi baik berupa Pemutusan Hubungan Kerja (PHK) maupun tuntutan hukum yang berlaku.
+          </div>
+          <label class="consent-row">
+            <input id="setuju" name="setuju" type="checkbox" />
+            Saya menyetujui pernyataan dan kebenaran data di atas.
+          </label>
+
+          <div class="approval-panel">
+            <div class="approval-left">
+              <div>
+                <label for="nama_terang" class="approval-label">Nama Terang &amp; Tanda Tangan Pelamar</label>
+                <div class="sig-preview-wrap">
+                  <div class="sig-preview-text" id="sigPreviewText" aria-hidden="true">Nama Lengkap Pelamar</div>
+                  <svg viewBox="0 0 240 10" class="sig-underline" fill="none" aria-hidden="true">
+                    <path d="M2 7C65 2.5 148 2.5 238 5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  </svg>
+                </div>
+                <input id="nama_terang" name="nama_terang" type="text" class="approval-name-input" placeholder="Ketik nama terang pelamar" value="" />
+              </div>
+
+              <div class="approval-meta-row">
+                <label class="approval-date-label">
+                  <span>Tanggal:</span>
+                  <input aria-label="Tanggal persetujuan pelamar" id="tanggal_persetujuan" name="tanggal_persetujuan" type="date" class="font-mono-code approval-date-input" value="" />
+                </label>
+                <span id="approvalStatus" class="status-pending">
+                  Menunggu Persetujuan
+                </span>
+              </div>
+            </div>
+
+            <div class="esig-badge">
+              <div class="esig-icon-box" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z" />
+                  <path d="m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18" />
+                  <path d="m2.3 2.3 7.286 7.286" />
+                  <circle cx="11" cy="11" r="2" />
+                </svg>
+              </div>
+              <div>
+                <div class="esig-title">Tanda Tangan Elektronik</div>
+                <div class="esig-sub font-mono-code">
+                  <span id="esigInitials">MB</span>
+                  <span aria-hidden="true" style="color: #94a3b8;">·</span>
+                  <span id="esigCode" style="color: #cbd5e1;">MBM-000000-38BC</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <footer class="page-footer">
+          <span>PT. MITRA BINAMANDIRI MAKMUR · FORM RECRUITMENT</span>
+          <span class="tabular-nums">HALAMAN 2 / 2</span>
+        </footer>
+      </section>
+    </form>
+  </main>
+
+  <script>
+    (function () {
+      var SAMPLE_DATA = {"posisi":"Staff QA / QC Inspector","nama":"Budi Santoso, S.T.","nik":"3514121508960002","alamat_asal":"Jl. Ahmad Yani No. 42, RT 03 / RW 05, Kel. Randupitu, Kec. Gempol, Pasuruan","domisili":"Jl. Raya Pandaan - Bangil No. 18, Pandaan, Pasuruan","tempat_lahir":"Pasuruan","tanggal_lahir":"1996-08-15","umur":"29","gender":"L","tinggi":"172","berat":"66","gol_darah":"O","agama":"Islam","warga_negara":"Indonesia","telepon":"0812-3456-7890","email":"budi.santoso96@gmail.com","ayah_nama":"H. Bambang Soeprapto","ayah_umur":"58","ayah_pendidikan":"S1 Teknik Mesin","ayah_pekerjaan":"Pensiunan BUMN","ibu_nama":"Hj. Siti Aminah","ibu_umur":"54","ibu_pendidikan":"D3 Akuntansi","ibu_pekerjaan":"Ibu Rumah Tangga","saudara1_nama":"Dian Permata Sari","saudara1_lp":"P","saudara1_umur":"32","saudara1_pendidikan":"S1 Farmasi","saudara1_pekerjaan":"Apoteker","saudara2_nama":"Budi Santoso (Pelamar)","saudara2_lp":"L","saudara2_umur":"29","saudara2_pendidikan":"S1 Teknik Kimia","saudara2_pekerjaan":"Staff Quality Control","saudara3_nama":"Reza Aditya","saudara3_lp":"L","saudara3_umur":"22","saudara3_pendidikan":"D4 Mekatronika","saudara3_pekerjaan":"Mahasiswa Tingkat Akhir","status_kawin":"Belum kawin","pasangan_nama":"-","pasangan_lp":"-","pasangan_umur":"-","pasangan_pendidikan":"-","pasangan_pekerjaan":"-","anak1_nama":"-","anak1_lp":"-","anak1_umur":"-","anak1_pendidikan":"-","anak1_pekerjaan":"-","anak2_nama":"-","anak2_lp":"-","anak2_umur":"-","anak2_pendidikan":"-","anak2_pekerjaan":"-","anak3_nama":"-","anak3_lp":"-","anak3_umur":"-","anak3_pendidikan":"-","anak3_pekerjaan":"-","sd_instansi":"SD Negeri Randupitu 1","sd_kota":"Pasuruan","sd_lulus":"2008","smp_instansi":"SMP Negeri 1 Pandaan","smp_kota":"Pasuruan","smp_lulus":"2011","sma_instansi":"SMA Negeri 1 Pandaan","sma_kota":"Pasuruan","sma_jurusan":"IPA","sma_lulus":"2014","diploma_instansi":"-","diploma_kota":"-","diploma_jurusan":"-","diploma_lulus":"-","universitas_instansi":"Institut Teknologi Sepuluh Nopember (ITS)","universitas_kota":"Surabaya","universitas_jurusan":"Teknik Kimia / Material Industri","universitas_lulus":"2018","bahasa1":"Inggris","bahasa1_bicara":"Mahir (Fluent)","bahasa1_baca":"Mahir (Advance)","bahasa1_tulis":"Mahir (Advance)","bahasa2":"Mandarin","bahasa2_bicara":"Dasar (HSK 2)","bahasa2_baca":"Dasar (HSK 2)","bahasa2_tulis":"Dasar","bahasa3":"Jepang","bahasa3_bicara":"Dasar","bahasa3_baca":"Dasar","bahasa3_tulis":"Dasar","bahasa4":"-","bahasa4_bicara":"-","bahasa4_baca":"-","bahasa4_tulis":"-","hobby":"Membaca jurnal teknologi industri, bulu tangkis, fotografi lanskap, dan pemodelan data statistik (Six Sigma & Kaizen).","kerja1_perusahaan":"PT. Tirta Investama (Danone Aqua)","kerja1_periode":"2021 - 2024","kerja1_durasi":"3 Tahun","kerja1_jabatan":"QC Line Inspector Specialist","kerja1_usaha":"FMCG / Minuman Kemasan","kerja1_jumlah":"850","kerja1_atasan":"Ir. Hendra Gunawan","kerja1_gaji":"6.500.000","kerja1_alasan":"Mencari jenjang karir lebih luas & pengembangan kompetensi sistem mutu terpadu.","kerja2_perusahaan":"PT. Santos Jaya Abadi (Kapal Api Group)","kerja2_periode":"2019 - 2021","kerja2_durasi":"2 Tahun","kerja2_jabatan":"Junior QA Analyst","kerja2_usaha":"Food & Beverage Manufacture","kerja2_jumlah":"1.200","kerja2_atasan":"Yohanes Surya, S.Si.","kerja2_gaji":"5.200.000","kerja2_alasan":"Kontrak kerja berkala selesai dengan performa sangat memuaskan.","kerja3_perusahaan":"PT. Petrokimia Gresik (Internship / Project)","kerja3_periode":"2018 (6 Bulan)","kerja3_durasi":"6 Bulan","kerja3_jabatan":"Quality Assurance Intern","kerja3_usaha":"Industri Pupuk & Kimia","kerja3_jumlah":"2.500","kerja3_atasan":"Bambang Sutejo, S.T.","kerja3_gaji":"2.000.000","kerja3_alasan":"Program magang skripsi telah tuntas diselesaikan.","mulai_kerja":"2026-12-01","gaji_harapan":"7.500.000","fasilitas_harapan":"BPJS Ketenagakerjaan & Kesehatan, Tunjangan Transport/Makan, Pelatihan Sertifikasi ISO 9001/22000.","referensi1_nama":"Ir. Hendra Gunawan","referensi1_alamat":"Jl. Rungkut Asri Timur No. 12, Surabaya","referensi1_telepon":"0811-3322-114","referensi1_pekerjaan":"Quality Assurance Manager (Ex-Atasan)","referensi1_hubungan":"Atasan Langsung di PT. Tirta Investama","referensi2_nama":"Dr. Eng. Ir. Supriyanto, M.T.","referensi2_alamat":"Kampus ITS Sukolilo, Surabaya","referensi2_telepon":"0812-9988-7766","referensi2_pekerjaan":"Dosen Pembimbing Akademik / Peneliti","referensi2_hubungan":"Dosen Pembimbing Skripsi S1 Teknik Kimia","jawaban1":"PT. Mitra Binamandiri Makmur merupakan perusahaan manufaktur terkemuka yang berbasis di Pasuruan dengan reputasi prima, mengedepankan kualitas proses, keamanan kerja berstandar tinggi, dan ekspansi pasar nasional maupun ekspor yang solid.","jawaban2":"Saya seorang profesional berlatar belakang Teknik Kimia dengan pengalaman 5+ tahun dalam quality control & continuous improvement. Saya terbiasa berpikir analitis, teliti dalam pengawasan spesifikasi mutu, disiplin tinggi, serta cepat beradaptasi dalam dinamika pabrik.","jawaban3":"Saya siap berkontribusi menekan defect rate lini produksi melalui implementasi SPC (Statistical Process Control), memastikan kepatuhan standar SOP/HACCP, serta membangun koordinasi proaktif antar divisi agar target efisiensi dan kualitas prima tercapai optimal.","setuju":true,"nama_terang":"Budi Santoso, S.T.","tanggal_persetujuan":"2026-11-11"};
+      var form = document.getElementById('applicationForm');
+
+      function syncTextareaHeight(el) {
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = el.scrollHeight + 'px';
+      }
+
+      function syncAllTextareas() {
+        var nodes = document.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field');
+        for (var i = 0; i < nodes.length; i++) {
+          syncTextareaHeight(nodes[i]);
+        }
+      }
+
+      function getInitials(fullName) {
+        var cleaned = String(fullName || '').replace(/,.*$/, '').trim();
+        if (!cleaned) return 'MB';
+        var parts = cleaned.split(/\s+/).filter(Boolean);
+        if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      }
+
+      function computeReferenceCode(name, nik, date) {
+        var seed = String(name || '').trim() + '|' + String(nik || '').trim() + '|' + String(date || '').trim() + '|MBM';
+        var hash = 2166136261;
+        for (var i = 0; i < seed.length; i++) {
+          hash ^= seed.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        var hex = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+        var nikSeg = String(nik || '').replace(/\D/g, '').slice(0, 6) || '000000';
+        return 'MBM-' + nikSeg + '-' + hex.slice(0, 4);
+      }
+
+      function syncSignatureBadge() {
+        var namaEl = document.getElementById('nama_terang');
+        var nikEl = document.getElementById('nik');
+        var tglEl = document.getElementById('tanggal_persetujuan');
+        var setujuEl = document.getElementById('setuju');
+        var sigPreview = document.getElementById('sigPreviewText');
+        var esigInitials = document.getElementById('esigInitials');
+        var esigCode = document.getElementById('esigCode');
+        var statusEl = document.getElementById('approvalStatus');
+
+        var namaVal = namaEl ? namaEl.value : '';
+        var nikVal = nikEl ? nikEl.value : '';
+        var tglVal = tglEl ? tglEl.value : '';
+        var isApproved = !!(setujuEl && setujuEl.checked);
+
+        if (sigPreview) sigPreview.textContent = namaVal.trim() || 'Nama Lengkap Pelamar';
+        if (esigInitials) esigInitials.textContent = getInitials(namaVal);
+        if (esigCode) esigCode.textContent = computeReferenceCode(namaVal, nikVal, tglVal);
+        if (statusEl) {
+          statusEl.className = isApproved ? 'status-approved' : 'status-pending';
+          statusEl.textContent = isApproved ? 'Disetujui Pelamar' : 'Menunggu Persetujuan';
+        }
+      }
+
+      function applyDataObject(obj) {
+        var keys = Object.keys(obj);
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          var val = obj[key];
+          if (key === 'gender' || key === 'status_kawin') {
+            var radios = form.querySelectorAll('input[name="' + key + '"]');
+            for (var r = 0; r < radios.length; r++) {
+              radios[r].checked = radios[r].value === val;
+            }
+          } else if (key === 'setuju') {
+            var cb = document.getElementById('setuju');
+            if (cb) cb.checked = Boolean(val);
+          } else {
+            var field = document.getElementById(key);
+            if (field) field.value = val == null ? '' : String(val);
+          }
+        }
+        syncAllTextareas();
+        syncSignatureBadge();
+      }
+
+      function clearAllFields() {
+        var inputs = form.querySelectorAll('input, textarea');
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          if (el.type === 'radio' || el.type === 'checkbox') {
+            el.checked = false;
+          } else {
+            el.value = '';
+          }
+        }
+        syncAllTextareas();
+        syncSignatureBadge();
+      }
+
+      form.addEventListener('input', function (e) {
+        var target = e.target;
+        if (target && target.matches && target.matches('textarea.cell-wrap, textarea.inline-wrap-field')) {
+          syncTextareaHeight(target);
+        }
+        if (target && target.id === 'nama') {
+          var nt = document.getElementById('nama_terang');
+          if (nt && (!nt.dataset.edited || nt.value === '')) {
+            nt.value = target.value;
+          }
+        }
+        if (target && target.id === 'nama_terang') {
+          target.dataset.edited = '1';
+        }
+        syncSignatureBadge();
+      });
+
+      form.addEventListener('change', function () {
+        syncSignatureBadge();
+      });
+
+      var btnSample = document.getElementById('btnLoadSample');
+      var btnReset = document.getElementById('btnResetEmpty');
+      var btnPrint = document.getElementById('btnPrint');
+
+      if (btnSample) btnSample.addEventListener('click', function () { applyDataObject(SAMPLE_DATA); });
+      if (btnReset) btnReset.addEventListener('click', clearAllFields);
+      if (btnPrint) btnPrint.addEventListener('click', function () { window.print(); });
+
+      window.addEventListener('resize', syncAllTextareas);
+      window.addEventListener('beforeprint', syncAllTextareas);
+      window.addEventListener('afterprint', syncAllTextareas);
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(syncAllTextareas);
+      }
+
+      syncAllTextareas();
+      syncSignatureBadge();
+    })();
+  </script>
+</body>
+</html>

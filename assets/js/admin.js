@@ -1,7 +1,7 @@
 import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-02';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js?v=20261120-hrga-workspace-02';
 import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-02';
-import { printApplication } from './print.js?v=20261120-hrga-workspace-04';
+import { printApplication } from './print.js?v=20261120-hrga-workspace-05';
 import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-02';
 import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-02';
 
@@ -131,8 +131,8 @@ function applicantRows(rows, action = 'print') {
    try{const result=computeDisc(disc.answers),natural=result.pola[2];graph=discGraphSvg(result);personality=`<b>${esc(natural.title)}</b><small class="table-subline">${esc(natural.nama)} · Dominan ${esc(result.hurufDominan)}</small>`;}
    catch{graph='<span class="status-pill gray">Hasil perlu diperiksa</span>';personality='Perlu diperiksa';}
   }
-  return `<tr><td><b>${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
-   <td>${esc(applicant.position||'—')}</td><td>${fmtAge(applicant)}</td><td>${statusPill(applicant.stage)}</td>
+  return `<tr><td><b class="cell-clamp-2" title="${esc(applicant.full_name)}">${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
+   <td><div class="cell-clamp-2" title="${esc(applicant.position||'—')}">${esc(applicant.position||'—')}</div></td><td>${fmtAge(applicant)}</td><td>${statusPill(applicant.stage)}</td>
    ${action==='both'?'<td>'+graph+'</td><td>'+personality+'</td>':''}
    <td><div class="row-actions">${action==='both'&&!employee?`<button class="icon-btn" data-hire="${esc(applicant.id)}">Jadikan karyawan</button>`:''}
    <button class="icon-btn" data-print="${esc(applicant.id)}">Cetak</button></div></td></tr>`;
@@ -380,14 +380,26 @@ function stage2FieldKeys(rows){
   return applicationFieldLabel(a).localeCompare(applicationFieldLabel(b),'id',{numeric:true,sensitivity:'base'});
  });
 }
+const STAGE2_COMPACT_FIELDS = new Set(['tanggal_lahir','gender','gol_darah','agama','warga_negara','tinggi','berat','alamat_rt','alamat_rw','alamat_kodepos','domisili_berbeda','saudara_count','anak_count','bahasa_count','kerja_count','setuju','mulai_kerja']);
+function stage2CellClass(key){
+ if(STAGE2_COMPACT_FIELDS.has(key)||/^(saudara|anak)\d+_(lp|umur)$|_lulus$|_umur$|_periode_(mulai|selesai)$/.test(key))return 'col-compact-cell';
+ if(/^(telepon|email|referensi\d+_telepon)$/.test(key))return 'col-contact-cell';
+ if(/^(alamat_jalan|domisili|hobby|fasilitas_harapan|jawaban\d+|referensi\d+_alamat)$|^kerja\d+_(perusahaan|jabatan|usaha|alasan)$/.test(key))return 'col-wide-cell';
+ return '';
+}
 function stage2RowHtml(row,keys){
  const data=row.application_data||{};
- return `<tr><td><b>${esc(row.full_name)}</b><small class="table-subline">${esc(row.nik)}</small></td>
-  <td>${esc(row.position||data.posisi||'—')}</td>
-  ${keys.map(key=>`<td>${esc(displayApplicationValue(data[key]))}</td>`).join('')}
+ const pos=row.position||data.posisi||'—';
+ return `<tr><td><b class="cell-clamp-2" title="${esc(row.full_name)}">${esc(row.full_name)}</b><small class="table-subline">${esc(row.nik)}</small></td>
+  <td><div class="cell-clamp-2" title="${esc(pos)}">${esc(pos)}</div></td>
+  ${keys.map(key=>{
+   const val=displayApplicationValue(data[key]);
+   const cls=stage2CellClass(key);
+   return `<td${cls?` class="${cls}"`:''}><div class="cell-clamp-2" title="${esc(val)}">${esc(val)}</div></td>`;
+  }).join('')}
   <td>${row.ktp_path?`<button class="icon-btn" data-stage2-ktp="${esc(row.id)}">Buka KTP</button>`:'—'}</td>
   <td>${row.cv_path?`<button class="icon-btn" data-stage2-cv="${esc(row.id)}">Buka CV</button>`:'—'}</td>
-  <td>${statusPill(row.stage)}</td><td><select class="select" style="min-width:145px" data-bg-value="${esc(row.id)}">
+  <td>${statusPill(row.stage)}</td><td><select class="select" style="min-width:136px" data-bg-value="${esc(row.id)}">
    <option value="pending" ${(row.background_check_status||'pending')==='pending'?'selected':''}>Menunggu</option>
    <option value="passed" ${row.background_check_status==='passed'?'selected':''}>Lolos</option>
    <option value="failed" ${row.background_check_status==='failed'?'selected':''}>Tidak lolos</option>
@@ -560,10 +572,18 @@ async function renderStage2(){
  const positions=await loadPositionList(),keys=stage2FieldKeys(allRows);
  stage2PositionsCache=positions.slice();
  const renderRows=rows=>rows.length?rows.map(row=>stage2RowHtml(row,keys)).join(''):emptyRow(7+keys.length,'No candidate forms');
- const columns=['APPLICANT','POSITION',...keys.map(key=>applicationFieldLabel(key).toLocaleUpperCase('id')),'ID CARD','CV','FORM STATUS','BACKGROUND CHECK','ACTIONS'];
+ const headerCells=[
+  '<th>APPLICANT</th>',
+  '<th>POSITION</th>',
+  ...keys.map(key=>{
+   const cls=stage2CellClass(key);
+   return `<th${cls?` class="${cls}"`:''}>${esc(applicationFieldLabel(key).toLocaleUpperCase('id'))}</th>`;
+  }),
+  '<th>ID CARD</th>','<th>CV</th>','<th>FORM STATUS</th>','<th>BACKGROUND CHECK</th>','<th>ACTIONS</th>'
+ ].join('');
  content.innerHTML=header('Candidate List','Seluruh field tersimpan, lampiran KTP/CV, dan kelayakan DISC · NIK adalah identitas utama')+
   `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Search name / NIK / position…','Candidate List')}
-   <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${columns.map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`+
+   <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`+
   positionManagerHtml(positions);
  bindPositionManager(positions);
  const repaint=query=>{
@@ -576,7 +596,7 @@ async function renderStage2(){
 function renderStage3(){
  const rows=applicants.filter(row=>getDiscForApplicant(row)||row.stage==='disc_completed'||row.stage==='hired');
  content.innerHTML=header('DISC Assessment','Grafik DISC dan pola kepribadian dihitung dari rumus DISC HR&GA Workspace')+
-  `<section class="panel table-panel">${tableToolbar('Search candidates…','DISC Assessment')}<div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table">
+  `<section class="panel table-panel">${tableToolbar('Search candidates…','DISC Assessment')}<div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table disc-assessment-table">
    <thead><tr><th>APPLICANT / NIK</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>DISC GRAPHS (G1 · G2 · G3)</th><th>PERSONALITY / NATURAL PATTERN</th><th>ACTIONS</th></tr></thead>
    <tbody id="candidate-rows">${applicantRows(rows,'both')}</tbody></table></div></section>`;
  const repaint=query=>{

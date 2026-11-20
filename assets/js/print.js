@@ -22,13 +22,71 @@ async function renderPdfPages(url) {
   return pages;
 }
 
+const MONTH_SHORT_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+function formatYm(ym) {
+  const match = String(ym || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return String(ym || '').trim();
+  const m = Number(match[2]);
+  return `${MONTH_SHORT_ID[m - 1] || match[2]} ${match[1]}`;
+}
+function deriveWorkPeriod(app, n) {
+  const start = String(app[`kerja${n}_periode_mulai`] || '').trim();
+  const end = String(app[`kerja${n}_periode_selesai`] || '').trim();
+  if (!start && !end) return '';
+  if (start && end) return `${formatYm(start)} – ${formatYm(end)}`;
+  if (start) return `${formatYm(start)} – Sekarang`;
+  return formatYm(end);
+}
+function deriveWorkDuration(app, n) {
+  const s = String(app[`kerja${n}_periode_mulai`] || '').match(/^(\d{4})-(\d{2})$/);
+  const e = String(app[`kerja${n}_periode_selesai`] || '').match(/^(\d{4})-(\d{2})$/);
+  if (!s || !e) return '';
+  const months = (Number(e[1]) * 12 + Number(e[2])) - (Number(s[1]) * 12 + Number(s[2])) + 1;
+  if (months <= 0) return '';
+  const yrs = Math.floor(months / 12);
+  const rem = months % 12;
+  if (yrs && rem) return `${yrs} Thn ${rem} Bln`;
+  if (yrs) return `${yrs} Tahun`;
+  return `${rem} Bulan`;
+}
+function signatureInitials(fullName) {
+  const cleaned = String(fullName || '').replace(/,.*$/, '').trim();
+  if (!cleaned) return 'MB';
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+function signatureRefCode(name, nik, date) {
+  const seed = `${String(name || '').trim()}|${String(nik || '').trim()}|${String(date || '').trim()}|MBM`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hex = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  const nikSeg = String(nik || '').replace(/\D/g, '').slice(0, 6) || '000000';
+  return `MBM-${nikSeg}-${hex.slice(0, 4)}`;
+}
+
 function fillMaster(doc, data, record = {}) {
   const app = data || {};
+  const shortGender = { 'Laki-laki': 'L', 'Perempuan': 'P' };
+  const approvalDateFallback = (record.created_at || record.updated_at || '').slice(0, 10);
+
   doc.querySelectorAll('#applicationForm [name]').forEach(el => {
     const name = el.getAttribute('name');
     let value = app[name] ?? '';
     const fillPath = el.getAttribute('data-application-fill');
     if (fillPath === 'applicant.full_name' || name === 'nama_terang') value = record.full_name || app.nama || value;
+    if (name === 'tanggal_persetujuan' && !value && approvalDateFallback) value = approvalDateFallback;
+    if (name === 'gender' && shortGender[value]) value = shortGender[value];
+    if (/_lp$/.test(name) && shortGender[value]) value = shortGender[value];
+    if (/^bahasa[1-4]$/.test(name) && value === 'Lainnya' && app[`${name}_lainnya`]) value = app[`${name}_lainnya`];
+    const workPeriodMatch = name.match(/^kerja([1-3])_periode$/);
+    if (workPeriodMatch && !value) value = deriveWorkPeriod(app, workPeriodMatch[1]);
+    const workDurMatch = name.match(/^kerja([1-3])_durasi$/);
+    if (workDurMatch && !value) value = deriveWorkDuration(app, workDurMatch[1]);
+
     if (el.type === 'radio') {
       const checked = String(value) === el.value;
       el.checked = checked;
@@ -53,10 +111,27 @@ function fillMaster(doc, data, record = {}) {
       el.setAttribute('value', String(value));
     }
   });
+
+  // Sync interactive attestation & electronic signature panel stripped of inline script
+  const fullName = String(doc.getElementById('nama_terang')?.value || record.full_name || app.nama || '').trim();
+  const nikVal = String(doc.getElementById('nik')?.value || record.nik || app.nik || '').trim();
+  const tglVal = String(doc.getElementById('tanggal_persetujuan')?.value || approvalDateFallback || '').trim();
+  const isApproved = Boolean(doc.getElementById('setuju')?.checked);
+  const sigPreview = doc.getElementById('sigPreviewText');
+  const esigInitials = doc.getElementById('esigInitials');
+  const esigCode = doc.getElementById('esigCode');
+  const statusEl = doc.getElementById('approvalStatus');
+  if (sigPreview) sigPreview.textContent = fullName || 'Nama Lengkap Pelamar';
+  if (esigInitials) esigInitials.textContent = signatureInitials(fullName);
+  if (esigCode) esigCode.textContent = signatureRefCode(fullName, nikVal, tglVal);
+  if (statusEl) {
+    statusEl.className = isApproved ? 'status-approved' : 'status-pending';
+    statusEl.textContent = isApproved ? 'Disetujui Pelamar' : 'Menunggu Persetujuan';
+  }
 }
 
 function sanitizePrintDocument(doc) {
-  doc.querySelectorAll('.toolbar,script,iframe,object,embed').forEach(el => el.remove());
+  doc.querySelectorAll('.toolbar,.toolbar-shell,script,iframe,object,embed').forEach(el => el.remove());
   doc.querySelectorAll('*').forEach(el => {
     [...el.attributes].forEach(attr => {
       if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
@@ -224,19 +299,23 @@ function fitMasterDocument(targetDoc) {
     if (!field.value) field.setAttribute('data-print-empty', 'true');
     else field.removeAttribute('data-print-empty');
   });
-  root.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), textarea').forEach(field => {
+  root.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field').forEach(field => {
+    field.style.height = 'auto';
+    field.style.height = `${field.scrollHeight}px`;
+  });
+  root.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), textarea:not(.cell-wrap):not(.inline-wrap-field)').forEach(field => {
     if (!field.value) return;
     field.style.fontSize = '';
     const computed = win.getComputedStyle(field);
     if (field.tagName === 'TEXTAREA') {
-      let size = parseFloat(computed.fontSize) || 7.9;
+      let size = parseFloat(computed.fontSize) || 8.7;
       while (field.scrollHeight > field.clientHeight + 1 && size > 6.2) {
         size = Math.max(6.2, size - 0.35);
         field.style.fontSize = `${size.toFixed(2)}px`;
       }
       return;
     }
-    const baseSize = parseFloat(computed.fontSize) || 8;
+    const baseSize = parseFloat(computed.fontSize) || 8.9;
     const available = Math.max(12, field.clientWidth - (parseFloat(computed.paddingLeft) || 0) - (parseFloat(computed.paddingRight) || 0) - 3);
     if (ctx) {
       ctx.font = `${computed.fontWeight} ${baseSize}px ${computed.fontFamily}`;
@@ -280,19 +359,20 @@ export async function printApplication(record) {
     }
     const extras = document.createElement('div');
     extras.innerHTML = cvSection + discSection;
-    doc.body.append(...extras.children);
+    (doc.querySelector('.sheets-canvas') || doc.body).append(...extras.children);
 
     const style = doc.createElement('style');
     style.textContent = `
       @page{size:A4 portrait;margin:0}
       @media print{
         html,body{margin:0!important;padding:0!important;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-        .toolbar{display:none!important}
+        .toolbar,.toolbar-shell{display:none!important}
         .sheet{page-break-after:always;break-after:page;margin:0!important;box-shadow:none!important}
         .aux-sheet{page-break-before:always;break-before:page;page-break-after:auto;break-after:auto;margin:0!important;box-shadow:none!important}
         .aux-sheet:last-child{page-break-after:avoid;break-after:avoid}
       }
       .aux-sheet{width:210mm;height:297mm;min-height:297mm;max-height:297mm;margin:15px auto;box-sizing:border-box;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.10);overflow:hidden}
+      .sheets-canvas .aux-sheet{margin:0 auto;box-shadow:0 24px 60px -12px rgba(4,9,20,.55),0 0 0 1px rgba(255,255,255,.08);border-radius:2px}
       .cv-page-sheet{position:relative;display:flex;align-items:center;justify-content:center;padding:5mm;color:#111}
       .cv-page-sheet img{display:block;max-width:200mm;max-height:287mm;width:auto;height:auto;object-fit:contain}
       .cv-page-sheet>span{position:absolute;right:8mm;bottom:5mm;color:#9aa3af;font:7px Arial,sans-serif}

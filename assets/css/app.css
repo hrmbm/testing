@@ -806,24 +806,58 @@ textarea:focus-visible {
 
 .recruitment-wide-table th {
   white-space: nowrap;
+  line-height: 1.3;
+  vertical-align: middle;
+  padding: 11px 14px;
 }
 
 .recruitment-wide-table td {
-  min-width: 100px;
-  max-width: 300px;
+  min-width: 105px;
+  max-width: 210px;
+  padding: 10px 14px;
   white-space: normal;
-  overflow-wrap: anywhere;
-  vertical-align: top;
+  overflow-wrap: break-word;
+  vertical-align: middle;
+}
+
+.recruitment-wide-table td.col-compact-cell {
+  min-width: 72px;
+  max-width: 150px;
+  white-space: nowrap;
+}
+
+.recruitment-wide-table td.col-contact-cell {
+  min-width: 148px;
+  max-width: 225px;
+}
+
+.recruitment-wide-table td.col-contact-cell .cell-clamp-2 {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.recruitment-wide-table td.col-wide-cell {
+  min-width: 230px;
+  max-width: 280px;
+}
+
+.cell-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  line-height: 1.4;
 }
 
 .recruitment-wide-table td:first-child {
-  min-width: 185px;
+  min-width: 176px;
 }
 
 .recruitment-wide-table th:last-child,
 .recruitment-wide-table td:last-child {
-  min-width: 260px;
-  padding-right: 22px;
+  min-width: 250px;
+  padding-right: 18px;
 }
 
 .stage2-candidate-panel {
@@ -839,8 +873,9 @@ textarea:focus-visible {
 .stage2-candidate-panel .data-table td:nth-child(1) {
   position: sticky;
   left: 0;
-  min-width: 190px;
-  max-width: 190px;
+  width: 176px;
+  min-width: 176px;
+  max-width: 176px;
   background: #ffffff;
   z-index: 10;
   box-shadow: 1px 0 0 var(--line);
@@ -849,9 +884,10 @@ textarea:focus-visible {
 .stage2-candidate-panel .data-table th:nth-child(2),
 .stage2-candidate-panel .data-table td:nth-child(2) {
   position: sticky;
-  left: 190px;
-  min-width: 136px;
-  max-width: 136px;
+  left: 176px;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
   background: #ffffff;
   z-index: 10;
   box-shadow: 1px 0 0 var(--line);
@@ -866,6 +902,59 @@ textarea:focus-visible {
 .stage2-candidate-panel .data-table tbody tr:hover td:nth-child(1),
 .stage2-candidate-panel .data-table tbody tr:hover td:nth-child(2) {
   background: #faf8f4;
+}
+
+.disc-assessment-table th,
+.disc-assessment-table td {
+  min-width: 0;
+  max-width: none;
+  padding: 11px 12px;
+}
+
+.disc-assessment-table th:nth-child(1),
+.disc-assessment-table td:nth-child(1) {
+  min-width: 165px;
+  max-width: 195px;
+}
+
+.disc-assessment-table th:nth-child(2),
+.disc-assessment-table td:nth-child(2) {
+  min-width: 155px;
+  max-width: 210px;
+}
+
+.disc-assessment-table th:nth-child(3),
+.disc-assessment-table td:nth-child(3) {
+  width: 68px;
+  min-width: 68px;
+  white-space: nowrap;
+}
+
+.disc-assessment-table th:nth-child(5),
+.disc-assessment-table td:nth-child(5) {
+  width: 180px;
+}
+
+.disc-assessment-table .disc-mini-graph {
+  width: 164px;
+  padding: 6px;
+}
+
+.disc-assessment-table th:nth-child(6) {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.disc-assessment-table th:nth-child(6),
+.disc-assessment-table td:nth-child(6) {
+  min-width: 145px;
+  max-width: 185px;
+}
+
+.disc-assessment-table th:last-child,
+.disc-assessment-table td:last-child {
+  min-width: 168px;
+  padding-right: 12px;
 }
 
 /* Position Manager, Print Templates, Settings */
@@ -2247,8 +2336,8 @@ body.candidate-page {
   .wizard-actions .btn, .candidate-actions .btn { min-height: 46px; }
   .disc-option { grid-template-columns: minmax(0, 1fr) 48px 48px; gap: 6px; }
   .disc-column-head { gap: 8px; }
-  .stage2-candidate-panel .data-table th:nth-child(1), .stage2-candidate-panel .data-table td:nth-child(1) { min-width: 180px; max-width: 180px; }
-  .stage2-candidate-panel .data-table th:nth-child(2), .stage2-candidate-panel .data-table td:nth-child(2) { left: 180px; min-width: 130px; max-width: 130px; }
+  .stage2-candidate-panel .data-table th:nth-child(1), .stage2-candidate-panel .data-table td:nth-child(1) { min-width: 168px; max-width: 168px; }
+  .stage2-candidate-panel .data-table th:nth-child(2), .stage2-candidate-panel .data-table td:nth-child(2) { left: 168px; min-width: 150px; max-width: 150px; }
 }
 
 @media print {
