@@ -1,8 +1,8 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-07';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261120-hrga-workspace-07';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-07';
-import { extractKtpText, formatKtpAddress } from './ktp-ocr.js?v=20261120-hrga-workspace-07';
-import { recognizeWithPaddle } from './ocr-engine.js?v=20261120-hrga-workspace-07';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-08';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261120-hrga-workspace-08';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-08';
+import { extractKtpText, formatKtpAddress } from './ktp-ocr.js?v=20261120-hrga-workspace-08';
+import { recognizeWithPaddle } from './ocr-engine.js?v=20261120-hrga-workspace-08';
 
 const root = $('#candidate-app');
 const queryAll = (selector, scope=document) => [...scope.querySelectorAll(selector)];

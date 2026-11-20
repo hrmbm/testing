@@ -1,9 +1,9 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-07';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-07';
-import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-07';
-import { printApplication } from './print.js?v=20261120-hrga-workspace-07';
-import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-07';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-07';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-08';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-08';
+import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-08';
+import { printApplication } from './print.js?v=20261120-hrga-workspace-08';
+import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-08';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-08';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');

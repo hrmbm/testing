@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="form-template" content="FORM RECRUITMENT" />
   <meta name="form-schema-version" content="1.2" />
-  <meta name="form-master-revision" content="20261120-mbm-exec-v3" />
+  <meta name="form-master-revision" content="20261120-mbm-exec-v4" />
   <meta name="form-code" content="FRM-HRD-REC-001 Rev.02" />
   <title>Formulir Lamaran Kerja | PT. Mitra Binamandiri Makmur</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -775,7 +775,7 @@
       color: #e2c68d;
     }
 
-    @media (max-width: 760px) {
+    @media screen and (max-width: 760px) {
       .toolbar-meta { display: none; }
       .sheets-canvas { padding: 14px 10px 32px; gap: 18px; }
       .sheet { padding: 18px 16px 28px; }
@@ -794,113 +794,205 @@
       .approval-panel { grid-template-columns: 1fr; }
     }
 
+    /* Hidden synchronous measurement state matching exact print geometry */
+    body.print-measuring .sheets-canvas { display: block !important; padding: 0 !important; margin: 0 !important; }
+    body.print-measuring #applicationForm { display: block !important; width: 210mm !important; }
+    body.print-measuring .sheet {
+      display: flex !important; flex-direction: column !important;
+      width: 210mm !important; max-width: 210mm !important; height: auto !important;
+      padding: 5.5mm 8mm 5mm !important; font-size: 9px !important; line-height: 1.2 !important;
+      border-radius: 0 !important;
+    }
+    body.print-measuring .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 4px !important; }
+    body.print-measuring .doc-brand-row { flex-direction: row !important; align-items: center !important; gap: 10px !important; }
+    body.print-measuring .doc-brand-divider { display: block !important; height: 26px !important; }
+    body.print-measuring .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 4px !important; }
+    body.print-measuring .header-badges { align-items: flex-end !important; }
+    body.print-measuring .roleline { grid-template-columns: 38mm 1fr !important; padding: 3px 8px !important; margin-bottom: 4px !important; gap: 8px !important; }
+    body.print-measuring .roleline strong, body.print-measuring .roleline input { font-size: 9.2px !important; }
+    body.print-measuring .fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 1.5px !important; margin-top: 2.5px !important; }
+    body.print-measuring .expectation-fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 2px !important; margin-top: 2.5px !important; }
+    body.print-measuring .expectation-fields .wide { grid-column: 1 / -1 !important; grid-template-columns: 18.5% minmax(0, 1fr) !important; }
+    body.print-measuring .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 1px !important; column-gap: 8px !important; }
+    body.print-measuring .work-span-2 { grid-column: span 2 !important; }
+    body.print-measuring .work-span-3 { grid-column: span 3 !important; }
+    body.print-measuring .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 17px !important; padding: 1px 6px !important; }
+    body.print-measuring .table-scroll-wrap { overflow: visible !important; }
+    body.print-measuring .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 2px !important; }
+    body.print-measuring .field { min-height: 14.5px !important; }
+    body.print-measuring .field label { font-size: 8.6px !important; padding-bottom: 1px !important; }
+    body.print-measuring .sheet input:not([type]),
+    body.print-measuring .sheet input[type="text"],
+    body.print-measuring .sheet input[type="email"],
+    body.print-measuring .sheet input[type="tel"],
+    body.print-measuring .sheet input[type="date"],
+    body.print-measuring .sheet select { font-size: 8.7px !important; padding: 1px 2px !important; }
+    body.print-measuring table.aligned-grid th,
+    body.print-measuring table.aligned-grid td { height: 15px !important; padding: 1px 4px !important; }
+    body.print-measuring table.aligned-grid td textarea.cell-wrap,
+    body.print-measuring .sheet textarea.inline-wrap-field {
+      min-height: 12px !important; height: auto !important; font-size: 8.4px !important; line-height: 1.18 !important; padding: 1px 2px !important;
+    }
+    body.print-measuring .hobby-box { min-height: 8mm !important; height: auto !important; margin-top: 2px !important; padding: 2.5px 6px !important; font-size: 8.5px !important; line-height: 1.24 !important; }
+    body.print-measuring .answer { min-height: 8.5mm !important; height: auto !important; padding: 2.5px 6px !important; font-size: 8.5px !important; line-height: 1.24 !important; }
+    body.print-measuring .work-field-row { min-height: 18px !important; }
+    body.print-measuring .work-field-row label { font-size: 7.6px !important; margin-bottom: 0.5px !important; }
+    body.print-measuring .work-field-row input { font-size: 8.6px !important; padding: 1px 0 !important; }
+    body.print-measuring .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; padding: 5px 8px !important; }
+    body.print-measuring .approval-name-input { font-size: 9.8px !important; }
+    body.print-measuring .approval-date-input { font-size: 7.8px !important; }
+
     @page { size: A4 portrait; margin: 0; }
     @media print {
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
       html, body {
-        width: 210mm;
+        width: 100% !important;
+        height: auto !important;
         margin: 0 !important;
         padding: 0 !important;
         background: #ffffff !important;
       }
       .no-print, .toolbar, .toolbar-shell { display: none !important; }
       .sheets-canvas {
-        display: block;
-        padding: 0;
-        margin: 0;
+        display: block !important;
+        width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
         background: #ffffff !important;
-        min-height: auto;
+        min-height: 0 !important;
+      }
+      #applicationForm {
+        display: block !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       .sheet {
-        width: 210mm;
-        max-width: 210mm;
-        height: 297mm;
-        margin: 0;
-        padding: 6.5mm 8.5mm 9mm;
-        box-shadow: none;
-        border-radius: 0;
-        overflow: hidden;
-        font-size: 9.2px;
-        line-height: 1.22;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        max-width: 210mm !important;
+        height: 99.6vh !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        margin: 0 auto !important;
+        padding: 5.5mm 8mm 5mm !important;
+        box-shadow: none !important;
+        border: none !important;
+        border-radius: 0 !important;
+        overflow: hidden !important;
+        font-size: 9px !important;
+        line-height: 1.2 !important;
         page-break-after: always;
         break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
-      .sheet:last-child { page-break-after: auto; break-after: auto; }
-      .doc-header { padding-bottom: 5px; }
-      .doc-logo-mitra { height: 17px; }
-      .doc-brand-divider { height: 28px; }
-      .continuation-logo { height: 11px; }
-      .company-title { font-size: 13px; }
-      .company-detail { font-size: 8px; line-height: 1.35; }
-      .doc-type { font-size: 8.6px; padding: 3px 8px; }
-      .doc-code { font-size: 7.8px; }
-      .doc-main-title { margin: 5px 0 5px; font-size: 16px; }
-      .roleline { grid-template-columns: 38mm 1fr; padding: 3.5px 8px; margin-bottom: 5px; }
-      .roleline strong, .roleline input { font-size: 9.5px; }
-      .section { margin-top: 4px; }
-      .section-title { min-height: 18px; padding: 2px 7px; font-size: 9.2px; }
-      .section-title .letter { width: 14px; height: 14px; font-size: 8.6px; }
-      .fields { column-gap: 14px; row-gap: 2px; margin-top: 3px; }
-      .field { min-height: 15.5px; }
-      .field label { font-size: 8.8px; padding-bottom: 1px; }
+      .sheet:last-of-type { page-break-after: auto; break-after: auto; }
+      body.combined-print .sheet {
+        page-break-after: always !important;
+        break-after: page !important;
+      }
+      .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 4px !important; }
+      .doc-brand-row { flex-direction: row !important; align-items: center !important; gap: 10px !important; }
+      .doc-brand-divider { display: block !important; height: 26px !important; }
+      .doc-logo-mitra { height: 16px !important; }
+      .continuation-logo { height: 11px !important; }
+      .company-title { font-size: 12.5px !important; }
+      .company-detail { font-size: 7.8px !important; line-height: 1.3 !important; }
+      .header-badges { align-items: flex-end !important; }
+      .doc-type { font-size: 8.4px !important; padding: 2.5px 7px !important; }
+      .doc-code { font-size: 7.6px !important; }
+      .doc-main-title { margin: 4px 0 4px !important; font-size: 15.2px !important; }
+      .roleline { grid-template-columns: 38mm 1fr !important; padding: 3px 8px !important; margin-bottom: 4px !important; gap: 8px !important; }
+      .roleline strong { font-size: 9.2px !important; }
+      .roleline input { font-size: var(--print-fs, 9.2px) !important; }
+      .section { margin-top: 3.5px !important; }
+      .section-title { min-height: 17px !important; padding: 2px 7px !important; font-size: 9px !important; }
+      .section-title .letter { width: 13px !important; height: 13px !important; font-size: 8.2px !important; }
+      .fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 1.5px !important; margin-top: 2.5px !important; }
+      .field { min-height: 14.5px !important; }
+      .field label { font-size: 8.6px !important; padding-bottom: 1px !important; }
       .sheet input:not([type]),
       .sheet input[type="text"],
       .sheet input[type="email"],
       .sheet input[type="tel"],
       .sheet input[type="date"],
-      .sheet textarea,
-      .sheet select { font-size: 8.9px; padding: 1px 2px; }
-      table.aligned-grid { margin-top: 2.5px; }
-      table.aligned-grid th, table.aligned-grid td { height: 16px; padding: 1px 4px; }
-      table.aligned-grid th { font-size: 8.2px; }
-      table.aligned-grid td, table.aligned-grid td textarea.cell-wrap { font-size: 8.6px; border-bottom: 0; }
+      .sheet select { font-size: var(--print-fs, 8.7px) !important; padding: 1px 2px !important; }
+      .table-scroll-wrap { overflow: visible !important; }
+      .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 2px !important; }
+      table.aligned-grid th, table.aligned-grid td { height: 15px !important; padding: 1px 4px !important; }
+      table.aligned-grid th { font-size: 8px !important; }
+      table.aligned-grid td { font-size: 8.4px !important; border-bottom: 0; }
       table.aligned-grid td textarea.cell-wrap,
       .sheet textarea.inline-wrap-field {
-        min-height: 13px;
-        font-size: 8.6px;
-        line-height: 1.2;
-        padding: 1px 2px;
+        min-height: 12px !important;
+        height: var(--print-h, auto) !important;
+        font-size: var(--print-fs, 8.4px) !important;
+        line-height: 1.18 !important;
+        padding: 1px 2px !important;
+        border-bottom: 0;
       }
-      .subhead { margin: 3.5px 0 1px; font-size: 8.6px; }
-      .marital-status-box { min-height: 18px; padding: 1px 6px; }
-      .marital-label, .inline-options { font-size: 8.6px; }
-      .hobby-box { min-height: 9.5mm; height: 9.5mm; margin-top: 2.5px; padding: 3px 6px; font-size: 8.8px; }
-      .continuation-header { margin-bottom: 6px; padding-bottom: 5px; }
-      .continuation-title { font-size: 11px; }
-      .continuation-sub { font-size: 8.5px; }
-      .work-grid { gap: 4px; margin-top: 3px; }
-      .work-card { padding: 3.5px 6px; }
-      .work-head { margin: -3.5px -6px 3.5px; padding: 2px 6px; font-size: 8.4px; }
-      .work-fields { row-gap: 1.5px; column-gap: 8px; }
-      .work-field-row { min-height: 20px; }
-      .work-field-row label { font-size: 7.8px; margin-bottom: 1px; }
-      .work-field-row input { font-size: 8.8px; padding: 1px 0; }
-      .expectation-fields { row-gap: 2.5px; margin-top: 3px; }
-      .answer-block { margin-top: 3.5px; }
-      .answer-block .subhead { font-size: 8.7px; margin-bottom: 1.5px; }
-      .answer { min-height: 9.5mm; height: 9.5mm; padding: 3.5px 6px; font-size: 8.7px; line-height: 1.28; }
-      .declaration { margin-top: 3.5px; padding: 4.5px 8px; font-size: 8.3px; line-height: 1.38; }
-      .consent-row { margin-top: 4px; font-size: 8.8px; }
-      .approval-panel { margin-top: 4.5px; padding: 6px 9px; gap: 10px; }
-      .approval-label { font-size: 8px; margin-bottom: 2px; }
-      .sig-preview-wrap { padding: 3px 2px; }
-      .sig-preview-text { font-size: 15px; }
-      .sig-underline { width: 136px; height: 5px; }
-      .approval-name-input { font-size: 10px !important; }
-      .approval-meta-row, .approval-date-input { font-size: 8px !important; }
-      .esig-badge { padding: 7px 11px; gap: 9px; }
-      .esig-icon-box { width: 30px; height: 30px; }
-      .esig-title { font-size: 9px; }
-      .esig-sub { font-size: 7.8px; }
+      .sheet textarea.inline-wrap-field { border-bottom: 1px solid var(--line-hairline) !important; }
+      .subhead { margin: 3px 0 1px !important; font-size: 8.4px !important; }
+      .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 17px !important; padding: 1px 6px !important; }
+      .marital-label, .inline-options { font-size: 8.4px !important; }
+      .hobby-box {
+        min-height: 8mm !important;
+        height: var(--print-h, 8.5mm) !important;
+        margin-top: 2px !important;
+        padding: 2.5px 6px !important;
+        font-size: var(--print-fs, 8.5px) !important;
+        line-height: 1.24 !important;
+      }
+      .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 4px !important; }
+      .continuation-title { font-size: 10.6px !important; }
+      .continuation-sub { font-size: 8.2px !important; }
+      .work-grid { gap: 3px !important; margin-top: 2.5px !important; }
+      .work-card { padding: 3px 6px !important; }
+      .work-head { margin: -3px -6px 2.5px !important; padding: 1.5px 6px !important; font-size: 8.1px !important; }
+      .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 1px !important; column-gap: 8px !important; }
+      .work-span-2 { grid-column: span 2 !important; }
+      .work-span-3 { grid-column: span 3 !important; }
+      .work-field-row { min-height: 18px !important; }
+      .work-field-row label { font-size: 7.6px !important; margin-bottom: 0.5px !important; }
+      .work-field-row input { font-size: var(--print-fs, 8.6px) !important; padding: 1px 0 !important; }
+      .expectation-fields { grid-template-columns: 1fr 1fr !important; row-gap: 2px !important; column-gap: 14px !important; margin-top: 2.5px !important; }
+      .expectation-fields .wide { grid-column: 1 / -1 !important; grid-template-columns: 18.5% minmax(0, 1fr) !important; }
+      .answer-block { margin-top: 2.5px !important; }
+      .answer-block .subhead { font-size: 8.4px !important; margin-bottom: 1px !important; }
+      .answer {
+        min-height: 8.5mm !important;
+        height: var(--print-h, 9mm) !important;
+        padding: 2.5px 6px !important;
+        font-size: var(--print-fs, 8.5px) !important;
+        line-height: 1.24 !important;
+      }
+      .declaration { margin-top: 3px !important; padding: 4px 8px !important; font-size: 8px !important; line-height: 1.32 !important; }
+      .consent-row { margin-top: 3px !important; font-size: 8.5px !important; }
+      .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; margin-top: 3.5px !important; padding: 5px 8px !important; gap: 10px !important; }
+      .approval-label { font-size: 7.8px !important; margin-bottom: 1px !important; }
+      .sig-preview-wrap { padding: 2px 2px !important; }
+      .sig-preview-text { font-size: 14px !important; }
+      .sig-underline { width: 128px !important; height: 5px !important; }
+      .approval-name-input { font-size: var(--print-fs, 9.8px) !important; }
+      .approval-meta-row { font-size: 7.8px !important; padding-top: 2px !important; }
+      .approval-date-input { font-size: var(--print-fs, 7.8px) !important; }
+      .esig-badge { padding: 6px 10px !important; gap: 8px !important; }
+      .esig-icon-box { width: 28px !important; height: 28px !important; }
+      .esig-title { font-size: 8.8px !important; }
+      .esig-sub { font-size: 7.6px !important; }
       .page-footer {
-        position: absolute;
-        right: 8.5mm;
-        bottom: 4mm;
-        left: 8.5mm;
-        margin-top: 0;
-        padding-top: 4px;
-        font-size: 7.6px;
+        position: static !important;
+        margin-top: auto !important;
+        padding-top: 3.5px !important;
+        font-size: 7.4px !important;
+        flex-shrink: 0 !important;
       }
-      .sheet textarea { resize: none !important; }
+      .sheet textarea { resize: none !important; overflow: hidden !important; }
       input[type="date"][data-print-empty]::-webkit-datetime-edit { color: transparent !important; }
       input[type="date"]::-webkit-calendar-picker-indicator { display: none !important; }
       input::placeholder, textarea::placeholder { color: transparent !important; }
@@ -1591,6 +1683,72 @@
         }
       }
 
+      function computePrintMetrics() {
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        document.body.classList.add('print-measuring');
+        try {
+          var textareas = form.querySelectorAll('textarea');
+          for (var i = 0; i < textareas.length; i++) {
+            var ta = textareas[i];
+            ta.style.removeProperty('--print-h');
+            ta.style.removeProperty('--print-fs');
+            ta.style.height = 'auto';
+            ta.style.fontSize = '';
+          }
+          var inputs = form.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])');
+          for (var j = 0; j < inputs.length; j++) {
+            inputs[j].style.removeProperty('--print-fs');
+            inputs[j].style.fontSize = '';
+          }
+          void document.body.offsetHeight;
+
+          var wraps = form.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field');
+          for (var w = 0; w < wraps.length; w++) {
+            var wrapEl = wraps[w];
+            wrapEl.style.height = 'auto';
+            wrapEl.style.setProperty('--print-h', Math.max(12, wrapEl.scrollHeight) + 'px');
+          }
+
+          var boxes = form.querySelectorAll('textarea.hobby-box, textarea.answer');
+          for (var b = 0; b < boxes.length; b++) {
+            var box = boxes[b];
+            var cs = window.getComputedStyle(box);
+            var fs = parseFloat(cs.fontSize) || 8.5;
+            box.style.height = 'auto';
+            while (box.value && box.scrollHeight > 46 && fs > 6.6) {
+              fs = Math.max(6.6, fs - 0.35);
+              box.style.fontSize = fs.toFixed(2) + 'px';
+            }
+            box.style.setProperty('--print-fs', fs.toFixed(2) + 'px');
+            box.style.setProperty('--print-h', Math.max(30, box.scrollHeight) + 'px');
+          }
+
+          for (var k = 0; k < inputs.length; k++) {
+            var inp = inputs[k];
+            if (!inp.value) continue;
+            var ics = window.getComputedStyle(inp);
+            var baseFs = parseFloat(ics.fontSize) || 8.7;
+            var avail = Math.max(12, inp.clientWidth - (parseFloat(ics.paddingLeft) || 0) - (parseFloat(ics.paddingRight) || 0) - 3);
+            if (ctx) {
+              ctx.font = ics.fontWeight + ' ' + baseFs + 'px ' + ics.fontFamily;
+              var tw = ctx.measureText(inp.value).width;
+              if (tw > avail) {
+                inp.style.setProperty('--print-fs', Math.max(5.8, baseFs * avail / tw).toFixed(2) + 'px');
+              }
+            }
+          }
+        } finally {
+          var resetAreas = form.querySelectorAll('textarea');
+          for (var r = 0; r < resetAreas.length; r++) {
+            resetAreas[r].style.height = '';
+            resetAreas[r].style.fontSize = '';
+          }
+          document.body.classList.remove('print-measuring');
+        }
+        syncAllTextareas();
+      }
+
       function markEmptyDatesForPrint() {
         var dates = form.querySelectorAll('input[type="date"]');
         for (var i = 0; i < dates.length; i++) {
@@ -1682,7 +1840,7 @@
       }
 
       window.fitRecruitmentFormFields = function () {
-        syncAllTextareas();
+        computePrintMetrics();
         syncSignatureBadge();
         markEmptyDatesForPrint();
       };
@@ -1716,13 +1874,13 @@
 
       if (btnSample) btnSample.addEventListener('click', function () { applyDataObject(SAMPLE_DATA); });
       if (btnReset) btnReset.addEventListener('click', clearAllFields);
-      if (btnPrint) btnPrint.addEventListener('click', function () { window.print(); });
+      if (btnPrint) btnPrint.addEventListener('click', function () { window.fitRecruitmentFormFields(); window.print(); });
 
       window.addEventListener('resize', syncAllTextareas);
       window.addEventListener('beforeprint', window.fitRecruitmentFormFields);
       window.addEventListener('afterprint', syncAllTextareas);
       if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(syncAllTextareas);
+        document.fonts.ready.then(window.fitRecruitmentFormFields);
       }
 
       window.fitRecruitmentFormFields();

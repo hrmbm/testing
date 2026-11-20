@@ -62,3 +62,29 @@ test('ageFromDate handles valid and invalid dates safely', () => {
   const age = ageFromDate('1996-08-15');
   assert.ok(typeof age === 'number' && age >= 25 && age < 60);
 });
+
+test('Mitra and ReHolz masters isolate mobile query to screen and support robust print sizing', () => {
+  const mitraHtml = fs.readFileSync('templates/application-master.html', 'utf8');
+  const reholzHtml = fs.readFileSync('templates/application-master-reholz.html', 'utf8');
+  const printJs = fs.readFileSync('assets/js/print.js', 'utf8');
+
+  assert.match(mitraHtml, new RegExp(`name="form-master-revision"\\s+content="${DEFAULT_MASTER_REVISION}"`));
+  assert.match(reholzHtml, new RegExp(`name="form-master-revision"\\s+content="${REHOLZ_MASTER_REVISION}"`));
+
+  for (const [label, html] of [['Mitra', mitraHtml], ['ReHolz', reholzHtml]]) {
+    assert.ok(!/@media\s*\(max-width:\s*760px\)/.test(html), `${label} must scope 760px query to @media screen`);
+    assert.ok(/@media\s+screen\s+and\s+\(max-width:\s*760px\)/.test(html), `${label} must have @media screen and (max-width: 760px)`);
+    assert.ok(html.includes('body.print-measuring'), `${label} must define body.print-measuring`);
+    assert.ok(html.includes('print-color-adjust: exact !important'), `${label} must enforce exact print colors`);
+    assert.ok(html.includes('var(--print-h'), `${label} must consume --print-h in print CSS`);
+    assert.ok(html.includes('99.6vh !important'), `${label} .sheet must use 99.6vh flex height in print`);
+    assert.ok(html.includes('computePrintMetrics'), `${label} must compute print metrics`);
+  }
+
+  assert.ok(printJs.includes('print-measuring'), 'print.js must use print-measuring');
+  assert.ok(printJs.includes('--print-h'), 'print.js must set --print-h');
+  assert.ok(printJs.includes('--print-fs'), 'print.js must set --print-fs');
+  assert.ok(printJs.includes('print-color-adjust:exact!important'), 'print.js DISC CSS must enforce exact print colors');
+  assert.ok(printJs.includes('99.6vh!important'), 'print.js .aux-sheet must use 99.6vh in print');
+});
+
