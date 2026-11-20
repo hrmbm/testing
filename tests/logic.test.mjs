@@ -77,13 +77,15 @@ test('Mitra and ReHolz masters isolate mobile query to screen and support robust
     assert.ok(html.includes('body.print-measuring'), `${label} must define body.print-measuring`);
     assert.ok(html.includes('print-color-adjust: exact !important'), `${label} must enforce exact print colors`);
     assert.ok(html.includes('var(--print-h'), `${label} must consume --print-h in print CSS`);
-    assert.ok(html.includes('99.6vh !important'), `${label} .sheet must use 99.6vh flex height in print`);
+    assert.ok(html.includes('min-height: 99.4vh !important'), `${label} .sheet must use 99.4vh min-height in print`);
+    assert.ok(html.includes('overflow: visible !important'), `${label} .sheet must allow overflow onto extra pages when essays expand`);
+    assert.ok(!html.includes('--print-fs'), `${label} must expand fields rather than shrinking font sizes`);
     assert.ok(html.includes('computePrintMetrics'), `${label} must compute print metrics`);
   }
 
   assert.ok(printJs.includes('print-measuring'), 'print.js must use print-measuring');
   assert.ok(printJs.includes('--print-h'), 'print.js must set --print-h');
-  assert.ok(printJs.includes('--print-fs'), 'print.js must set --print-fs');
+  assert.ok(!printJs.includes('--print-fs'), 'print.js must not shrink font sizes with --print-fs');
   assert.ok(printJs.includes('print-color-adjust:exact!important'), 'print.js DISC CSS must enforce exact print colors');
   assert.ok(printJs.includes('99.6vh!important'), 'print.js .aux-sheet must use 99.6vh in print');
 });

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="form-template" content="FORM RECRUITMENT" />
   <meta name="form-schema-version" content="1.2" />
-  <meta name="form-master-revision" content="20261120-reholz-exec-v2" />
+  <meta name="form-master-revision" content="20261120-reholz-exec-v3" />
   <meta name="form-brand" content="reholz" />
   <meta name="form-theme" content="reholz" />
   <meta name="form-code" content="FRM-HRD-REC-001 Rev.02" />
@@ -246,16 +246,17 @@
       font-weight: 700;
       color: var(--navy-exec);
     }
-    .roleline input {
+    .roleline input,
+    .roleline textarea.inline-wrap-field {
       font-size: 13px;
       font-weight: 700;
       color: var(--navy-exec);
+      border-bottom: 0;
     }
 
     /* Sections */
     .section {
       margin-top: 12px;
-      break-inside: avoid;
     }
     .section-title {
       display: flex;
@@ -295,7 +296,7 @@
     .field {
       display: grid;
       grid-template-columns: 38% minmax(0, 1fr);
-      align-items: end;
+      align-items: start;
       gap: 8px;
       min-width: 0;
       min-height: 26px;
@@ -305,7 +306,8 @@
       font-size: 11.5px;
       font-weight: 600;
       line-height: 1.25;
-      padding-bottom: 3px;
+      padding-top: 4px;
+      padding-bottom: 2px;
     }
 
     /* Inputs & Textareas */
@@ -358,13 +360,16 @@
       border: 0;
       border-bottom: 1px solid var(--line-hairline);
       border-radius: 0;
-      padding: 2px 4px;
+      padding: 3px 4px;
       background: transparent;
-      font-size: 11.5px;
+      font-size: 12px;
       font-weight: 500;
-      line-height: 1.3;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       overflow: hidden;
-      min-height: 22px;
+      min-height: 24px;
     }
     .sheet textarea.inline-wrap-field:focus {
       border-bottom-color: var(--gold-brass);
@@ -416,6 +421,9 @@
       padding: 2px 2px;
       display: block;
       line-height: 1.35;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     table.aligned-grid td textarea.cell-wrap:focus {
       background: var(--gold-wash);
@@ -568,11 +576,12 @@
       font-weight: 600;
       margin-bottom: 2px;
     }
-    .work-field-row input {
+    .work-field-row input,
+    .work-field-row textarea.inline-wrap-field {
       font-size: 11.5px;
       padding: 2px 0;
       border-bottom: 1px solid var(--line-hairline);
-      text-overflow: ellipsis;
+      min-height: 22px;
     }
     .expectation-fields {
       display: grid;
@@ -897,54 +906,61 @@
       .approval-panel { grid-template-columns: 1fr; }
     }
 
-    /* Hidden synchronous measurement state matching exact print geometry */
+    /* Hidden synchronous measurement state matching exact A4 print geometry */
     body.print-measuring .sheets-canvas { display: block !important; padding: 0 !important; margin: 0 !important; }
     body.print-measuring #applicationForm { display: block !important; width: 210mm !important; }
     body.print-measuring .sheet {
       display: flex !important; flex-direction: column !important;
       width: 210mm !important; max-width: 210mm !important; height: auto !important;
-      padding: 5.5mm 8mm 5mm !important; font-size: 9px !important; line-height: 1.2 !important;
+      padding: 6.5mm 9mm 5.5mm !important; font-size: 9.4px !important; line-height: 1.28 !important;
       border-radius: 0 !important;
     }
-    body.print-measuring .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 4px !important; }
+    body.print-measuring .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 5px !important; }
     body.print-measuring .doc-brand-row { flex-direction: row !important; align-items: center !important; gap: 10px !important; }
-    body.print-measuring .doc-logo-green { height: 22px !important; width: auto !important; }
-    body.print-measuring .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 4px !important; }
-    body.print-measuring .continuation-header img { height: 14px !important; width: auto !important; }
+    body.print-measuring .doc-logo-green { height: 26px !important; width: auto !important; }
+    body.print-measuring .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 5px !important; }
+    body.print-measuring .continuation-header img { height: 17px !important; width: auto !important; }
     body.print-measuring .header-badges { align-items: flex-end !important; }
-    body.print-measuring .roleline { grid-template-columns: 38mm 1fr !important; padding: 3px 8px !important; margin-bottom: 4px !important; gap: 8px !important; }
-    body.print-measuring .roleline strong, body.print-measuring .roleline input { font-size: 9.2px !important; }
-    body.print-measuring .fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 1.5px !important; margin-top: 2.5px !important; }
-    body.print-measuring .expectation-fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 2px !important; margin-top: 2.5px !important; }
+    body.print-measuring .roleline { grid-template-columns: 42mm 1fr !important; padding: 4px 9px !important; margin-bottom: 4px !important; gap: 8px !important; }
+    body.print-measuring .roleline strong { font-size: 9.8px !important; }
+    body.print-measuring .roleline input,
+    body.print-measuring .roleline textarea.inline-wrap-field {
+      font-size: 10.2px !important; font-weight: 700 !important; line-height: 1.24 !important; padding: 1px 2px !important; border-bottom: 0 !important;
+    }
+    body.print-measuring .fields { grid-template-columns: 1fr 1fr !important; column-gap: 16px !important; row-gap: 2px !important; margin-top: 3.5px !important; }
+    body.print-measuring .expectation-fields { grid-template-columns: 1fr 1fr !important; column-gap: 16px !important; row-gap: 2.5px !important; margin-top: 4px !important; }
     body.print-measuring .expectation-fields .wide { grid-column: 1 / -1 !important; grid-template-columns: 18.5% minmax(0, 1fr) !important; }
-    body.print-measuring .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 1px !important; column-gap: 8px !important; }
+    body.print-measuring .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 2.5px !important; column-gap: 10px !important; }
     body.print-measuring .work-span-2 { grid-column: span 2 !important; }
     body.print-measuring .work-span-3 { grid-column: span 3 !important; }
-    body.print-measuring .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 17px !important; padding: 1px 6px !important; }
+    body.print-measuring .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 19px !important; padding: 1.5px 7px !important; }
     body.print-measuring .table-scroll-wrap { overflow: visible !important; }
-    body.print-measuring .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 2px !important; }
-    body.print-measuring .field { min-height: 14.5px !important; }
-    body.print-measuring .field label { font-size: 8.6px !important; padding-bottom: 1px !important; }
+    body.print-measuring .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 3px !important; }
+    body.print-measuring .field { min-height: 17px !important; align-items: start !important; }
+    body.print-measuring .field label { font-size: 9px !important; padding: 2px 0 1px !important; }
     body.print-measuring .sheet input:not([type]),
     body.print-measuring .sheet input[type="text"],
     body.print-measuring .sheet input[type="email"],
     body.print-measuring .sheet input[type="tel"],
     body.print-measuring .sheet input[type="date"],
-    body.print-measuring .sheet select { font-size: 8.7px !important; padding: 1px 2px !important; }
+    body.print-measuring .sheet select { font-size: 9.2px !important; padding: 1.5px 2px !important; }
     body.print-measuring table.aligned-grid th,
-    body.print-measuring table.aligned-grid td { height: 15px !important; padding: 1px 4px !important; }
-    body.print-measuring table.aligned-grid td textarea.cell-wrap,
-    body.print-measuring .sheet textarea.inline-wrap-field {
-      min-height: 12px !important; height: auto !important; font-size: 8.4px !important; line-height: 1.18 !important; padding: 1px 2px !important;
+    body.print-measuring table.aligned-grid td { height: 18px !important; padding: 1.5px 4px !important; }
+    body.print-measuring table.aligned-grid td textarea.cell-wrap {
+      min-height: 13px !important; height: auto !important; font-size: 8.9px !important; line-height: 1.22 !important; padding: 1px 2px !important;
     }
-    body.print-measuring .hobby-box { min-height: 8mm !important; height: auto !important; margin-top: 2px !important; padding: 2.5px 6px !important; font-size: 8.5px !important; line-height: 1.24 !important; }
-    body.print-measuring .answer { min-height: 8.5mm !important; height: auto !important; padding: 2.5px 6px !important; font-size: 8.5px !important; line-height: 1.24 !important; }
-    body.print-measuring .work-field-row { min-height: 18px !important; }
-    body.print-measuring .work-field-row label { font-size: 7.6px !important; margin-bottom: 0.5px !important; }
-    body.print-measuring .work-field-row input { font-size: 8.6px !important; padding: 1px 0 !important; }
-    body.print-measuring .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; padding: 5px 8px !important; }
-    body.print-measuring .approval-name-input { font-size: 9.8px !important; }
-    body.print-measuring .approval-date-input { font-size: 7.8px !important; }
+    body.print-measuring .sheet textarea.inline-wrap-field {
+      min-height: 14px !important; height: auto !important; font-size: 9.2px !important; line-height: 1.24 !important; padding: 1.5px 2px !important;
+    }
+    body.print-measuring .hobby-box { min-height: 11mm !important; height: auto !important; margin-top: 3px !important; padding: 3px 7px !important; font-size: 9.1px !important; line-height: 1.28 !important; }
+    body.print-measuring .answer { min-height: 14mm !important; height: auto !important; padding: 3.5px 7px !important; font-size: 9.1px !important; line-height: 1.28 !important; }
+    body.print-measuring .work-field-row { min-height: 22px !important; }
+    body.print-measuring .work-field-row label { font-size: 8px !important; margin-bottom: 1px !important; }
+    body.print-measuring .work-field-row input,
+    body.print-measuring .work-field-row textarea.inline-wrap-field { font-size: 9px !important; line-height: 1.22 !important; padding: 1px 0 !important; min-height: 14px !important; }
+    body.print-measuring .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; padding: 7px 11px !important; }
+    body.print-measuring .sheet textarea.inline-wrap-field.approval-name-input { font-size: 10.5px !important; font-weight: 700 !important; }
+    body.print-measuring .approval-date-input { font-size: 8.3px !important; }
 
     @page { size: A4 portrait; margin: 0; }
     @media print {
@@ -979,120 +995,151 @@
         flex-direction: column !important;
         width: 100% !important;
         max-width: 210mm !important;
-        height: 99.6vh !important;
-        min-height: 0 !important;
+        min-height: 99.4vh !important;
+        height: auto !important;
         max-height: none !important;
         margin: 0 auto !important;
-        padding: 5.5mm 8mm 5mm !important;
+        padding: 6.5mm 9mm 5.5mm !important;
         box-shadow: none !important;
         border: none !important;
         border-radius: 0 !important;
-        overflow: hidden !important;
-        font-size: 9px !important;
-        line-height: 1.2 !important;
+        overflow: visible !important;
+        font-size: 9.4px !important;
+        line-height: 1.28 !important;
         page-break-after: always;
         break-after: page;
-        page-break-inside: avoid;
-        break-inside: avoid;
+        page-break-inside: auto;
+        break-inside: auto;
       }
       .sheet:last-of-type { page-break-after: auto; break-after: auto; }
       body.combined-print .sheet {
         page-break-after: always !important;
         break-after: page !important;
       }
-      .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 4px !important; }
+      .doc-header, .continuation-header, .roleline, .field,
+      table.aligned-grid tr, .marital-status-box, .work-card,
+      .answer-block, .declaration, .approval-panel, .page-footer {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .section-title {
+        break-inside: avoid;
+        break-after: avoid;
+        page-break-after: avoid;
+      }
+      .doc-header { flex-direction: row !important; align-items: flex-start !important; padding-bottom: 5px !important; }
       .doc-brand-row { flex-direction: row !important; align-items: center !important; gap: 10px !important; }
-      .doc-logo-green { height: 22px !important; width: auto !important; }
-      .continuation-header img { height: 14px !important; width: auto !important; }
-      .company-title { font-size: 12.5px !important; }
-      .company-detail { font-size: 7.8px !important; line-height: 1.3 !important; }
+      .doc-logo-green { height: 26px !important; width: auto !important; }
+      .continuation-header img { height: 17px !important; width: auto !important; }
+      .company-title { font-size: 13.5px !important; }
+      .company-detail { font-size: 8.3px !important; line-height: 1.35 !important; }
       .header-badges { align-items: flex-end !important; }
-      .doc-type { font-size: 8.4px !important; padding: 2.5px 7px !important; }
-      .doc-code { font-size: 7.6px !important; }
-      .doc-main-title { margin: 4px 0 4px !important; font-size: 15.2px !important; }
-      .roleline { grid-template-columns: 38mm 1fr !important; padding: 3px 8px !important; margin-bottom: 4px !important; gap: 8px !important; }
-      .roleline strong { font-size: 9.2px !important; }
-      .roleline input { font-size: var(--print-fs, 9.2px) !important; }
-      .section { margin-top: 3.5px !important; }
-      .section-title { min-height: 17px !important; padding: 2px 7px !important; font-size: 9px !important; }
-      .section-title .letter { width: 13px !important; height: 13px !important; font-size: 8.2px !important; }
-      .fields { grid-template-columns: 1fr 1fr !important; column-gap: 14px !important; row-gap: 1.5px !important; margin-top: 2.5px !important; }
-      .field { min-height: 14.5px !important; }
-      .field label { font-size: 8.6px !important; padding-bottom: 1px !important; }
+      .doc-type { font-size: 9px !important; padding: 3px 8px !important; }
+      .doc-code { font-size: 8px !important; }
+      .doc-main-title { margin: 5px 0 4px !important; font-size: 16px !important; }
+      .roleline { grid-template-columns: 42mm 1fr !important; padding: 4px 9px !important; margin-bottom: 4px !important; gap: 8px !important; }
+      .roleline strong { font-size: 9.8px !important; }
+      .roleline input,
+      .roleline textarea.inline-wrap-field {
+        font-size: 10.2px !important; font-weight: 700 !important; line-height: 1.24 !important; padding: 1px 2px !important; border-bottom: 0 !important;
+      }
+      .section { margin-top: 5.5px !important; }
+      .section.page2-section { margin-top: 7px !important; }
+      .section-title { min-height: 19px !important; padding: 2.5px 8px !important; font-size: 9.4px !important; }
+      .section-title .letter { width: 14px !important; height: 14px !important; font-size: 8.6px !important; }
+      .fields { grid-template-columns: 1fr 1fr !important; column-gap: 16px !important; row-gap: 2px !important; margin-top: 3.5px !important; }
+      .field { min-height: 17px !important; align-items: start !important; }
+      .field label { font-size: 9px !important; padding: 2px 0 1px !important; }
       .sheet input:not([type]),
       .sheet input[type="text"],
       .sheet input[type="email"],
       .sheet input[type="tel"],
       .sheet input[type="date"],
-      .sheet select { font-size: var(--print-fs, 8.7px) !important; padding: 1px 2px !important; }
+      .sheet select { font-size: 9.2px !important; padding: 1.5px 2px !important; }
       .table-scroll-wrap { overflow: visible !important; }
-      .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 2px !important; }
-      table.aligned-grid th, table.aligned-grid td { height: 15px !important; padding: 1px 4px !important; }
-      table.aligned-grid th { font-size: 8px !important; }
-      table.aligned-grid td { font-size: 8.4px !important; border-bottom: 0; }
-      table.aligned-grid td textarea.cell-wrap,
-      .sheet textarea.inline-wrap-field {
-        min-height: 12px !important;
+      .table-scroll-wrap table.aligned-grid { min-width: 0 !important; width: 100% !important; margin-top: 3px !important; }
+      table.aligned-grid th, table.aligned-grid td { height: 18px !important; padding: 1.5px 4px !important; }
+      table.aligned-grid th { font-size: 8.4px !important; }
+      table.aligned-grid td { font-size: 9px !important; border-bottom: 0; }
+      table.aligned-grid td textarea.cell-wrap {
+        min-height: 13px !important;
         height: var(--print-h, auto) !important;
-        font-size: var(--print-fs, 8.4px) !important;
-        line-height: 1.18 !important;
+        font-size: 8.9px !important;
+        line-height: 1.22 !important;
         padding: 1px 2px !important;
         border-bottom: 0;
       }
-      .sheet textarea.inline-wrap-field { border-bottom: 1px solid var(--line-hairline) !important; }
-      .subhead { margin: 3px 0 1px !important; font-size: 8.4px !important; }
-      .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 17px !important; padding: 1px 6px !important; }
-      .marital-label, .inline-options { font-size: 8.4px !important; }
-      .hobby-box {
-        min-height: 8mm !important;
-        height: var(--print-h, 8.5mm) !important;
-        margin-top: 2px !important;
-        padding: 2.5px 6px !important;
-        font-size: var(--print-fs, 8.5px) !important;
+      .sheet textarea.inline-wrap-field {
+        min-height: 14px !important;
+        height: var(--print-h, auto) !important;
+        font-size: 9.2px !important;
         line-height: 1.24 !important;
+        padding: 1.5px 2px !important;
+        border-bottom: 1px solid var(--line-hairline) !important;
       }
-      .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 4px !important; }
-      .continuation-title { font-size: 10.6px !important; }
-      .continuation-sub { font-size: 8.2px !important; }
-      .work-grid { gap: 3px !important; margin-top: 2.5px !important; }
-      .work-card { padding: 3px 6px !important; }
-      .work-head { margin: -3px -6px 2.5px !important; padding: 1.5px 6px !important; font-size: 8.1px !important; }
-      .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 1px !important; column-gap: 8px !important; }
+      .subhead { margin: 4px 0 1.5px !important; font-size: 8.9px !important; }
+      .marital-status-box { grid-template-columns: 41% 59% !important; min-height: 19px !important; padding: 1.5px 7px !important; }
+      .marital-label, .inline-options { font-size: 8.9px !important; }
+      .hobby-box {
+        min-height: 11mm !important;
+        height: var(--print-h, 11.5mm) !important;
+        margin-top: 3px !important;
+        padding: 3px 7px !important;
+        font-size: 9.1px !important;
+        line-height: 1.28 !important;
+      }
+      .continuation-header { flex-direction: row !important; align-items: center !important; margin-bottom: 5px !important; padding-bottom: 5px !important; }
+      .continuation-title { font-size: 11.2px !important; }
+      .continuation-sub { font-size: 8.6px !important; }
+      .work-grid { gap: 5px !important; margin-top: 4px !important; }
+      .work-card { padding: 4px 8px !important; }
+      .work-head { margin: -4px -8px 3.5px !important; padding: 2px 8px !important; font-size: 8.5px !important; }
+      .work-fields { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 2.5px !important; column-gap: 10px !important; }
       .work-span-2 { grid-column: span 2 !important; }
       .work-span-3 { grid-column: span 3 !important; }
-      .work-field-row { min-height: 18px !important; }
-      .work-field-row label { font-size: 7.6px !important; margin-bottom: 0.5px !important; }
-      .work-field-row input { font-size: var(--print-fs, 8.6px) !important; padding: 1px 0 !important; }
-      .expectation-fields { grid-template-columns: 1fr 1fr !important; row-gap: 2px !important; column-gap: 14px !important; margin-top: 2.5px !important; }
-      .expectation-fields .wide { grid-column: 1 / -1 !important; grid-template-columns: 18.5% minmax(0, 1fr) !important; }
-      .answer-block { margin-top: 2.5px !important; }
-      .answer-block .subhead { font-size: 8.4px !important; margin-bottom: 1px !important; }
-      .answer {
-        min-height: 8.5mm !important;
-        height: var(--print-h, 9mm) !important;
-        padding: 2.5px 6px !important;
-        font-size: var(--print-fs, 8.5px) !important;
-        line-height: 1.24 !important;
+      .work-field-row { min-height: 22px !important; }
+      .work-field-row label { font-size: 8px !important; margin-bottom: 1px !important; }
+      .work-field-row input,
+      .work-field-row textarea.inline-wrap-field {
+        font-size: 9px !important;
+        line-height: 1.22 !important;
+        padding: 1px 0 !important;
+        min-height: 14px !important;
       }
-      .declaration { margin-top: 3px !important; padding: 4px 8px !important; font-size: 8px !important; line-height: 1.32 !important; }
-      .consent-row { margin-top: 3px !important; font-size: 8.5px !important; }
-      .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; margin-top: 3.5px !important; padding: 5px 8px !important; gap: 10px !important; }
-      .approval-label { font-size: 7.8px !important; margin-bottom: 1px !important; }
+      .expectation-fields { grid-template-columns: 1fr 1fr !important; row-gap: 2.5px !important; column-gap: 16px !important; margin-top: 4px !important; }
+      .expectation-fields .wide { grid-column: 1 / -1 !important; grid-template-columns: 18.5% minmax(0, 1fr) !important; }
+      .answer-block { margin-top: 4.5px !important; }
+      .answer-block .subhead { font-size: 8.9px !important; margin-bottom: 2px !important; }
+      .answer {
+        min-height: 14mm !important;
+        height: var(--print-h, 14.5mm) !important;
+        padding: 3.5px 7px !important;
+        font-size: 9.1px !important;
+        line-height: 1.28 !important;
+      }
+      .declaration { margin-top: 4.5px !important; padding: 5.5px 9px !important; font-size: 8.6px !important; line-height: 1.36 !important; }
+      .consent-row { margin-top: 4.5px !important; font-size: 9.1px !important; }
+      .approval-panel { grid-template-columns: minmax(0, 1fr) auto !important; margin-top: 5px !important; padding: 7px 11px !important; gap: 12px !important; }
+      .approval-label { font-size: 8.3px !important; margin-bottom: 1.5px !important; }
       .sig-preview-wrap { padding: 2px 2px !important; }
-      .sig-preview-text { font-size: 14px !important; }
-      .sig-underline { width: 128px !important; height: 5px !important; }
-      .approval-name-input { font-size: var(--print-fs, 9.8px) !important; }
-      .approval-meta-row { font-size: 7.8px !important; padding-top: 2px !important; }
-      .approval-date-input { font-size: var(--print-fs, 7.8px) !important; }
-      .esig-badge { padding: 6px 10px !important; gap: 8px !important; }
-      .esig-icon-box { width: 28px !important; height: 28px !important; }
-      .esig-title { font-size: 8.8px !important; }
-      .esig-sub { font-size: 7.6px !important; }
+      .sig-preview-text { font-size: 16px !important; }
+      .sig-underline { width: 145px !important; height: 6px !important; }
+      .sheet textarea.inline-wrap-field.approval-name-input {
+        font-size: 10.5px !important;
+        font-weight: 700 !important;
+        border-bottom: 1.5px solid var(--line-strong) !important;
+      }
+      .approval-meta-row { font-size: 8.3px !important; padding-top: 2px !important; }
+      .approval-date-input { font-size: 8.3px !important; }
+      .esig-badge { padding: 7px 12px !important; gap: 9px !important; }
+      .esig-icon-box { width: 32px !important; height: 32px !important; }
+      .esig-title { font-size: 9.4px !important; }
+      .esig-sub { font-size: 8.2px !important; }
       .page-footer {
         position: static !important;
         margin-top: auto !important;
-        padding-top: 3.5px !important;
-        font-size: 7.4px !important;
+        padding-top: 4px !important;
+        font-size: 8px !important;
         flex-shrink: 0 !important;
       }
       .sheet textarea { resize: none !important; overflow: hidden !important; }
@@ -1148,7 +1195,7 @@
 
         <div class="roleline">
           <strong>Posisi yang dilamar</strong>
-          <input aria-label="Posisi yang dilamar" id="posisi" name="posisi" type="text" value="" />
+          <textarea aria-label="Posisi yang dilamar" id="posisi" name="posisi" rows="1" class="inline-wrap-field"></textarea>
         </div>
 
         <!-- A. DATA PRIBADI -->
@@ -1157,23 +1204,23 @@
           <div class="fields">
             <div class="field">
               <label for="nama">Nama lengkap</label>
-              <input id="nama" name="nama" type="text" value="" />
+              <textarea id="nama" name="nama" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="nik">No. KTP</label>
-              <input id="nik" name="nik" type="text" class="tabular-nums" value="" />
+              <textarea id="nik" name="nik" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
-            <div class="field" style="align-items: start;">
-              <label for="alamat_asal" style="padding-top: 4px;">Alamat asal</label>
+            <div class="field">
+              <label for="alamat_asal">Alamat asal</label>
               <textarea id="alamat_asal" name="alamat_asal" rows="1" class="inline-wrap-field"></textarea>
             </div>
-            <div class="field" style="align-items: start;">
-              <label for="domisili" style="padding-top: 4px;">Domisili sekarang</label>
+            <div class="field">
+              <label for="domisili">Domisili sekarang</label>
               <textarea id="domisili" name="domisili" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="tempat_lahir">Tempat lahir</label>
-              <input id="tempat_lahir" name="tempat_lahir" type="text" value="" />
+              <textarea id="tempat_lahir" name="tempat_lahir" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="tanggal_lahir">Tanggal lahir</label>
@@ -1181,7 +1228,7 @@
             </div>
             <div class="field">
               <label for="umur">Umur (tahun)</label>
-              <input id="umur" inputmode="numeric" name="umur" type="text" class="tabular-nums" value="" />
+              <textarea id="umur" inputmode="numeric" name="umur" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
             <div class="field">
               <label>Jenis kelamin</label>
@@ -1192,31 +1239,31 @@
             </div>
             <div class="field">
               <label for="tinggi">Tinggi badan (cm)</label>
-              <input id="tinggi" inputmode="decimal" name="tinggi" type="text" class="tabular-nums" value="" />
+              <textarea id="tinggi" inputmode="decimal" name="tinggi" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
             <div class="field">
               <label for="berat">Berat badan (kg)</label>
-              <input id="berat" inputmode="decimal" name="berat" type="text" class="tabular-nums" value="" />
+              <textarea id="berat" inputmode="decimal" name="berat" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
             <div class="field">
               <label for="gol_darah">Golongan darah</label>
-              <input id="gol_darah" name="gol_darah" type="text" value="" />
+              <textarea id="gol_darah" name="gol_darah" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="agama">Agama</label>
-              <input id="agama" name="agama" type="text" value="" />
+              <textarea id="agama" name="agama" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="warga_negara">Warga negara</label>
-              <input id="warga_negara" name="warga_negara" type="text" value="" />
+              <textarea id="warga_negara" name="warga_negara" rows="1" class="inline-wrap-field"></textarea>
             </div>
             <div class="field">
               <label for="telepon">No. telepon / HP</label>
-              <input id="telepon" name="telepon" type="tel" class="tabular-nums" value="" />
+              <textarea id="telepon" name="telepon" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
             <div class="field">
               <label for="email">Email</label>
-              <input id="email" name="email" type="email" value="" />
+              <textarea id="email" name="email" rows="1" class="inline-wrap-field"></textarea>
             </div>
           </div>
         </section>
@@ -1493,7 +1540,7 @@
         </header>
 
         <!-- F. PENGALAMAN KERJA -->
-        <section aria-labelledby="heading-f" class="section">
+        <section aria-labelledby="heading-f" class="section page2-section">
           <div class="section-title" id="heading-f"><span class="letter">F</span> RIWAYAT PENGALAMAN KERJA</div>
           <div class="work-grid">
             <div class="work-card">
@@ -1504,127 +1551,125 @@
               <div class="work-fields">
                 <div class="work-field-row work-span-2" style="grid-column: span 2;">
                   <label for="kerja1_perusahaan">Nama Perusahaan</label>
-                  <input id="kerja1_perusahaan" name="kerja1_perusahaan" value="" />
+                  <textarea id="kerja1_perusahaan" name="kerja1_perusahaan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_periode">Periode</label>
-                  <input id="kerja1_periode" name="kerja1_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                  <textarea id="kerja1_periode" name="kerja1_periode" rows="1" class="inline-wrap-field tabular-nums" placeholder="2021 - 2024"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_durasi">Durasi</label>
-                  <input id="kerja1_durasi" name="kerja1_durasi" placeholder="3 Tahun" value="" />
+                  <textarea id="kerja1_durasi" name="kerja1_durasi" rows="1" class="inline-wrap-field" placeholder="3 Tahun"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_jabatan">Jabatan</label>
-                  <input id="kerja1_jabatan" name="kerja1_jabatan" value="" />
+                  <textarea id="kerja1_jabatan" name="kerja1_jabatan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_usaha">Jenis Usaha</label>
-                  <input id="kerja1_usaha" name="kerja1_usaha" value="" />
+                  <textarea id="kerja1_usaha" name="kerja1_usaha" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_jumlah">Jumlah Karyawan</label>
-                  <input id="kerja1_jumlah" name="kerja1_jumlah" class="tabular-nums" value="" />
+                  <textarea id="kerja1_jumlah" name="kerja1_jumlah" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_atasan">Nama Atasan Langsung</label>
-                  <input id="kerja1_atasan" name="kerja1_atasan" value="" />
+                  <textarea id="kerja1_atasan" name="kerja1_atasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja1_gaji">Gaji Terakhir (Rp)</label>
-                  <input id="kerja1_gaji" name="kerja1_gaji" class="tabular-nums" value="" />
+                  <textarea id="kerja1_gaji" name="kerja1_gaji" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row work-span-3" style="grid-column: span 3;">
                   <label for="kerja1_alasan">Alasan Berhenti</label>
-                  <input id="kerja1_alasan" name="kerja1_alasan" value="" />
+                  <textarea id="kerja1_alasan" name="kerja1_alasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
               </div>
             </div>
             <div class="work-card">
               <div class="work-head">
                 <span>PENGALAMAN KERJA 2</span>
-                
               </div>
               <div class="work-fields">
                 <div class="work-field-row work-span-2" style="grid-column: span 2;">
                   <label for="kerja2_perusahaan">Nama Perusahaan</label>
-                  <input id="kerja2_perusahaan" name="kerja2_perusahaan" value="" />
+                  <textarea id="kerja2_perusahaan" name="kerja2_perusahaan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_periode">Periode</label>
-                  <input id="kerja2_periode" name="kerja2_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                  <textarea id="kerja2_periode" name="kerja2_periode" rows="1" class="inline-wrap-field tabular-nums" placeholder="2021 - 2024"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_durasi">Durasi</label>
-                  <input id="kerja2_durasi" name="kerja2_durasi" placeholder="3 Tahun" value="" />
+                  <textarea id="kerja2_durasi" name="kerja2_durasi" rows="1" class="inline-wrap-field" placeholder="3 Tahun"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_jabatan">Jabatan</label>
-                  <input id="kerja2_jabatan" name="kerja2_jabatan" value="" />
+                  <textarea id="kerja2_jabatan" name="kerja2_jabatan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_usaha">Jenis Usaha</label>
-                  <input id="kerja2_usaha" name="kerja2_usaha" value="" />
+                  <textarea id="kerja2_usaha" name="kerja2_usaha" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_jumlah">Jumlah Karyawan</label>
-                  <input id="kerja2_jumlah" name="kerja2_jumlah" class="tabular-nums" value="" />
+                  <textarea id="kerja2_jumlah" name="kerja2_jumlah" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_atasan">Nama Atasan Langsung</label>
-                  <input id="kerja2_atasan" name="kerja2_atasan" value="" />
+                  <textarea id="kerja2_atasan" name="kerja2_atasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja2_gaji">Gaji Terakhir (Rp)</label>
-                  <input id="kerja2_gaji" name="kerja2_gaji" class="tabular-nums" value="" />
+                  <textarea id="kerja2_gaji" name="kerja2_gaji" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row work-span-3" style="grid-column: span 3;">
                   <label for="kerja2_alasan">Alasan Berhenti</label>
-                  <input id="kerja2_alasan" name="kerja2_alasan" value="" />
+                  <textarea id="kerja2_alasan" name="kerja2_alasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
               </div>
             </div>
             <div class="work-card">
               <div class="work-head">
                 <span>PENGALAMAN KERJA 3</span>
-                
               </div>
               <div class="work-fields">
                 <div class="work-field-row work-span-2" style="grid-column: span 2;">
                   <label for="kerja3_perusahaan">Nama Perusahaan</label>
-                  <input id="kerja3_perusahaan" name="kerja3_perusahaan" value="" />
+                  <textarea id="kerja3_perusahaan" name="kerja3_perusahaan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_periode">Periode</label>
-                  <input id="kerja3_periode" name="kerja3_periode" class="tabular-nums" placeholder="2021 - 2024" value="" />
+                  <textarea id="kerja3_periode" name="kerja3_periode" rows="1" class="inline-wrap-field tabular-nums" placeholder="2021 - 2024"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_durasi">Durasi</label>
-                  <input id="kerja3_durasi" name="kerja3_durasi" placeholder="3 Tahun" value="" />
+                  <textarea id="kerja3_durasi" name="kerja3_durasi" rows="1" class="inline-wrap-field" placeholder="3 Tahun"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_jabatan">Jabatan</label>
-                  <input id="kerja3_jabatan" name="kerja3_jabatan" value="" />
+                  <textarea id="kerja3_jabatan" name="kerja3_jabatan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_usaha">Jenis Usaha</label>
-                  <input id="kerja3_usaha" name="kerja3_usaha" value="" />
+                  <textarea id="kerja3_usaha" name="kerja3_usaha" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_jumlah">Jumlah Karyawan</label>
-                  <input id="kerja3_jumlah" name="kerja3_jumlah" class="tabular-nums" value="" />
+                  <textarea id="kerja3_jumlah" name="kerja3_jumlah" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_atasan">Nama Atasan Langsung</label>
-                  <input id="kerja3_atasan" name="kerja3_atasan" value="" />
+                  <textarea id="kerja3_atasan" name="kerja3_atasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
                 <div class="work-field-row">
                   <label for="kerja3_gaji">Gaji Terakhir (Rp)</label>
-                  <input id="kerja3_gaji" name="kerja3_gaji" class="tabular-nums" value="" />
+                  <textarea id="kerja3_gaji" name="kerja3_gaji" rows="1" class="inline-wrap-field tabular-nums"></textarea>
                 </div>
                 <div class="work-field-row work-span-3" style="grid-column: span 3;">
                   <label for="kerja3_alasan">Alasan Berhenti</label>
-                  <input id="kerja3_alasan" name="kerja3_alasan" value="" />
+                  <textarea id="kerja3_alasan" name="kerja3_alasan" rows="1" class="inline-wrap-field"></textarea>
                 </div>
               </div>
             </div>
@@ -1632,7 +1677,7 @@
         </section>
 
         <!-- G. EKSPEKTASI -->
-        <section aria-labelledby="heading-g" class="section">
+        <section aria-labelledby="heading-g" class="section page2-section">
           <div class="section-title" id="heading-g"><span class="letter">G</span> EKSPEKTASI</div>
           <div class="expectation-fields">
             <div class="field">
@@ -1641,17 +1686,17 @@
             </div>
             <div class="field">
               <label for="gaji_harapan">Gaji yang diharapkan (Rp)</label>
-              <input id="gaji_harapan" name="gaji_harapan" type="text" class="tabular-nums" value="" />
+              <textarea id="gaji_harapan" name="gaji_harapan" rows="1" class="inline-wrap-field tabular-nums"></textarea>
             </div>
             <div class="field wide">
               <label for="fasilitas_harapan">Fasilitas lain yang diharapkan</label>
-              <input id="fasilitas_harapan" name="fasilitas_harapan" type="text" value="" />
+              <textarea id="fasilitas_harapan" name="fasilitas_harapan" rows="1" class="inline-wrap-field"></textarea>
             </div>
           </div>
         </section>
 
         <!-- H. REFERENSI -->
-        <section aria-labelledby="heading-h" class="section">
+        <section aria-labelledby="heading-h" class="section page2-section">
           <div class="section-title" id="heading-h"><span class="letter">H</span> REFERENSI (Hubungan profesional atau akademis)</div>
           <div class="table-scroll-wrap">
             <table class="aligned-grid">
@@ -1689,7 +1734,7 @@
         </section>
 
         <!-- I. PERTANYAAN TERBUKA -->
-        <section aria-labelledby="heading-i" class="section">
+        <section aria-labelledby="heading-i" class="section page2-section">
           <div class="section-title" id="heading-i"><span class="letter">I</span> PERTANYAAN TERBUKA</div>
           <div class="answer-block">
             <div class="subhead">1. Apa yang Anda ketahui tentang perusahaan kami?</div>
@@ -1706,7 +1751,7 @@
         </section>
 
         <!-- J. PERNYATAAN & PERSETUJUAN -->
-        <section aria-labelledby="heading-j" class="section">
+        <section aria-labelledby="heading-j" class="section page2-section">
           <div class="section-title" id="heading-j"><span class="letter">J</span> PERNYATAAN &amp; PERSETUJUAN</div>
           <div class="declaration">
             Dengan ini saya menyatakan semua pernyataan di atas adalah benar adanya. Jika di kemudian hari ternyata terbukti saya membuat pernyataan palsu, maka saya bersedia dikenakan sanksi baik berupa Pemutusan Hubungan Kerja (PHK) maupun tuntutan hukum yang berlaku.
@@ -1726,7 +1771,7 @@
                     <path d="M2 7C65 2.5 148 2.5 238 5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
                   </svg>
                 </div>
-                <input id="nama_terang" name="nama_terang" data-application-fill="applicant.full_name" type="text" class="approval-name-input" placeholder="Ketik nama terang pelamar" value="" />
+                <textarea id="nama_terang" name="nama_terang" data-application-fill="applicant.full_name" rows="1" class="inline-wrap-field approval-name-input" placeholder="Ketik nama terang pelamar"></textarea>
               </div>
 
               <div class="approval-meta-row">
@@ -1781,72 +1826,46 @@
       }
 
       function syncAllTextareas() {
-        var nodes = document.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field');
+        var nodes = document.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field, textarea.hobby-box, textarea.answer');
         for (var i = 0; i < nodes.length; i++) {
           syncTextareaHeight(nodes[i]);
         }
       }
 
       function computePrintMetrics() {
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
         document.body.classList.add('print-measuring');
         try {
           var textareas = form.querySelectorAll('textarea');
           for (var i = 0; i < textareas.length; i++) {
             var ta = textareas[i];
             ta.style.removeProperty('--print-h');
-            ta.style.removeProperty('--print-fs');
-            ta.style.height = 'auto';
-            ta.style.fontSize = '';
-          }
-          var inputs = form.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])');
-          for (var j = 0; j < inputs.length; j++) {
-            inputs[j].style.removeProperty('--print-fs');
-            inputs[j].style.fontSize = '';
+            ta.style.minHeight = '0px';
+            ta.style.height = '1px';
           }
           void document.body.offsetHeight;
 
           var wraps = form.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field');
           for (var w = 0; w < wraps.length; w++) {
             var wrapEl = wraps[w];
-            wrapEl.style.height = 'auto';
-            wrapEl.style.setProperty('--print-h', Math.max(12, wrapEl.scrollHeight) + 'px');
+            wrapEl.style.setProperty('--print-h', Math.max(14, wrapEl.scrollHeight + 2) + 'px');
           }
 
-          var boxes = form.querySelectorAll('textarea.hobby-box, textarea.answer');
-          for (var b = 0; b < boxes.length; b++) {
-            var box = boxes[b];
-            var cs = window.getComputedStyle(box);
-            var fs = parseFloat(cs.fontSize) || 8.5;
-            box.style.height = 'auto';
-            while (box.value && box.scrollHeight > 46 && fs > 6.6) {
-              fs = Math.max(6.6, fs - 0.35);
-              box.style.fontSize = fs.toFixed(2) + 'px';
-            }
-            box.style.setProperty('--print-fs', fs.toFixed(2) + 'px');
-            box.style.setProperty('--print-h', Math.max(30, box.scrollHeight) + 'px');
+          var hobbies = form.querySelectorAll('textarea.hobby-box');
+          for (var h = 0; h < hobbies.length; h++) {
+            var hb = hobbies[h];
+            hb.style.setProperty('--print-h', Math.max(42, hb.scrollHeight + 3) + 'px');
           }
 
-          for (var k = 0; k < inputs.length; k++) {
-            var inp = inputs[k];
-            if (!inp.value) continue;
-            var ics = window.getComputedStyle(inp);
-            var baseFs = parseFloat(ics.fontSize) || 8.7;
-            var avail = Math.max(12, inp.clientWidth - (parseFloat(ics.paddingLeft) || 0) - (parseFloat(ics.paddingRight) || 0) - 3);
-            if (ctx) {
-              ctx.font = ics.fontWeight + ' ' + baseFs + 'px ' + ics.fontFamily;
-              var tw = ctx.measureText(inp.value).width;
-              if (tw > avail) {
-                inp.style.setProperty('--print-fs', Math.max(5.8, baseFs * avail / tw).toFixed(2) + 'px');
-              }
-            }
+          var answers = form.querySelectorAll('textarea.answer');
+          for (var a = 0; a < answers.length; a++) {
+            var ans = answers[a];
+            ans.style.setProperty('--print-h', Math.max(53, ans.scrollHeight + 3) + 'px');
           }
         } finally {
           var resetAreas = form.querySelectorAll('textarea');
           for (var r = 0; r < resetAreas.length; r++) {
+            resetAreas[r].style.minHeight = '';
             resetAreas[r].style.height = '';
-            resetAreas[r].style.fontSize = '';
           }
           document.body.classList.remove('print-measuring');
         }
@@ -1951,7 +1970,7 @@
 
       form.addEventListener('input', function (e) {
         var target = e.target;
-        if (target && target.matches && target.matches('textarea.cell-wrap, textarea.inline-wrap-field')) {
+        if (target && target.matches && target.matches('textarea.cell-wrap, textarea.inline-wrap-field, textarea.hobby-box, textarea.answer')) {
           syncTextareaHeight(target);
         }
         if (target && target.id === 'nama') {
