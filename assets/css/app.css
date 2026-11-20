@@ -2280,6 +2280,155 @@ body.candidate-page {
   font-size: 13px;
 }
 
+/* Print Brand Picker Modal (Mitra vs ReHolz) */
+.print-brand-modal-card {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+}
+
+.print-brand-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+}
+
+.print-brand-candidate b {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.print-brand-candidate span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.print-brand-nik {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.print-brand-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.print-brand-option {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.print-brand-option:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px -10px rgba(15, 23, 42, 0.22);
+}
+
+.print-brand-option[data-print-brand="mitra"]:hover {
+  border-color: #0f1e36;
+}
+
+.print-brand-option[data-print-brand="reholz"]:hover {
+  border-color: #007850;
+}
+
+.print-brand-option-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 64px;
+  padding: 0 18px;
+}
+
+.print-brand-option[data-print-brand="mitra"] .print-brand-option-banner {
+  background: linear-gradient(118deg, #0b1526 0%, #0f1e36 58%, #1a3052 100%);
+  border-bottom: 2.5px solid #b08d57;
+}
+
+.print-brand-option[data-print-brand="reholz"] .print-brand-option-banner {
+  background: linear-gradient(118deg, #002E1E 0%, #004C33 54%, #007850 100%);
+  border-bottom: 2.5px solid #B77932;
+}
+
+.print-brand-option-banner img {
+  display: block;
+  width: auto;
+  height: 20px;
+  object-fit: contain;
+}
+
+.print-brand-option[data-print-brand="reholz"] .print-brand-option-banner img {
+  height: 26px;
+}
+
+.print-brand-option-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.78);
+  text-transform: uppercase;
+}
+
+.print-brand-option-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  padding: 16px 18px 18px;
+}
+
+.print-brand-option-body b {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.print-brand-option-body small {
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.48;
+  color: var(--muted);
+}
+
+.print-brand-cta {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f1e36;
+}
+
+.print-brand-option[data-print-brand="reholz"] .print-brand-cta {
+  color: #007850;
+}
+
 /* Desktop guard below 1024px on index.html */
 @media (max-width: 1023px) {
   #desktop-guard {
@@ -2330,7 +2479,7 @@ body.candidate-page {
 @media (max-width: 720px) {
   .candidate-wrap { padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); }
   .candidate-card, .form-wizard-card, .ktp-card, .disc-card { padding: 18px 16px; }
-  .form-grid, .employee-form-grid, .admin-attachment-grid, .template-upload { grid-template-columns: 1fr; }
+  .form-grid, .employee-form-grid, .admin-attachment-grid, .template-upload, .print-brand-grid { grid-template-columns: 1fr; }
   .form-field.wide, .employee-notes, .template-upload-copy { grid-column: auto; }
   .form-field input, .form-field select, .form-field textarea { font-size: 16px; min-height: 44px; }
   .wizard-actions .btn, .candidate-actions .btn { min-height: 46px; }

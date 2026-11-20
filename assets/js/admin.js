@@ -1,9 +1,9 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-02';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL } from './config.js?v=20261120-hrga-workspace-02';
-import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-02';
-import { printApplication } from './print.js?v=20261120-hrga-workspace-05';
-import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-02';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-02';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-07';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-07';
+import { $, $$, esc, idDate, stageUrl } from './common.js?v=20261120-hrga-workspace-07';
+import { printApplication } from './print.js?v=20261120-hrga-workspace-07';
+import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-07';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-07';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -19,6 +19,9 @@ let hiringApplicantId = null;
 let editingApplicantId = null;
 let stage2PositionsCache = [];
 let adminEditorBinding = null;
+let defaultMasterSyncPromise = null;
+let pendingPrintRecord = null;
+let pendingPrintSourceButton = null;
 
 const TITLES = {
   dashboard: 'Dashboard', stage1: 'Lead Register', filterSettings: 'Filter Settings',
@@ -650,6 +653,9 @@ function renderPrintRows(rows) {
 }
 
 async function loadPrintTemplates() {
+  await syncDefaultPrintMaster().catch(error => {
+    console.warn('Sinkronisasi otomatis master bawaan dilewati:', error);
+  });
   const { data, error } = await supabase.from('print_templates')
     .select('id,source_filename,schema_version,is_active,created_at')
     .order('created_at', { ascending: false }).limit(30);
@@ -664,6 +670,10 @@ async function loadPrintTemplates() {
 function templateManagerHtml(migrationError = null) {
   const active = printTemplates.find(t => t.is_active);
   const currentName = active?.source_filename || 'Master bawaan repository';
+  const isRepoDefault = !active || active.source_filename === 'Master bawaan repository';
+  const currentMeta = isRepoDefault
+    ? 'Master bawaan Mitra (templates/application-master.html) & ReHolz (templates/application-master-reholz.html) siap dipilih saat mencetak'
+    : `Diperbarui ${idDate(active.created_at)} · Master ReHolz tetap tersedia sebagai pilihan cetak`;
   const history = printTemplates.length ? printTemplates.map(template => `<tr>
     <td><b>${esc(template.source_filename)}</b><small class="table-subline">${esc(template.schema_version || '—')}</small></td>
     <td data-sort-value="${esc(template.created_at||'')}">${idDate(template.created_at)}</td>
@@ -672,7 +682,7 @@ function templateManagerHtml(migrationError = null) {
   </tr>`).join('') : emptyRow(4, 'Belum ada versi master tambahan. Master bawaan tetap digunakan.');
   const controls = migrationError
     ? `<div class="form-error template-error">Riwayat master belum tersedia. Jalankan <code>supabase/SETUP-ALL-IN-ONE.sql</code> di Supabase SQL Editor untuk mengaktifkan master versi.</div>`
-    : `<div class="template-current"><div><small>MASTER AKTIF</small><b>${esc(currentName)}</b><span>${active ? `Diperbarui ${idDate(active.created_at)}` : 'Menggunakan file templates/application-master.html'}</span></div>
+    : `<div class="template-current"><div><small>MASTER AKTIF</small><b>${esc(currentName)}</b><span>${esc(currentMeta)}</span></div>
         <button class="btn btn-secondary" id="restore-template">Pulihkan master bawaan</button></div>
       <form id="template-upload-form" class="template-upload">
         <div class="template-upload-copy"><b>Ganti desain master</b><span>Unggah HTML baru. Field <code>name</code> yang lama wajib dipertahankan.</span></div>
@@ -681,7 +691,7 @@ function templateManagerHtml(migrationError = null) {
       </form>
       <div class="template-history"><div class="template-history-title">Riwayat versi tersimpan</div><div class="table-wrap"><table class="data-table"><thead><tr><th>MASTER FILE</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${history}</tbody></table></div></div>`;
   return `<section class="panel template-manager">
-    <div class="panel-head"><div><h3>Master HTML lamaran</h3><p>Desain dapat diganti tanpa mengubah struktur data formulir</p></div><span class="status-pill ${active ? 'green' : 'blue'}">${active ? 'Versi tersimpan' : 'Master bawaan'}</span></div>
+    <div class="panel-head"><div><h3>Master HTML lamaran</h3><p>Desain dapat diganti tanpa mengubah struktur data formulir</p></div><span class="status-pill ${active ? 'green' : 'blue'}">${isRepoDefault ? 'Master bawaan · Aktif' : 'Versi tersimpan'}</span></div>
     <div class="template-manager-body">${controls}</div>
   </section>`;
 }
@@ -757,17 +767,110 @@ function renderPlaceholder(title) {
   content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div><h2>${esc(title || 'Modul Dalam Pengembangan')}</h2><p>Modul ini disiapkan untuk pengelolaan operasional terintegrasi.</p></div></section>`;
 }
 
+function printBrandModal() {
+  let modal = $('#print-brand-modal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'print-brand-modal';
+  modal.className = 'modal-backdrop hidden';
+  modal.innerHTML = `<section class="print-brand-modal-card" role="dialog" aria-modal="true" aria-labelledby="print-brand-modal-title">
+    <div class="employee-modal-head">
+      <div>
+        <small>FORMAT CETAK DOKUMEN</small>
+        <h2 id="print-brand-modal-title">Pilih versi perusahaan untuk cetak</h2>
+      </div>
+      <button type="button" class="modal-close" id="print-brand-close" aria-label="Tutup">×</button>
+    </div>
+    <div class="print-brand-candidate" id="print-brand-candidate"></div>
+    <div class="print-brand-grid">
+      <button type="button" class="print-brand-option" data-print-brand="mitra">
+        <div class="print-brand-option-banner">
+          <img src="./assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+          <span class="print-brand-option-tag">Executive Navy</span>
+        </div>
+        <div class="print-brand-option-body">
+          <b>PT. Mitra Binamandiri Makmur</b>
+          <small>Formulir lamaran kerja resmi Mitra, lampiran CV, dan Laporan Hasil Tes D.I.S.C. edisi Mitra.</small>
+          <span class="print-brand-cta">Cetak versi Mitra ↗</span>
+        </div>
+      </button>
+      <button type="button" class="print-brand-option" data-print-brand="reholz">
+        <div class="print-brand-option-banner">
+          <img src="./assets/img/logo-reholz-light.png" alt="ReHolz · PT Radin Mitra Lestari">
+          <span class="print-brand-option-tag">Forest &amp; Amber</span>
+        </div>
+        <div class="print-brand-option-body">
+          <b>PT Radin Mitra Lestari (ReHolz)</b>
+          <small>Formulir lamaran kerja ReHolz, lampiran CV, dan Laporan Hasil Tes D.I.S.C. edisi ReHolz.</small>
+          <span class="print-brand-cta">Cetak versi ReHolz ↗</span>
+        </div>
+      </button>
+    </div>
+  </section>`;
+  document.body.append(modal);
+  const close = () => {
+    modal.classList.add('hidden');
+    pendingPrintRecord = null;
+    pendingPrintSourceButton = null;
+  };
+  $('#print-brand-close', modal).addEventListener('click', close);
+  modal.addEventListener('click', event => { if (event.target === modal) close(); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) close();
+  });
+  $$('[data-print-brand]', modal).forEach(optionBtn => {
+    optionBtn.addEventListener('click', () => {
+      const record = pendingPrintRecord;
+      const sourceBtn = pendingPrintSourceButton;
+      const brand = optionBtn.dataset.printBrand === 'reholz' ? 'reholz' : 'mitra';
+      if (!record) return;
+      modal.classList.add('hidden');
+      pendingPrintRecord = null;
+      pendingPrintSourceButton = null;
+      const originalText = sourceBtn?.textContent || '';
+      if (sourceBtn) {
+        sourceBtn.disabled = true;
+        sourceBtn.textContent = 'Menyiapkan…';
+      }
+      let printTask;
+      try {
+        printTask = printApplication(record, { brand });
+      } catch (syncError) {
+        say(syncError.message || 'Dokumen tidak dapat disiapkan.');
+        if (sourceBtn) { sourceBtn.disabled = false; sourceBtn.textContent = originalText; }
+        return;
+      }
+      Promise.resolve(printTask)
+        .catch(error => { say(error.message || 'Dokumen tidak dapat disiapkan.'); })
+        .finally(() => {
+          if (sourceBtn) {
+            sourceBtn.disabled = false;
+            sourceBtn.textContent = originalText;
+          }
+        });
+    });
+  });
+  return modal;
+}
+
+function openPrintBrandModal(record, sourceButton = null) {
+  const modal = printBrandModal();
+  pendingPrintRecord = record;
+  pendingPrintSourceButton = sourceButton;
+  const candidateEl = $('#print-brand-candidate', modal);
+  if (candidateEl) {
+    candidateEl.innerHTML = `<div><b>${esc(record.full_name || '—')}</b><span>${esc(record.position || 'Posisi belum diisi')}</span></div><span class="print-brand-nik">${esc(record.nik || '—')}</span>`;
+  }
+  modal.classList.remove('hidden');
+  $('[data-print-brand="mitra"]', modal)?.focus();
+}
+
 function bindPrint() {
   $$('[data-print]').forEach(button => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       const record = applicants.find(a => a.id === button.dataset.print);
       if (!record) return;
-      const originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = 'Menyiapkan…';
-      try { await printApplication(record); }
-      catch (error) { say(error.message || 'Dokumen tidak dapat disiapkan.'); }
-      finally { button.disabled = false; button.textContent = originalText; }
+      openPrintBrandModal(record, button);
     });
   });
 }
@@ -966,8 +1069,48 @@ function sanitizeAndValidateTemplate(html, baselineHtml) {
   };
 }
 
+function versionedTemplateUrl() {
+  const sep = TEMPLATE_URL.includes('?') ? '&' : '?';
+  return `${TEMPLATE_URL}${sep}v=${encodeURIComponent(DEFAULT_MASTER_REVISION)}`;
+}
+
+async function markDefaultMasterSynced() {
+  if (!supabase || !currentUserId) return;
+  const { error } = await supabase.from('portal_settings').upsert({
+    key: 'default_master_revision',
+    value: DEFAULT_MASTER_REVISION,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'key' });
+  if (error && !['42P01', 'PGRST205', 'PGRST204'].includes(error.code)) {
+    console.warn('Gagal menyimpan penanda revisi master:', error);
+  }
+}
+
+async function syncDefaultPrintMaster() {
+  if (!supabase || !currentUserId) return;
+  if (defaultMasterSyncPromise) return defaultMasterSyncPromise;
+  defaultMasterSyncPromise = (async () => {
+    const { data: setting, error: settingError } = await supabase
+      .from('portal_settings')
+      .select('value')
+      .eq('key', 'default_master_revision')
+      .maybeSingle();
+    if (settingError) return;
+    if (setting?.value === DEFAULT_MASTER_REVISION) return;
+    const response = await fetch(versionedTemplateUrl(), { cache: 'no-store' });
+    if (!response.ok) return;
+    const html = await response.text();
+    await storeAndActivateTemplate(html, 'Master bawaan repository');
+    await markDefaultMasterSynced();
+  })().catch(error => {
+    defaultMasterSyncPromise = null;
+    throw error;
+  });
+  return defaultMasterSyncPromise;
+}
+
 async function storeAndActivateTemplate(html, filename) {
-  const [baselineResponse] = await Promise.all([fetch(TEMPLATE_URL, { cache: 'no-store' })]);
+  const [baselineResponse] = await Promise.all([fetch(versionedTemplateUrl(), { cache: 'no-store' })]);
   if (!baselineResponse.ok) throw new Error('Master bawaan tidak dapat dimuat untuk validasi field.');
   const baselineHtml = await baselineResponse.text();
   const validated = sanitizeAndValidateTemplate(html, baselineHtml);
@@ -996,6 +1139,7 @@ function bindTemplateManager(migrationMissing) {
     button.disabled = true; button.textContent = 'Memvalidasi…';
     try {
       await storeAndActivateTemplate(await file.text(), file.name);
+      await markDefaultMasterSynced();
       say('Master HTML baru berhasil diaktifkan.');
       await loadView('print');
     } catch (error) { say(error.message || 'Master HTML gagal disimpan.'); }
@@ -1005,9 +1149,10 @@ function bindTemplateManager(migrationMissing) {
     const button = $('#restore-template');
     button.disabled = true; button.textContent = 'Memulihkan…';
     try {
-      const response = await fetch(TEMPLATE_URL, { cache: 'no-store' });
+      const response = await fetch(versionedTemplateUrl(), { cache: 'no-store' });
       if (!response.ok) throw new Error('Master bawaan tidak ditemukan.');
       await storeAndActivateTemplate(await response.text(), 'Master bawaan repository');
+      await markDefaultMasterSynced();
       say('Master bawaan berhasil diaktifkan.');
       await loadView('print');
     } catch (error) { say(error.message || 'Master bawaan gagal diaktifkan.'); }
@@ -1018,6 +1163,7 @@ function bindTemplateManager(migrationMissing) {
     try {
       const { error } = await supabase.rpc('activate_print_template', { p_template_id: button.dataset.templateActivate });
       if (error) throw error;
+      await markDefaultMasterSynced();
       say('Versi master berhasil diaktifkan.');
       await loadView('print');
     } catch (error) { say(error.message || 'Versi master gagal diaktifkan.'); button.disabled = false; }
@@ -1065,6 +1211,7 @@ async function openAdmin(session) {
   $('#admin-name').textContent = adminDisplayName;
   loginView.classList.add('hidden');
   shell.classList.remove('hidden');
+  syncDefaultPrintMaster().catch(() => {});
   await loadView('dashboard');
 }
 
