@@ -1,10 +1,10 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-12';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-12';
-import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-12';
-import { printApplication, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-12';
-import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-12';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-12';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-12';
+import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-13';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-13';
+import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-13';
+import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-13';
+import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-13';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-13';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-13';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -25,11 +25,12 @@ import {
   buildInvitedCandidatesViewRows,
   aggregateCvScreeningBySource,
   buildUnifiedTrackingRows,
+  buildRecruitmentConclusionSummary,
   formatEmployeeExportRow,
   formatDmyDash,
   isRootAdminAccount,
   maskPin
-} from './workspace-logic.js?v=20261121-hrga-workspace-12';
+} from './workspace-logic.js?v=20261121-hrga-workspace-13';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -40,7 +41,7 @@ import {
   openEmployeeUploadModal,
   openUserModal,
   openPinRevealPrompt
-} from './admin-modals.js?v=20261121-hrga-workspace-12';
+} from './admin-modals.js?v=20261121-hrga-workspace-13';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -59,7 +60,9 @@ let interviewsTableMissing = false;
 let invitedTableMissing = false;
 let cvScreeningsTableMissing = false;
 let interviewDateColMissing = false;
+let interviewContractNoColMissing = false;
 let stage1HasRecommendationCol = true;
+let stage1HasSourceCol = true;
 let employeesExtendedMissing = false;
 let lastDataFetchedAt = 0;
 let inflightRefreshPromise = null;
@@ -96,7 +99,7 @@ const TITLES = {
   stage2: 'Candidate List',
   stage3: 'DISC Assessment',
   interview: 'Interview Pipeline',
-  tracking: 'Recruitment Tracking',
+  tracking: 'Tracking & Report',
   employees: 'Employee Directory',
   print: 'Application Print',
   settings: 'Recruitment Settings',
@@ -283,20 +286,27 @@ async function fetchEmployeesSafe() {
 }
 
 async function fetchStage1Safe() {
+  stage1HasSourceCol = true;
+  stage1HasRecommendationCol = true;
   let res = await supabase.from('candidate_stage1_applications')
-    .select('id,full_name,position,whatsapp,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
+    .select('id,full_name,position,source,whatsapp,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
     .order('created_at', { ascending: false }).limit(500);
   if (res.error && isMissingSchemaError(res.error)) {
-    stage1HasRecommendationCol = false;
+    stage1HasSourceCol = false;
     res = await supabase.from('candidate_stage1_applications')
-      .select('id,full_name,position,whatsapp,cv_path,cv_filename,status,created_at')
+      .select('id,full_name,position,whatsapp,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
       .order('created_at', { ascending: false }).limit(500);
-  } else {
-    stage1HasRecommendationCol = true;
+    if (res.error && isMissingSchemaError(res.error)) {
+      stage1HasRecommendationCol = false;
+      res = await supabase.from('candidate_stage1_applications')
+        .select('id,full_name,position,whatsapp,cv_path,cv_filename,status,created_at')
+        .order('created_at', { ascending: false }).limit(500);
+    }
   }
   if (res.error) throw res.error;
   return (res.data || []).map(item => ({
     ...item,
+    source: item.source || '',
     recommendation: normalizeLeadRecommendation(
       item.recommendation || (
         item.status === 'invited' ? 'Recommended'
@@ -568,7 +578,7 @@ function renderDashboard() {
  * LEAD REGISTER (stage1) — Connected live status synced with Candidate List
  * ============================================================================ */
 function stage1RowsHtml(rows) {
-  if (!rows.length) return emptyRow(6, 'No lead records yet');
+  if (!rows.length) return emptyRow(7, 'No lead records yet');
   return rows.map(row => {
     const rec = normalizeLeadRecommendation(row.recommendation);
     const unified = resolveLeadUnifiedStatus(row, {
@@ -579,9 +589,10 @@ function stage1RowsHtml(rows) {
     });
     return `<tr>
       <td><b>${esc(row.full_name)}</b></td>
-      <td>${esc(row.position || '—')}</td>
-      <td>${esc(row.whatsapp || '—')}</td>
-      <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '—'}</td>
+      <td>${esc(row.position || '-')}</td>
+      <td>${esc(row.source || '-')}</td>
+      <td>${esc(row.whatsapp || '-')}</td>
+      <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '-'}</td>
       <td>
         <select class="select" style="min-width:170px" data-stage1-rec="${esc(row.id)}" aria-label="Recommendation remarks for ${esc(row.full_name)}">
           ${LEAD_RECOMMENDATION_OPTIONS.map(opt => `<option value="${esc(opt)}" ${rec === opt ? 'selected' : ''}>${esc(opt)}</option>`).join('')}
@@ -597,15 +608,15 @@ function renderStage1() {
   const paint = query => {
     const filtered = rows.filter(row => {
       const unified = resolveLeadUnifiedStatus(row, { applicants, interviews, employees, invitedCandidates });
-      return `${row.full_name} ${row.position} ${row.whatsapp} ${row.recommendation || ''} ${unified.label}`.toLowerCase().includes(query);
+      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${row.recommendation || ''} ${unified.label}`.toLowerCase().includes(query);
     });
     $('#stage1-rows').innerHTML = stage1RowsHtml(filtered);
     bindStage1Actions(rows);
   };
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
-    `<section class="panel table-panel">${tableToolbar('Search name / position / WhatsApp / status…', 'Lead Register')}
+    `<section class="panel table-panel">${tableToolbar('Search name / position / source / WhatsApp / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>WHATSAPP NO.</th><th>CV</th><th>REMARKS</th><th>STATUS</th></tr></thead>
+        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>CV</th><th>REMARKS</th><th>STATUS</th></tr></thead>
         <tbody id="stage1-rows">${stage1RowsHtml(rows)}</tbody>
       </table></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
@@ -1017,9 +1028,21 @@ function bindStage2CandidateActions() {
 
           const intPayloads = buildDuplicatedInterviewPayloads(getInterviewsForApplicant(applicant.id), inserted, currentUserId);
           if (intPayloads.length && !interviewsTableMissing) {
-            let { error: intErr } = await supabase.from('candidate_interviews').insert(intPayloads);
-            if (intErr && isMissingSchemaError(intErr) && String(intErr.message || '').toLowerCase().includes('interview_date')) {
-              const stripped = intPayloads.map(({ interview_date: _d, ...rest }) => rest);
+            const prepared = intPayloads.map(({ interview_date: d, contract_number: c, ...rest }) => ({
+              ...rest,
+              ...(interviewDateColMissing ? {} : { interview_date: d }),
+              ...(interviewContractNoColMissing ? {} : { contract_number: c })
+            }));
+            let { error: intErr } = await supabase.from('candidate_interviews').insert(prepared);
+            if (intErr && isMissingSchemaError(intErr)) {
+              const msg = String(intErr.message || '').toLowerCase();
+              if (msg.includes('interview_date')) interviewDateColMissing = true;
+              if (msg.includes('contract_number')) interviewContractNoColMissing = true;
+              const stripped = intPayloads.map(({ interview_date: _d, contract_number: _c, ...rest }) => ({
+                ...rest,
+                ...(interviewDateColMissing ? {} : { interview_date: _d }),
+                ...(interviewContractNoColMissing ? {} : { contract_number: _c })
+              }));
               ({ error: intErr } = await supabase.from('candidate_interviews').insert(stripped));
             }
             if (intErr) console.warn('Partial interview clone skipped:', intErr);
@@ -1125,14 +1148,18 @@ function invitedCandidateRowHtml(row) {
 }
 
 function renderInvitedView() {
-  const allRows = buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants });
+  const allRows = buildInvitedCandidatesViewRows({
+    manualInvites: invitedCandidates,
+    applicants,
+    stage1Leads
+  });
   const respondedCount = allRows.filter(r => r.status === 'Responded').length;
   const noResponseCount = allRows.filter(r => r.status === 'No Response').length;
   const screeningSummary = aggregateCvScreeningBySource(cvScreenings);
   const linkedApplicantIds = new Set(invitedCandidates.map(i => i.linked_applicant_id).filter(Boolean));
 
   const migrationBanner = (invitedTableMissing || cvScreeningsTableMissing)
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Supabase tables <code>invited_candidates</code> / <code>cv_screenings</code> are not created yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Supabase tables <code>invited_candidates</code> / <code>cv_screenings</code> are not created yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> and <code>v4</code> in Supabase SQL Editor.</div>`
     : '';
 
   const renderInviteRows = rows => rows.length
@@ -1141,14 +1168,15 @@ function renderInvitedView() {
 
   const renderScreeningRows = items => items.length
     ? items.map(item => `<tr>
+        <td><b>${esc(item.position || '-')}</b></td>
         <td><b>${esc(item.source)}</b>${item.notes ? `<small class="table-subline">${esc(item.notes)}</small>` : ''}</td>
         <td><span class="status-pill blue">${item.screeningCount}</span></td>
         <td><div class="row-actions">
-          <button type="button" class="icon-btn" data-scr-edit="${esc(item.source)}">Edit</button>
+          <button type="button" class="icon-btn" data-scr-edit="${esc(item.rowKey)}">Edit</button>
           ${item.id ? `<button type="button" class="icon-btn danger" data-scr-delete="${esc(item.id)}">Delete</button>` : ''}
         </div></td>
       </tr>`).join('')
-    : emptyRow(3, 'No CV screening counts added yet');
+    : emptyRow(4, 'No CV screening counts added yet');
 
   content.innerHTML = header('Invited', '',
     '<button type="button" class="btn btn-secondary" id="refresh-invited">Refresh ↻</button>' +
@@ -1173,12 +1201,12 @@ function renderInvitedView() {
 
       <section class="panel table-panel cv-screening-panel">
         <div class="panel-head">
-          <div><h3>CV Screening</h3><small class="subtle">Total Screened Across Sources: <b>${screeningSummary.totalCount}</b></small></div>
+          <div><h3>CV Screening</h3><small class="subtle">Total Screened Across Positions &amp; Sources: <b>${screeningSummary.totalCount}</b></small></div>
           <button type="button" class="btn btn-secondary btn-xs" id="add-cv-screening">+ Add Screening</button>
         </div>
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>SOURCE</th><th>SCREENING COUNT</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th>POSITION</th><th>SOURCE</th><th>SCREENING COUNT</th><th>ACTIONS</th></tr></thead>
             <tbody id="screening-rows">${renderScreeningRows(screeningSummary.items)}</tbody>
           </table>
         </div>
@@ -1205,6 +1233,7 @@ function renderInvitedView() {
           source: payload.source,
           status: payload.status,
           linked_applicant_id: payload.linked_applicant_id,
+          linked_stage1_id: payload.linked_stage1_id || null,
           notes: payload.notes,
           updated_at: new Date().toISOString()
         };
@@ -1247,41 +1276,64 @@ function renderInvitedView() {
     }));
   };
 
-  const openScreeningEditor = (existing = null) => {
+  const openScreeningEditor = async (existing = null) => {
+    const positions = await loadPositionList().catch(() => stage2PositionsCache);
     openCvScreeningModal({
       existing,
+      positions,
       onSave: async payload => {
         if (cvScreeningsTableMissing) {
-          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
+          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql & v4 in Supabase SQL Editor first.');
         }
+        const matchedExisting = payload.id
+          ? cvScreenings.find(s => s.id === payload.id)
+          : cvScreenings.find(s =>
+              String(s.position || '').trim().toLowerCase() === payload.position.toLowerCase() &&
+              String(s.source || '').trim().toLowerCase() === payload.source.toLowerCase()
+            );
         const recordPayload = {
+          position: payload.position,
           source: payload.source,
           screening_count: payload.screening_count,
           notes: payload.notes,
           updated_by: currentUserId,
           updated_at: new Date().toISOString()
         };
-        if (payload.id) {
-          const { error } = await supabase.from('cv_screenings').update(recordPayload).eq('id', payload.id);
+        if (matchedExisting?.id) {
+          let { error } = await supabase.from('cv_screenings').update(recordPayload).eq('id', matchedExisting.id);
+          if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('position')) {
+            const { position: _dropPos, ...legacyPayload } = recordPayload;
+            ({ error } = await supabase.from('cv_screenings').update(legacyPayload).eq('id', matchedExisting.id));
+          }
           if (error) throw error;
         } else {
-          const { error } = await supabase.from('cv_screenings').upsert(recordPayload, { onConflict: 'source' });
-          if (error) throw error;
+          let { error } = await supabase.from('cv_screenings').insert(recordPayload);
+          if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('position')) {
+            const { position: _dropPos, ...legacyPayload } = recordPayload;
+            ({ error } = await supabase.from('cv_screenings').upsert(legacyPayload, { onConflict: 'source' }));
+          }
+          if (error) {
+            const msg = String(error.message || '').toLowerCase();
+            if (msg.includes('cv_screenings_source_key')) {
+              throw new Error('Run database/migrations/20261121_hrga_workspace_v4.sql in Supabase SQL Editor to store screenings by Position & Source.');
+            }
+            throw error;
+          }
         }
         invalidateDataCache();
-        say(`CV screening count saved for ${payload.source}.`);
+        say(`CV screening count saved for ${payload.position} (${payload.source}).`);
         await loadView('invited', true);
       }
     });
   };
 
   $$('[data-scr-edit]').forEach(btn => btn.addEventListener('click', () => {
-    const item = screeningSummary.items.find(s => s.source === btn.dataset.scrEdit);
+    const item = screeningSummary.items.find(s => s.rowKey === btn.dataset.scrEdit);
     if (item) openScreeningEditor(item);
   }));
   $$('[data-scr-delete]').forEach(btn => btn.addEventListener('click', async () => {
     const id = btn.dataset.scrDelete;
-    if (!window.confirm('Remove this CV screening source entry?')) return;
+    if (!window.confirm('Remove this CV screening entry?')) return;
     try {
       const { error } = await supabase.from('cv_screenings').delete().eq('id', id);
       if (error) throw error;
@@ -1347,21 +1399,22 @@ function renderInterviewStageCard(stage) {
             ? 'gray'
             : 'gold';
         const dateLabel = formatDmyDash(row.interview_date || String(row.created_at || '').slice(0, 10));
-        let extra = esc(row.notes || '—');
+        let extra = esc(row.notes || '-');
         if (isFinal) {
           if (dec === 'Rejected') {
             extra = `${esc(row.rejection_reason_category)}${row.rejection_reason_detail ? ` · ${esc(row.rejection_reason_detail)}` : ''}`;
           } else if (dec === 'Accepted') {
             const period = row.contract_start_date && row.contract_end_date
               ? `${formatDmyDash(row.contract_start_date)} to ${formatDmyDash(row.contract_end_date)}`
-              : '—';
-            extra = `${esc(row.official_position || row.applied_position)} · NIK ${esc(row.assigned_nik)} · ${period}`;
+              : '-';
+            const contractPart = row.contract_number ? ` · Contract ${esc(row.contract_number)}` : '';
+            extra = `${esc(row.official_position || row.applied_position)} · NIK ${esc(row.assigned_nik)}${contractPart} · ${period}`;
           }
         }
         return `<tr>
-          <td><b>${esc(row.candidate_name)}</b><small class="table-subline">${esc(row.applied_position || '—')}</small></td>
+          <td><b>${esc(row.candidate_name)}</b><small class="table-subline">${esc(row.applied_position || '-')}</small></td>
           <td style="white-space:nowrap"><span class="interview-date-meta">${esc(dateLabel)}</span></td>
-          <td>${esc(row.pic_name || '—')}</td>
+          <td>${esc(row.pic_name || '-')}</td>
           <td><span class="status-pill ${tone}">${esc(dec)}</span></td>
           <td style="max-width:210px;white-space:normal">${extra}</td>
           <td><button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button></td>
@@ -1373,7 +1426,6 @@ function renderInterviewStageCard(stage) {
     <div class="interview-stage-head">
       <div>
         <h3>${esc(INTERVIEW_STAGE_LABELS[stage])}</h3>
-        <small>Latest 5 candidates${stage === 'HR 1' ? ' · Default PIC: Samsul Hariyadi (Employee Directory)' : stage === 'HR 2' ? ' · Default PIC: Diana Anita Sari (Employee Directory)' : ''}</small>
       </div>
       <button type="button" class="btn btn-primary btn-xs" data-interview-add="${esc(stage)}">+ Add Candidate</button>
     </div>
@@ -1432,6 +1484,7 @@ function renderInterviewView() {
           contract_end_date: payload.contract_end_date,
           official_position: payload.official_position,
           assigned_nik: payload.assigned_nik,
+          ...(interviewContractNoColMissing ? {} : { contract_number: payload.contract_number || '' }),
           updated_at: new Date().toISOString()
         };
 
@@ -1443,9 +1496,13 @@ function renderInterviewView() {
         };
 
         let { error } = await persistRecord(recordPayload);
-        if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('interview_date')) {
-          interviewDateColMissing = true;
-          const { interview_date: _dropDate, ...fallbackBody } = recordPayload;
+        if (error && isMissingSchemaError(error)) {
+          const msg = String(error.message || '').toLowerCase();
+          if (msg.includes('interview_date')) interviewDateColMissing = true;
+          if (msg.includes('contract_number')) interviewContractNoColMissing = true;
+          const fallbackBody = { ...recordPayload };
+          if (interviewDateColMissing) delete fallbackBody.interview_date;
+          if (interviewContractNoColMissing) delete fallbackBody.contract_number;
           ({ error } = await persistRecord(fallbackBody));
         }
         if (error) throw error;
@@ -1456,6 +1513,9 @@ function renderInterviewView() {
             const appData = app?.application_data || {};
             const genderRaw = appData.gender || '';
             const genderNormalized = genderRaw === 'L' ? 'Laki-laki' : genderRaw === 'P' ? 'Perempuan' : genderRaw;
+            const contractPrefix = payload.contract_number ? `Contract No. ${payload.contract_number}` : '';
+            const baseNotes = payload.notes || `Passed Final Interview (${payload.pic_name})`;
+            const mergedNotes = [contractPrefix, baseNotes].filter(Boolean).join(' · ');
             const empPayload = {
               applicant_id: payload.applicant_id || null,
               employee_no: payload.assigned_nik,
@@ -1475,7 +1535,7 @@ function renderInterviewView() {
               gender: genderNormalized,
               religion: appData.agama || '',
               salary: payload.salary,
-              notes: payload.notes || `Passed Final Interview (${payload.pic_name})`,
+              notes: mergedNotes,
               updated_at: new Date().toISOString()
             };
             const { error: empErr } = await supabase.from('employees')
@@ -1533,10 +1593,10 @@ function renderInterviewView() {
 }
 
 /* ============================================================================
- * RECRUITMENT TRACKING — 12 Structured English Columns
+ * TRACKING & REPORT — 13 Structured English Columns + 2-Page A4 Landscape Print
  * ============================================================================ */
 function trackingStageCellHtml(cell) {
-  if (!cell) return '<span class="status-pill gray">—</span>';
+  if (!cell) return '<span class="status-pill gray">-</span>';
   const dec = normalizeInterviewDecision(cell.decision);
   const tone = ['Recommended', 'Accepted'].includes(dec)
     ? 'green'
@@ -1559,22 +1619,25 @@ function renderTrackingView() {
     invitedCandidates
   }).map(r => ({
     ...r,
-    searchText: `${r.name} ${r.sub} ${r.inviteSource} ${r.inviteStatus} ${r.decision} ${r.rejectionReason}`.toLowerCase()
+    searchText: `${r.name} ${r.position} ${r.sub} ${r.inviteSource} ${r.inviteStatus} ${r.decision} ${r.rejectionReason}`.toLowerCase()
   }));
+
+  let activeFilteredRows = allRows;
 
   const renderRows = rows => rows.length
     ? rows.map(r => `<tr>
         <td><b>${esc(r.name)}</b><small class="table-subline">${esc(r.sub)}</small></td>
+        <td>${esc(r.inviteSource || '-')}</td>
         <td><div class="tracking-stage-cell">
           <span class="status-pill ${r.inviteStatus === 'Responded' ? 'green' : r.inviteStatus === 'Lead Register' ? 'blue' : 'gray'}">${esc(r.inviteStatus)}</span>
           ${r.inviteDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.inviteDate))}</small>` : ''}
         </div></td>
         <td>${r.formSubmittedDate
           ? `<div class="tracking-stage-cell"><span class="status-pill green">Submitted</span><small class="tracking-date-sub">${esc(formatDmyDash(r.formSubmittedDate))}</small></div>`
-          : '<span class="status-pill gray">—</span>'}</td>
+          : '<span class="status-pill gray">-</span>'}</td>
         <td>${r.hrTestDone
           ? `<div class="tracking-stage-cell"><span class="status-pill green">Completed</span>${r.hrTestDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.hrTestDate))}</small>` : ''}</div>`
-          : '<span class="status-pill gray">Pending</span>'}</td>
+          : '<span class="status-pill gray">-</span>'}</td>
         <td>${trackingStageCellHtml(r.hr1)}</td>
         <td>${trackingStageCellHtml(r.hr2)}</td>
         <td>${trackingStageCellHtml(r.user1)}</td>
@@ -1584,17 +1647,20 @@ function renderTrackingView() {
           <span class="status-pill ${r.decisionTone}">${esc(r.decision)}</span>
           ${r.rejectionReason ? `<small class="tracking-reason-sub">${esc(r.rejectionReason)}</small>` : ''}
         </td>
-        <td style="white-space:nowrap">${r.decisionDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.decisionDate))}</span>` : '—'}</td>
-        <td style="white-space:nowrap">${r.joinDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.joinDate))}</span>` : '—'}</td>
+        <td style="white-space:nowrap">${r.decisionDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.decisionDate))}</span>` : '-'}</td>
+        <td style="white-space:nowrap">${r.joinDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.joinDate))}</span>` : '-'}</td>
       </tr>`).join('')
-    : emptyRow(12, 'No candidate tracking records yet');
+    : emptyRow(13, 'No candidate tracking records yet');
 
-  content.innerHTML = header('Recruitment Tracking', '', '<button class="btn btn-secondary" id="refresh-tracking">Refresh ↻</button>') +
-    `<section class="panel table-panel">${tableToolbar('Search name / position / status…', 'Recruitment Progress Tracking')}
+  content.innerHTML = header('Tracking & Report', '',
+    '<button class="btn btn-secondary" id="refresh-tracking">Refresh ↻</button>' +
+    '<button type="button" class="btn btn-primary" id="print-tracking">Print Report ↗</button>'
+  ) +
+    `<section class="panel table-panel">${tableToolbar('Search name / position / source / status…', 'Tracking & Report')}
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
           <thead><tr>
-            <th>NAME</th><th>INVITE</th><th>FORM SUBMITTED</th><th>HR TEST</th>
+            <th>NAME</th><th>SOURCE</th><th>INVITE</th><th>FORM SUBMITTED</th><th>HR TEST</th>
             <th>HR INTERVIEW 1</th><th>HR INTERVIEW 2</th><th>USER INTERVIEW 1</th><th>USER INTERVIEW 2</th>
             <th>FINAL INTERVIEW</th><th>DECISION</th><th>DECISION DATE</th><th>JOIN DATE</th>
           </tr></thead>
@@ -1603,8 +1669,27 @@ function renderTrackingView() {
       </div></section>`;
 
   $('#refresh-tracking')?.addEventListener('click', () => loadView('tracking', true));
+  $('#print-tracking')?.addEventListener('click', async () => {
+    try {
+      const query = $('#table-search')?.value?.trim() || '';
+      const positions = await loadPositionList().catch(() => stage2PositionsCache);
+      const summary = buildRecruitmentConclusionSummary({
+        positions,
+        cvScreenings,
+        invitedCandidates,
+        stage1Leads,
+        applicants,
+        interviews,
+        employees
+      });
+      printTrackingReport({ summary, rows: activeFilteredRows, filterQuery: query });
+    } catch (err) {
+      say(err.message || 'Unable to prepare Tracking & Report print view.');
+    }
+  });
   bindSearch('#table-search', query => {
-    $('#tracking-rows').innerHTML = renderRows(allRows.filter(r => r.searchText.includes(query)));
+    activeFilteredRows = allRows.filter(r => r.searchText.includes(query));
+    $('#tracking-rows').innerHTML = renderRows(activeFilteredRows);
   });
 }
 

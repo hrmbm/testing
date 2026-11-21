@@ -4,11 +4,11 @@ import {
   REHOLZ_TEMPLATE_URL,
   REHOLZ_MASTER_REVISION,
   CV_BUCKET
-} from './config.js?v=20261121-hrga-workspace-12';
-import { supabase } from './supabase.js?v=20261121-hrga-workspace-12';
-import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-12';
-import { esc } from './common.js?v=20261121-hrga-workspace-12';
-import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261121-hrga-workspace-12';
+} from './config.js?v=20261121-hrga-workspace-13';
+import { supabase } from './supabase.js?v=20261121-hrga-workspace-13';
+import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-13';
+import { esc } from './common.js?v=20261121-hrga-workspace-13';
+import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261121-hrga-workspace-13';
 
 const MASTER_HTML_MEMORY = new Map();
 let pdfjsLoaderPromise = null;
@@ -329,10 +329,15 @@ export function discReportHtml(record, result, brand = 'mitra') {
   const axes = ['D', 'I', 'S', 'C'];
   const gridTone = brandKey === 'reholz' ? '#DCE7DE' : '#e2e8f0';
   const detail = result.detail || {};
-  const kecenderungan = (detail.kecenderungan || []).slice(0, 6);
-  const pengembangan = (detail.pengembangan || []).slice(0, 6);
+  const kecenderungan = detail.kecenderungan || [];
+  const pengembangan = detail.pengembangan || [];
+  const potret = (detail.potret || []).slice(0, 12);
   const natural = result.pola[2] || {};
-  const professions = trimSentences(natural.professions || '', 215);
+  const dominantHeading = String(detail.judul || `Tipe kepribadian ${result.hurufDominan || ''}`).trim().toUpperCase();
+  const professions = String(natural.professions || '').trim() || '—';
+  const deskripsiLengkap = String(detail.deskripsi || '').trim() || '—';
+  const naturalDeskripsi = String(natural.description || '').trim();
+  const formatStageSummary = v => trimSentences(v || '', 245);
 
   return `<section class="aux-sheet disc-sheet disc-brand-${brandKey}" data-brand="${brandKey}">
     <header class="disc-hero">
@@ -385,30 +390,39 @@ export function discReportHtml(record, result, brand = 'mitra') {
         <article class="disc-pattern-card disc-pattern-card-${p.key}">
           <div class="disc-card-kicker">${esc(p.tag)}</div>
           <b>${esc(p.pattern.nama)} · ${esc(p.pattern.title)}</b>
-          <p>${esc(trimSentences(p.pattern.description, 200))}</p>
+          <p>${esc(formatStageSummary(p.pattern.description))}</p>
           <div class="disc-chips">${(p.pattern.traits || []).slice(0, 6).map(t => `<span>${esc(t)}</span>`).join('')}</div>
         </article>`).join('')}
       </div>
     </div>
 
-    <div class="disc-section">
+    <div class="disc-section disc-section-grow">
       <div class="disc-sec-head">
-        <h2>Analisis Faktor Dominan · ${esc(result.hurufDominan)}</h2>
-        <span>${esc(detail.judul || '')}</span>
+        <h2>${esc(dominantHeading)}</h2>
+        <span>Faktor Dominan · ${esc(result.hurufDominan || '—')}</span>
       </div>
       <div class="disc-detail">
-        <p class="disc-detail-summary">${esc(trimSentences(detail.deskripsi || '', 310))}</p>
+        <div class="disc-subblock">
+          <div class="disc-subblock-title">DESKRIPSI KEPRIBADIAN</div>
+          <p class="disc-detail-summary">${esc(deskripsiLengkap)}${naturalDeskripsi && naturalDeskripsi !== '-' ? ` ${esc(naturalDeskripsi)}` : ''}</p>
+        </div>
+
         <div class="disc-detail-cols">
           <div class="disc-detail-box">
-            <b>Kecenderungan Perilaku</b>
+            <b>${esc(dominantHeading)}</b>
             <ul>${kecenderungan.map(x => `<li>${esc(x.replace(/^[•\-\s]+/, ''))}</li>`).join('')}</ul>
+            ${potret.length ? `<div class="disc-potret-line"><strong>Potret Diri:</strong> ${esc(potret.map(x => x.replace(/^\d+\.\s*/, '').trim()).join(' · '))}</div>` : ''}
           </div>
           <div class="disc-detail-box disc-detail-box-dev">
-            <b>Rekomendasi Pengembangan</b>
-            <ul>${pengembangan.map(x => `<li>${esc(x.replace(/^[•\-\s]+/, ''))}</li>`).join('')}</ul>
+            <b>PERBAIKAN, PENINGKATAN &amp; PENGEMBANGAN YANG DAPAT DILAKUKAN</b>
+            <ul class="disc-dev-cols">${pengembangan.map(x => `<li>${esc(x.replace(/^[•\-\s]+/, ''))}</li>`).join('')}</ul>
           </div>
         </div>
-        ${professions && professions !== '—' ? `<div class="disc-professions"><span>Kesesuaian Peran Kerja</span><p>${esc(professions)}</p></div>` : ''}
+
+        <div class="disc-professions">
+          <span>PROFESI YANG COCOK</span>
+          <p>${esc(professions)}</p>
+        </div>
       </div>
     </div>
 
@@ -528,10 +542,10 @@ const DISC_SHARED_AND_BRAND_CSS = `
     --d-change:#0d5c6b;
     display:flex;
     flex-direction:column;
-    gap:2.9mm;
-    padding:6.5mm 9mm 5.5mm;
+    gap:2.1mm;
+    padding:5.5mm 8.5mm 4.8mm;
     color:var(--d-ink);
-    font:9.3px/1.32 'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    font:8.6px/1.28 'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
   }
@@ -563,103 +577,109 @@ const DISC_SHARED_AND_BRAND_CSS = `
     display:flex;
     align-items:stretch;
     justify-content:space-between;
-    gap:4.5mm;
-    padding:4mm 5.2mm;
+    gap:4mm;
+    padding:3.2mm 4.6mm;
     background:var(--d-hero-bg);
     color:#fff;
     border-radius:6px;
     border-bottom:2.5px solid var(--d-hero-border);
   }
   .disc-hero-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center}
-  .disc-hero-brand{display:flex;align-items:center;gap:2.6mm;margin-bottom:1.1mm}
-  .disc-hero-logo{height:4.2mm;width:auto;display:block;object-fit:contain;flex-shrink:0}
-  .disc-brand-reholz .disc-hero-logo{height:5.2mm}
-  .disc-hero-sep{width:1px;height:3.6mm;background:rgba(255,255,255,.28);flex-shrink:0}
-  .disc-eyebrow{font-size:7.6px;font-weight:700;letter-spacing:.95px;color:var(--d-eyebrow);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .disc-hero h1{margin:0 0 2mm;font-family:'Playfair Display',Georgia,serif;font-size:16px;font-weight:700;letter-spacing:.02em;line-height:1.15;color:#fff}
-  .disc-brand-reholz .disc-hero h1{font-family:'Playfair Display',Georgia,serif;font-weight:700;font-size:16px;letter-spacing:.02em}
-  .disc-meta{display:grid;grid-template-columns:1.15fr 1fr;column-gap:4mm;row-gap:.8mm;font-size:8.9px;line-height:1.28}
+  .disc-hero-brand{display:flex;align-items:center;gap:2.4mm;margin-bottom:.9mm}
+  .disc-hero-logo{height:4mm;width:auto;display:block;object-fit:contain;flex-shrink:0}
+  .disc-brand-reholz .disc-hero-logo{height:5mm}
+  .disc-hero-sep{width:1px;height:3.4mm;background:rgba(255,255,255,.28);flex-shrink:0}
+  .disc-eyebrow{font-size:7.3px;font-weight:700;letter-spacing:.9px;color:var(--d-eyebrow);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .disc-hero h1{margin:0 0 1.6mm;font-family:'Playfair Display',Georgia,serif;font-size:15.5px;font-weight:700;letter-spacing:.02em;line-height:1.15;color:#fff}
+  .disc-brand-reholz .disc-hero h1{font-family:'Playfair Display',Georgia,serif;font-weight:700;font-size:15.5px;letter-spacing:.02em}
+  .disc-meta{display:grid;grid-template-columns:1.15fr 1fr;column-gap:4mm;row-gap:.6mm;font-size:8.4px;line-height:1.25}
   .disc-meta div{display:flex;gap:2mm;min-width:0}
-  .disc-meta span{flex:0 0 21mm;color:rgba(248,250,252,.76);font-weight:500}
+  .disc-meta span{flex:0 0 20mm;color:rgba(248,250,252,.76);font-weight:500}
   .disc-meta b{color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   .disc-badge{
-    flex:0 0 46mm;
+    flex:0 0 44mm;
     display:flex;
     flex-direction:column;
     justify-content:center;
-    padding:2.6mm 3.4mm;
+    padding:2.2mm 3.2mm;
     border-radius:5px;
     border:1px solid var(--d-badge-border);
     background:var(--d-badge-bg);
     text-align:left;
   }
-  .disc-badge-kicker{font-size:7px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--d-eyebrow)}
-  .disc-badge-factor{margin-top:.6mm;font-size:17px;font-weight:800;line-height:1;color:#fff;letter-spacing:.4px}
-  .disc-badge-name{margin-top:.9mm;font-size:9.3px;font-weight:700;color:#fff}
-  .disc-badge-title{font-size:8px;font-weight:500;color:rgba(248,250,252,.86)}
+  .disc-badge-kicker{font-size:6.8px;font-weight:700;letter-spacing:.55px;text-transform:uppercase;color:var(--d-eyebrow)}
+  .disc-badge-factor{margin-top:.5mm;font-size:16px;font-weight:800;line-height:1;color:#fff;letter-spacing:.4px}
+  .disc-badge-name{margin-top:.7mm;font-size:8.9px;font-weight:700;color:#fff}
+  .disc-badge-title{font-size:7.6px;font-weight:500;color:rgba(248,250,252,.86)}
 
-  .disc-section{display:flex;flex-direction:column;gap:2mm}
-  .disc-sec-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:1mm;border-bottom:1.2px solid var(--d-rule)}
-  .disc-sec-head h2{position:relative;margin:0;padding-left:2.6mm;font-size:9.4px;font-weight:800;letter-spacing:.45px;text-transform:uppercase;color:var(--d-heading)}
+  .disc-section{display:flex;flex-direction:column;gap:1.5mm}
+  .disc-section-grow{flex:1 1 auto;min-height:0}
+  .disc-sec-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:.8mm;border-bottom:1.1px solid var(--d-rule)}
+  .disc-sec-head h2{position:relative;margin:0;padding-left:2.4mm;font-size:8.9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--d-heading)}
   .disc-sec-head h2::before{content:"";position:absolute;left:0;top:1px;bottom:1px;width:2px;background:var(--d-hero-border);border-radius:1px}
-  .disc-sec-head span{font-size:8.2px;font-weight:600;color:var(--d-muted)}
+  .disc-sec-head span{font-size:7.8px;font-weight:600;color:var(--d-muted)}
 
-  .disc-graphs{display:grid;grid-template-columns:repeat(3,1fr);gap:2.8mm}
-  .disc-chart{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-top:2.5px solid var(--d-change);border-radius:5px;padding:2.1mm 2.5mm 1.9mm;background:#fff}
+  .disc-graphs{display:grid;grid-template-columns:repeat(3,1fr);gap:2.5mm}
+  .disc-chart{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-top:2.4px solid var(--d-change);border-radius:5px;padding:1.7mm 2.2mm 1.5mm;background:#fff}
   .disc-chart-most{border-top-color:var(--d-most)}
   .disc-chart-least{border-top-color:var(--d-least)}
   .disc-chart-change{border-top-color:var(--d-change)}
-  .disc-chart-head{margin-bottom:.7mm}
-  .disc-chart-head b{display:block;font-size:8.8px;font-weight:800;color:var(--d-heading);letter-spacing:.2px}
-  .disc-chart-head small{display:block;font-size:7.6px;color:var(--d-muted)}
-  .disc-chart svg{width:100%;height:auto;max-height:24.5mm;display:block}
+  .disc-chart-head{margin-bottom:.5mm}
+  .disc-chart-head b{display:block;font-size:8.3px;font-weight:800;color:var(--d-heading);letter-spacing:.2px}
+  .disc-chart-head small{display:block;font-size:7.2px;color:var(--d-muted)}
+  .disc-chart svg{width:100%;height:auto;max-height:21mm;display:block}
   .disc-score-strip{
     display:grid;
     grid-template-columns:repeat(4,1fr);
-    gap:1mm;
-    margin-top:.8mm;
-    padding:.8mm 1mm;
+    gap:.8mm;
+    margin-top:.6mm;
+    padding:.6mm .9mm;
     border-radius:3px;
     background:var(--d-card-soft);
     border:1px solid var(--d-rule);
     font-family:'JetBrains Mono',ui-monospace,monospace;
-    font-size:7.6px;
+    font-size:7.3px;
     font-variant-numeric:tabular-nums;
     text-align:center;
     color:var(--d-muted);
   }
   .disc-score-strip b{color:var(--d-ink);font-weight:700}
-  .disc-pattern{margin-top:.9mm;padding-top:.8mm;border-top:1px solid var(--d-rule);font-size:7.9px;color:var(--d-ink-2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .disc-pattern{margin-top:.7mm;padding-top:.6mm;border-top:1px solid var(--d-rule);font-size:7.5px;color:var(--d-ink-2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .disc-pattern b{color:var(--d-heading)}
 
-  .disc-pattern-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.8mm}
-  .disc-pattern-card{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-radius:5px;padding:2.4mm 2.8mm;background:var(--d-card-soft)}
+  .disc-pattern-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.5mm}
+  .disc-pattern-card{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-radius:5px;padding:1.9mm 2.4mm;background:var(--d-card-soft)}
   .disc-pattern-card-change{background:var(--d-change-bg);border-color:var(--d-change-border);box-shadow:inset 0 2px 0 var(--d-change)}
-  .disc-card-kicker{font-size:7.1px;font-weight:800;letter-spacing:.55px;color:var(--d-most);margin-bottom:.5mm}
+  .disc-card-kicker{font-size:6.8px;font-weight:800;letter-spacing:.5px;color:var(--d-most);margin-bottom:.4mm}
   .disc-pattern-card-least .disc-card-kicker{color:var(--d-least)}
   .disc-pattern-card-change .disc-card-kicker{color:var(--d-change)}
-  .disc-pattern-card>b{display:block;font-size:9px;font-weight:700;color:var(--d-heading);margin-bottom:.9mm}
-  .disc-pattern-card p{margin:0 0 1.8mm;font-size:8.4px;line-height:1.34;color:var(--d-ink-2);text-align:left}
-  .disc-chips{margin-top:auto;display:flex;flex-wrap:wrap;gap:.9mm}
-  .disc-chips span{display:inline-block;padding:.55mm 1.5mm;border-radius:3px;border:1px solid var(--d-card-border);background:#fff;color:var(--d-ink-2);font-size:7.3px;font-weight:600;line-height:1.18}
+  .disc-pattern-card>b{display:block;font-size:8.4px;font-weight:700;color:var(--d-heading);margin-bottom:.6mm}
+  .disc-pattern-card p{margin:0 0 1.3mm;font-size:7.6px;line-height:1.28;color:var(--d-ink-2);text-align:left}
+  .disc-chips{margin-top:auto;display:flex;flex-wrap:wrap;gap:.7mm}
+  .disc-chips span{display:inline-block;padding:.4mm 1.3mm;border-radius:3px;border:1px solid var(--d-card-border);background:#fff;color:var(--d-ink-2);font-size:6.9px;font-weight:600;line-height:1.14}
   .disc-pattern-card-change .disc-chips span{border-color:var(--d-change-chip-border);color:var(--d-change-chip-ink)}
 
-  .disc-detail{display:flex;flex-direction:column;gap:2.1mm;border:1px solid var(--d-card-border);border-radius:5px;padding:2.6mm 3.2mm;background:#fff}
-  .disc-detail-summary{margin:0;font-size:8.8px;line-height:1.36;color:var(--d-ink-2)}
-  .disc-detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:2.8mm;align-items:stretch}
-  .disc-detail-box{border:1px solid var(--d-rule);border-radius:4px;padding:2.2mm 2.7mm;background:var(--d-card-soft)}
-  .disc-detail-box b{display:flex;align-items:center;gap:1.5mm;font-size:8.5px;font-weight:800;color:var(--d-change);margin-bottom:1.1mm;text-transform:uppercase;letter-spacing:.3px}
-  .disc-detail-box b::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--d-change);display:inline-block}
+  .disc-detail{display:flex;flex-direction:column;flex:1 1 auto;gap:1.8mm;border:1px solid var(--d-card-border);border-radius:5px;padding:2.2mm 2.8mm;background:#fff}
+  .disc-subblock-title{font-size:7.8px;font-weight:800;letter-spacing:.38px;text-transform:uppercase;color:var(--d-heading);margin-bottom:.6mm}
+  .disc-detail-summary{margin:0;font-size:7.75px;line-height:1.3;color:var(--d-ink-2);text-align:justify}
+  .disc-detail-cols{display:grid;grid-template-columns:0.86fr 1.14fr;gap:2.3mm;align-items:stretch}
+  .disc-detail-box{display:flex;flex-direction:column;border:1px solid var(--d-rule);border-radius:4px;padding:1.8mm 2.3mm;background:var(--d-card-soft)}
+  .disc-detail-box b{display:flex;align-items:center;gap:1.4mm;font-size:7.7px;font-weight:800;color:var(--d-change);margin-bottom:.9mm;text-transform:uppercase;letter-spacing:.28px}
+  .disc-detail-box b::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--d-change);display:inline-block;flex-shrink:0}
   .disc-detail-box-dev b{color:var(--d-least)}
   .disc-detail-box-dev b::before{background:var(--d-least)}
-  .disc-detail-box ul{margin:0;padding-left:3.6mm;font-size:8.3px;line-height:1.35;color:var(--d-ink-2)}
-  .disc-detail-box li{margin-bottom:.65mm}
-  .disc-professions{padding-top:1.7mm;border-top:1px solid var(--d-rule);display:grid;grid-template-columns:38mm 1fr;gap:2.8mm;align-items:baseline}
-  .disc-professions span{font-size:7.9px;font-weight:800;text-transform:uppercase;letter-spacing:.35px;color:var(--d-heading)}
-  .disc-professions p{margin:0;font-size:8.3px;line-height:1.35;color:var(--d-ink-2)}
+  .disc-detail-box ul{margin:0;padding-left:3.2mm;font-size:7.45px;line-height:1.25;color:var(--d-ink-2)}
+  .disc-detail-box li{margin-bottom:.42mm}
+  .disc-dev-cols{columns:2;column-gap:3.2mm}
+  .disc-dev-cols li{break-inside:avoid}
+  .disc-potret-line{margin-top:auto;padding-top:1.1mm;border-top:1px dashed var(--d-rule);font-size:7.15px;line-height:1.25;color:var(--d-muted)}
+  .disc-potret-line strong{color:var(--d-heading)}
+  .disc-professions{margin-top:auto;padding-top:1.5mm;border-top:1px solid var(--d-rule);display:grid;grid-template-columns:34mm 1fr;gap:2.4mm;align-items:baseline}
+  .disc-professions span{font-size:7.7px;font-weight:800;text-transform:uppercase;letter-spacing:.35px;color:var(--d-heading)}
+  .disc-professions p{margin:0;font-size:7.65px;line-height:1.28;color:var(--d-ink-2)}
 
-  .disc-footer{margin-top:auto;padding-top:1.4mm;border-top:1px solid var(--d-rule);display:flex;justify-content:space-between;align-items:center;color:var(--d-muted);font-size:8px;font-weight:600}
+  .disc-footer{margin-top:auto;padding-top:1.1mm;border-top:1px solid var(--d-rule);display:flex;justify-content:space-between;align-items:center;color:var(--d-muted);font-size:7.6px;font-weight:600}
   .disc-empty{margin:auto;text-align:center;color:var(--d-ink-2)}
   .disc-empty h1{font-size:16px;margin:0 0 6px}
 `;
@@ -724,4 +744,285 @@ export async function printApplication(record, options = {}) {
     tab.close();
     throw error;
   }
+}
+
+function fmtReportDate(value) {
+  if (!value) return '-';
+  const raw = String(value).slice(0, 10);
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : raw;
+}
+
+function reportBadge(text, tone = 'gray') {
+  const cls = tone === 'green' ? 'b-green' : tone === 'blue' ? 'b-blue' : tone === 'gold' ? 'b-gold' : 'b-gray';
+  return `<span class="badge ${cls}">${esc(text)}</span>`;
+}
+
+function reportStageCell(cell) {
+  if (!cell) return reportBadge('-', 'gray');
+  const dec = cell.decision || '-';
+  const tone = ['Recommended', 'Accepted'].includes(dec)
+    ? 'green'
+    : ['Not Recommended', 'Rejected'].includes(dec)
+      ? 'gray'
+      : 'gold';
+  const dateText = cell.date ? `<span class="subdate">${esc(fmtReportDate(cell.date))}</span>` : '';
+  return `<div class="stage-cell">${reportBadge(dec, tone)}${dateText}</div>`;
+}
+
+export function buildTrackingReportHtml({ summary = { rows: [], totals: {} }, rows = [], filterQuery = '' } = {}) {
+  const generatedAt = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric'
+  }).format(new Date());
+  const totals = summary?.totals || {
+    cvScreeningCount: 0,
+    invitedCount: 0,
+    hrTestCount: 0,
+    hrInterviewCount: 0,
+    userInterviewCount: 0,
+    finalInterviewCount: 0,
+    acceptedCount: 0
+  };
+  const summaryRows = summary?.rows || [];
+  const totalInterviews = (totals.hrInterviewCount || 0) + (totals.userInterviewCount || 0) + (totals.finalInterviewCount || 0);
+
+  const conclusionBody = summaryRows.length
+    ? summaryRows.map(r => `<tr>
+        <td class="num">${r.no}</td>
+        <td class="pos">${esc(r.position)}</td>
+        <td class="num">${r.cvScreeningCount}</td>
+        <td class="num">${r.invitedCount}</td>
+        <td class="num">${r.hrTestCount}</td>
+        <td class="num">${r.hrInterviewCount}</td>
+        <td class="num">${r.userInterviewCount}</td>
+        <td class="num">${r.finalInterviewCount}</td>
+        <td class="num strong-acc">${r.acceptedCount}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="9" class="empty">No position pipeline summary data available.</td></tr>`;
+
+  const detailBody = rows.length
+    ? rows.map(r => `<tr>
+        <td><b>${esc(r.name)}</b><span class="subline">${esc(r.sub || '-')}</span></td>
+        <td>${esc(r.inviteSource || '-')}</td>
+        <td><div class="stage-cell">${reportBadge(r.inviteStatus || '-', r.inviteStatus === 'Responded' ? 'green' : r.inviteStatus === 'Lead Register' ? 'blue' : 'gray')}${r.inviteDate ? `<span class="subdate">${esc(fmtReportDate(r.inviteDate))}</span>` : ''}</div></td>
+        <td>${r.formSubmittedDate ? `<div class="stage-cell">${reportBadge('Submitted', 'green')}<span class="subdate">${esc(fmtReportDate(r.formSubmittedDate))}</span></div>` : reportBadge('-', 'gray')}</td>
+        <td>${r.hrTestDone ? `<div class="stage-cell">${reportBadge('Completed', 'green')}${r.hrTestDate ? `<span class="subdate">${esc(fmtReportDate(r.hrTestDate))}</span>` : ''}</div>` : reportBadge('-', 'gray')}</td>
+        <td>${reportStageCell(r.hr1)}</td>
+        <td>${reportStageCell(r.hr2)}</td>
+        <td>${reportStageCell(r.user1)}</td>
+        <td>${reportStageCell(r.user2)}</td>
+        <td>${reportStageCell(r.finalInt)}</td>
+        <td>${reportBadge(r.decision || '-', r.decisionTone)}${r.rejectionReason ? `<span class="reason-sub">${esc(r.rejectionReason)}</span>` : ''}</td>
+        <td class="nowrap">${esc(fmtReportDate(r.decisionDate))}</td>
+        <td class="nowrap">${esc(fmtReportDate(r.joinDate))}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="13" class="empty">No candidate tracking records match this view.</td></tr>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tracking &amp; Report — PT. Mitra Binamandiri Makmur</title>
+<style>
+  @page { size: A4 landscape; margin: 9mm 10mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  html, body { margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #0f172a; background: #1e293b; }
+  .toolbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 10px 22px; background: #0f172a; color: #f8fafc; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .toolbar-title { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+  .toolbar-actions { display: flex; gap: 8px; }
+  .toolbar button { border: 1px solid rgba(255,255,255,.22); border-radius: 7px; padding: 7px 14px; font: 600 12.5px inherit; cursor: pointer; background: rgba(255,255,255,.08); color: #fff; }
+  .toolbar button.primary { background: #0d5c6b; border-color: #0d5c6b; }
+  .canvas { padding: 18px 0 36px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .report-page { width: 297mm; min-height: 210mm; padding: 10mm 11mm; background: #fff; box-shadow: 0 18px 46px rgba(0,0,0,.38); border-radius: 3px; display: flex; flex-direction: column; gap: 4.5mm; }
+  .page-break { page-break-after: always; break-after: page; }
+  .hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4.2mm 5.5mm; border-radius: 6px; background: linear-gradient(118deg,#0b1526 0%,#0f1e36 58%,#1a3052 100%); border-bottom: 2.5px solid #b08d57; color: #fff; }
+  .hero-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .hero-brand img { height: 18px; width: auto; display: block; object-fit: contain; }
+  .hero-sep { width: 1px; height: 14px; background: rgba(255,255,255,.28); }
+  .eyebrow { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #d4b475; }
+  .hero h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.015em; color: #fff; }
+  .hero-meta { text-align: right; font-size: 10px; line-height: 1.5; color: rgba(248,250,252,.84); }
+  .hero-meta b { color: #fff; display: block; font-size: 11px; }
+  .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3.2mm; }
+  .kpi { padding: 3mm 3.6mm; border: 1px solid #dbe2ea; border-top: 2.5px solid #0d5c6b; border-radius: 5px; background: #f8fafc; }
+  .kpi.accent { border-top-color: #b08d57; }
+  .kpi small { display: block; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; }
+  .kpi b { display: block; margin-top: 2px; font-size: 18px; font-weight: 800; color: #0f1e36; font-variant-numeric: tabular-nums; }
+  .section-bar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1.5px solid #dbe2ea; padding-bottom: 2mm; }
+  .section-bar h2 { margin: 0; font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #0f1e36; }
+  .section-bar span { font-size: 9.5px; color: #64748b; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  thead { display: table-header-group; }
+  th { background: #f1f5f9; color: #0f1e36; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 6.5px 7px; border-top: 1px solid #cbd5e1; border-bottom: 1.5px solid #94a3b8; }
+  th.num, td.num { text-align: right; }
+  .summary-table th, .summary-table td { padding: 7.5px 9px; font-size: 10px; }
+  .summary-table td.pos { font-weight: 700; color: #0f172a; }
+  .summary-table td.strong-acc { font-weight: 800; color: #15803d; }
+  .summary-table tbody td { border-bottom: 1px solid #e2e8f0; }
+  .summary-table tbody tr:nth-child(even) td { background: #fafbfd; }
+  .summary-table tfoot td { background: #0f1e36; color: #fff; font-weight: 800; font-size: 10.2px; padding: 8px 9px; border-top: 2px solid #b08d57; }
+  .summary-note { font-size: 8.8px; color: #475569; margin: 0; line-height: 1.45; }
+  .detail-table th { font-size: 7.6px; padding: 5.5px 4.5px; white-space: nowrap; }
+  .detail-table td { font-size: 8.1px; line-height: 1.3; padding: 5px 4.5px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  .detail-table tbody tr { page-break-inside: avoid; break-inside: avoid; }
+  .detail-table tbody tr:nth-child(even) td { background: #fafbfd; }
+  .detail-table td b { color: #0f172a; font-weight: 700; }
+  .subline { display: block; margin-top: 1.5px; font-size: 7.2px; color: #64748b; }
+  .stage-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 1.5px; }
+  .subdate { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 7px; color: #64748b; white-space: nowrap; }
+  .reason-sub { display: block; margin-top: 2px; font-size: 7.2px; font-weight: 600; color: #b45309; }
+  .badge { display: inline-block; padding: 1.5px 5px; border-radius: 999px; font-size: 7.3px; font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
+  .b-green { background: #ecfdf5; color: #15803d; border-color: #bbf7d0; }
+  .b-blue { background: #eef7f8; color: #0d5c6b; border-color: #bae6fd; }
+  .b-gold { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+  .b-gray { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+  .nowrap { white-space: nowrap; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 7.6px; }
+  .empty { text-align: center; padding: 20px; color: #64748b; font-style: italic; }
+  .footer { margin-top: auto; padding-top: 2.5mm; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8.2px; color: #64748b; font-weight: 600; }
+  .detail-page { min-height: 192mm; }
+  @media print {
+    html, body { background: #fff !important; }
+    .toolbar { display: none !important; }
+    .canvas { padding: 0; display: block; }
+    .report-page { width: 100%; min-height: auto; padding: 0; box-shadow: none; border-radius: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="toolbar-title">Tracking &amp; Report · PT. Mitra Binamandiri Makmur (A4 Landscape)</span>
+    <div class="toolbar-actions">
+      <button type="button" onclick="window.close()">Close</button>
+      <button type="button" class="primary" onclick="window.print()">Print / Save PDF ↗</button>
+    </div>
+  </div>
+  <main class="canvas">
+    <section class="report-page page-break">
+      <header class="hero">
+        <div>
+          <div class="hero-brand">
+            <img src="${BRAND_LOGOS.mitra}" alt="PT. Mitra Binamandiri Makmur">
+            <span class="hero-sep"></span>
+            <span class="eyebrow">HR&amp;GA Workspace · Executive Report</span>
+          </div>
+          <h1>Recruitment Conclusion &amp; Pipeline Summary</h1>
+        </div>
+        <div class="hero-meta">
+          <b>Page 1 · Conclusion Overview</b>
+          <span>Generated: ${esc(generatedAt)}</span>
+          ${filterQuery ? `<span>Filter: "${esc(filterQuery)}"</span>` : ''}
+        </div>
+      </header>
+
+      <div class="kpis">
+        <article class="kpi"><small>CV Screening</small><b>${totals.cvScreeningCount}</b></article>
+        <article class="kpi"><small>Invited Candidates</small><b>${totals.invitedCount}</b></article>
+        <article class="kpi"><small>HR Test (DISC)</small><b>${totals.hrTestCount}</b></article>
+        <article class="kpi accent"><small>Total Interviews</small><b>${totalInterviews}</b></article>
+        <article class="kpi"><small>Accepted</small><b>${totals.acceptedCount}</b></article>
+      </div>
+
+      <div class="section-bar">
+        <h2>Pipeline Conclusion by Position</h2>
+        <span>${summaryRows.length} Positions Tracked</span>
+      </div>
+
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th class="num" style="width:36px">NO.</th>
+            <th>POSITION</th>
+            <th class="num">CV SCREENING</th>
+            <th class="num">INVITED</th>
+            <th class="num">HR TEST</th>
+            <th class="num">HR INTERVIEW</th>
+            <th class="num">USER INTERVIEW</th>
+            <th class="num">FINAL INTERVIEW</th>
+            <th class="num">ACCEPTED</th>
+          </tr>
+        </thead>
+        <tbody>${conclusionBody}</tbody>
+        <tfoot>
+          <tr>
+            <td></td>
+            <td>TOTAL</td>
+            <td class="num">${totals.cvScreeningCount}</td>
+            <td class="num">${totals.invitedCount}</td>
+            <td class="num">${totals.hrTestCount}</td>
+            <td class="num">${totals.hrInterviewCount}</td>
+            <td class="num">${totals.userInterviewCount}</td>
+            <td class="num">${totals.finalInterviewCount}</td>
+            <td class="num">${totals.acceptedCount}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <p class="summary-note">
+        * Deduplication Policy: Candidates attending both HR Interview 1 and HR Interview 2 for the same position are counted once (1) under <b>HR Interview</b>. Likewise, candidates attending both User Interview 1 and User Interview 2 for the same position are counted once (1) under <b>User Interview</b>.
+      </p>
+
+      <footer class="footer">
+        <span>PT. Mitra Binamandiri Makmur · HR&amp;GA Workspace</span>
+        <span>Page 1 · Recruitment Conclusion Summary</span>
+      </footer>
+    </section>
+
+    <section class="report-page detail-page">
+      <header class="hero">
+        <div>
+          <div class="hero-brand">
+            <img src="${BRAND_LOGOS.mitra}" alt="PT. Mitra Binamandiri Makmur">
+            <span class="hero-sep"></span>
+            <span class="eyebrow">HR&amp;GA Workspace · Tracking Detail</span>
+          </div>
+          <h1>Detailed Candidate Recruitment Tracking</h1>
+        </div>
+        <div class="hero-meta">
+          <b>Page 2 · Full Candidate Register</b>
+          <span>${rows.length} Candidates · Generated ${esc(generatedAt)}</span>
+        </div>
+      </header>
+
+      <table class="detail-table">
+        <thead>
+          <tr>
+            <th>NAME</th>
+            <th>SOURCE</th>
+            <th>INVITE</th>
+            <th>FORM SUBMITTED</th>
+            <th>HR TEST</th>
+            <th>HR INT 1</th>
+            <th>HR INT 2</th>
+            <th>USER INT 1</th>
+            <th>USER INT 2</th>
+            <th>FINAL INT</th>
+            <th>DECISION</th>
+            <th>DECISION DATE</th>
+            <th>JOIN DATE</th>
+          </tr>
+        </thead>
+        <tbody>${detailBody}</tbody>
+      </table>
+
+      <footer class="footer">
+        <span>PT. Mitra Binamandiri Makmur · Confidential Recruitment Document</span>
+        <span>Detailed Candidate Tracking · Printed ${esc(generatedAt)}</span>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+export function printTrackingReport(options = {}) {
+  const tab = window.open('', '_blank');
+  if (!tab) throw new Error('Please allow pop-ups in your browser to print Tracking & Report.');
+  const html = buildTrackingReportHtml(options);
+  tab.document.open();
+  tab.document.write(html);
+  tab.document.close();
+  tab.focus();
+  setTimeout(() => { try { tab.print(); } catch { /* browser print UI */ } }, 140);
 }

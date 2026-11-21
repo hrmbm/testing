@@ -330,6 +330,7 @@ export function buildDuplicatedInterviewPayloads(sourceInterviews = [], targetAp
     contract_end_date: row.contract_end_date || null,
     official_position: row.official_position || '',
     assigned_nik: row.assigned_nik || '',
+    contract_number: row.contract_number || '',
     created_by: createdBy || row.created_by || null,
     updated_at: new Date().toISOString()
   }));
@@ -488,11 +489,27 @@ export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [
   return { ...progress, linkedApplicant };
 }
 
-export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [] } = {}) {
+export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [], stage1Leads = [] } = {}) {
   const linkedIds = new Set();
+  const linkedStage1Ids = new Set();
   (manualInvites || []).forEach(inv => {
     if (inv.linked_applicant_id) linkedIds.add(inv.linked_applicant_id);
+    if (inv.linked_stage1_id) linkedStage1Ids.add(inv.linked_stage1_id);
   });
+
+  const matchedLeadByApplicantId = new Map();
+  const matchedStage1Ids = new Set();
+  const stage1ById = new Map((stage1Leads || []).map(l => [l.id, l]));
+
+  for (const lead of (stage1Leads || [])) {
+    const matchedApp = findMatchingApplicantForLead(lead, { applicants, invitedCandidates: manualInvites });
+    if (matchedApp) {
+      matchedStage1Ids.add(lead.id);
+      if (!matchedLeadByApplicantId.has(matchedApp.id) && String(lead.source || '').trim()) {
+        matchedLeadByApplicantId.set(matchedApp.id, lead);
+      }
+    }
+  }
 
   const rows = [];
 
@@ -500,17 +517,25 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
     const linkedApp = inv.linked_applicant_id
       ? (applicants || []).find(a => a.id === inv.linked_applicant_id) || null
       : null;
-    const resolvedStatus = linkedApp ? 'Responded' : (inv.status === 'Responded' ? 'Responded' : 'No Response');
+    const linkedLead = inv.linked_stage1_id ? (stage1ById.get(inv.linked_stage1_id) || null) : null;
+    const resolvedStatus = (linkedApp || String(linkedLead?.source || '').trim())
+      ? 'Responded'
+      : (inv.status === 'Responded' ? 'Responded' : 'No Response');
+    const fallbackLeadSource = linkedApp
+      ? String(matchedLeadByApplicantId.get(linkedApp.id)?.source || '').trim()
+      : String(linkedLead?.source || '').trim();
+
     rows.push({
       rowKey: `manual:${inv.id}`,
       manualId: inv.id,
       linkedApplicantId: inv.linked_applicant_id || null,
+      linkedStage1Id: inv.linked_stage1_id || null,
       isManual: true,
       isAutoOnly: false,
       inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
-      candidateName: linkedApp?.full_name || inv.candidate_name || '—',
-      appliedPosition: inv.applied_position || linkedApp?.position || '—',
-      source: inv.source || 'Other',
+      candidateName: linkedApp?.full_name || linkedLead?.full_name || inv.candidate_name || '—',
+      appliedPosition: inv.applied_position || linkedApp?.position || linkedLead?.position || '—',
+      source: inv.source || fallbackLeadSource || 'Other',
       status: resolvedStatus,
       notes: inv.notes || '',
       isDuplicated: Boolean(linkedApp?.duplicated_from),
@@ -521,20 +546,45 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
   for (const app of (applicants || [])) {
     if (app.stage === 'stage1_pending') continue;
     if (linkedIds.has(app.id)) continue;
+    const leadSource = String(matchedLeadByApplicantId.get(app.id)?.source || '').trim();
     rows.push({
       rowKey: `app:${app.id}`,
       manualId: null,
       linkedApplicantId: app.id,
+      linkedStage1Id: matchedLeadByApplicantId.get(app.id)?.id || null,
       isManual: false,
       isAutoOnly: true,
       inviteDate: String(app.created_at || '').slice(0, 10),
       candidateName: app.full_name || app.application_data?.nama || '—',
       appliedPosition: app.position || app.application_data?.posisi || '—',
-      source: app.duplicated_from ? 'Duplicated Position' : 'Application Form',
+      source: app.duplicated_from ? 'Duplicated Position' : (leadSource || 'Application Form'),
       status: 'Responded',
       notes: '',
       isDuplicated: Boolean(app.duplicated_from),
       applicantRef: app
+    });
+  }
+
+  for (const lead of (stage1Leads || [])) {
+    const leadSource = String(lead.source || '').trim();
+    if (!leadSource) continue;
+    if (linkedStage1Ids.has(lead.id) || matchedStage1Ids.has(lead.id)) continue;
+    rows.push({
+      rowKey: `stage1:${lead.id}`,
+      manualId: null,
+      linkedApplicantId: null,
+      linkedStage1Id: lead.id,
+      isManual: false,
+      isAutoOnly: true,
+      inviteDate: String(lead.created_at || '').slice(0, 10),
+      candidateName: lead.full_name || '—',
+      appliedPosition: lead.position || '—',
+      source: leadSource,
+      status: 'Responded',
+      notes: 'Lead Register',
+      isDuplicated: false,
+      applicantRef: null,
+      stage1Ref: lead
     });
   }
 
@@ -546,18 +596,22 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
 }
 
 export function aggregateCvScreeningBySource(screenings = []) {
-  const bySource = new Map();
+  const byKey = new Map();
   for (const row of (screenings || [])) {
+    const position = String(row.position || '').trim();
     const source = String(row.source || '').trim();
     if (!source) continue;
+    const key = `${position.toLowerCase()}||${source.toLowerCase()}`;
     const count = Math.max(0, Number.parseInt(row.screening_count, 10) || 0);
-    const prev = bySource.get(source);
+    const prev = byKey.get(key);
     if (prev) {
       prev.screeningCount += count;
       if (row.notes && !prev.notes) prev.notes = row.notes;
     } else {
-      bySource.set(source, {
+      byKey.set(key, {
         id: row.id || null,
+        rowKey: key,
+        position,
         source,
         screeningCount: count,
         notes: row.notes || '',
@@ -565,7 +619,9 @@ export function aggregateCvScreeningBySource(screenings = []) {
       });
     }
   }
-  const items = [...bySource.values()].sort((a, b) => {
+  const items = [...byKey.values()].sort((a, b) => {
+    const posCmp = (a.position || '\uffff').localeCompare(b.position || '\uffff', 'en');
+    if (posCmp !== 0) return posCmp;
     const idxA = INVITE_SOURCES.indexOf(a.source);
     const idxB = INVITE_SOURCES.indexOf(b.source);
     if (idxA !== -1 && idxB !== -1) return idxA - idxB;
@@ -586,11 +642,25 @@ export function buildUnifiedTrackingRows({
 } = {}) {
   const rows = [];
   const inviteByApplicantId = new Map();
+  const inviteByStage1Id = new Map();
   (invitedCandidates || []).forEach(inv => {
     if (inv.linked_applicant_id && !inviteByApplicantId.has(inv.linked_applicant_id)) {
       inviteByApplicantId.set(inv.linked_applicant_id, inv);
     }
+    if (inv.linked_stage1_id && !inviteByStage1Id.has(inv.linked_stage1_id)) {
+      inviteByStage1Id.set(inv.linked_stage1_id, inv);
+    }
   });
+
+  const leadByApplicantId = new Map();
+  const seenStage1Ids = new Set();
+  for (const s of (stage1Leads || [])) {
+    seenStage1Ids.add(s.id);
+    const matched = findMatchingApplicantForLead(s, { applicants, interviews, invitedCandidates });
+    if (matched && !leadByApplicantId.has(matched.id) && String(s.source || '').trim()) {
+      leadByApplicantId.set(matched.id, s);
+    }
+  }
 
   const getDisc = a => (Array.isArray(a.disc_submissions) ? a.disc_submissions[0] : a.disc_submissions) || null;
   const getEmp = a => (Array.isArray(a.employees) ? a.employees[0] : a.employees) ||
@@ -614,6 +684,7 @@ export function buildUnifiedTrackingRows({
     const emp = getEmp(a);
     const disc = getDisc(a);
     const linkedInv = inviteByApplicantId.get(a.id) || null;
+    const matchedLead = leadByApplicantId.get(a.id) || null;
     const finalInt = byStage['Final Interview'];
     const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
 
@@ -637,14 +708,16 @@ export function buildUnifiedTrackingRows({
       ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
       : '';
     const joinDate = emp?.join_date || finalInt?.work_start_date || '';
+    const resolvedSource = linkedInv?.source || String(matchedLead?.source || '').trim() || 'Application Form';
 
     rows.push({
       id: `app:${a.id}`,
       name: a.full_name || '—',
+      position: a.position || '',
       sub: `${a.position || '—'}${a.nik ? ` · ${a.nik}` : ''}`,
       inviteDate: linkedInv?.invite_date || String(a.created_at || '').slice(0, 10),
       inviteStatus: 'Responded',
-      inviteSource: linkedInv?.source || 'Application Form',
+      inviteSource: resolvedSource,
       formSubmittedDate: String(a.created_at || '').slice(0, 10),
       hrTestDate: disc?.completed_at ? String(disc.completed_at).slice(0, 10) : '',
       hrTestDone: Boolean(disc || a.stage === 'disc_completed'),
@@ -666,6 +739,7 @@ export function buildUnifiedTrackingRows({
     if (matched) continue;
     const ints = (interviews || []).filter(i => i.stage1_id === s.id);
     const byStage = getLatestInterviewsByStage(ints);
+    const linkedInv = inviteByStage1Id.get(s.id) || null;
     const finalInt = byStage['Final Interview'];
     const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
     const leadRec = normalizeLeadRecommendation(s.recommendation);
@@ -680,13 +754,16 @@ export function buildUnifiedTrackingRows({
     } else if (finalDec === 'Sent to OS') { decisionLabel = 'Sent to OS'; decisionTone = 'gold'; }
     else if (leadRec === 'Not Recommended') { decisionLabel = 'Not Recommended'; decisionTone = 'gray'; }
 
+    const leadSource = String(s.source || linkedInv?.source || '').trim();
+
     rows.push({
       id: `stage1:${s.id}`,
       name: s.full_name || '—',
+      position: s.position || '',
       sub: `${s.position || '—'}${s.whatsapp ? ` · ${s.whatsapp}` : ''}`,
       inviteDate: String(s.created_at || '').slice(0, 10),
-      inviteStatus: 'Lead Register',
-      inviteSource: 'Lead Register',
+      inviteStatus: leadSource ? 'Responded' : (linkedInv?.status || 'Lead Register'),
+      inviteSource: leadSource || 'Lead Register',
       formSubmittedDate: '',
       hrTestDate: '',
       hrTestDone: false,
@@ -705,9 +782,11 @@ export function buildUnifiedTrackingRows({
 
   for (const inv of (invitedCandidates || [])) {
     if (inv.linked_applicant_id) continue;
+    if (inv.linked_stage1_id && seenStage1Ids.has(inv.linked_stage1_id)) continue;
     rows.push({
       id: `inv:${inv.id}`,
       name: inv.candidate_name || '—',
+      position: inv.applied_position || '',
       sub: `${inv.applied_position || '—'} · ${inv.source || '—'}`,
       inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
       inviteStatus: inv.status === 'Responded' ? 'Responded' : 'No Response',
@@ -729,6 +808,146 @@ export function buildUnifiedTrackingRows({
   }
 
   return rows;
+}
+
+export function buildRecruitmentConclusionSummary({
+  positions = [],
+  cvScreenings = [],
+  invitedCandidates = [],
+  stage1Leads = [],
+  applicants = [],
+  interviews = [],
+  employees = []
+} = {}) {
+  const buckets = new Map();
+  const ensureBucket = (rawPos = '') => {
+    const clean = String(rawPos || '').trim();
+    const display = clean && clean !== '—' ? clean : 'Unspecified';
+    const key = display.toLowerCase();
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        position: display,
+        cvScreeningCount: 0,
+        invitedCount: 0,
+        hrTestCount: 0,
+        hrCandidates: new Set(),
+        userCandidates: new Set(),
+        finalCandidates: new Set(),
+        acceptedCandidates: new Set()
+      });
+    }
+    return buckets.get(key);
+  };
+
+  for (const pos of (positions || [])) {
+    if (String(pos || '').trim()) ensureBucket(pos);
+  }
+
+  const applicantById = new Map((applicants || []).map(a => [a.id, a]));
+  const leadById = new Map((stage1Leads || []).map(l => [l.id, l]));
+  const matchedAppByStage1Id = new Map();
+  for (const lead of (stage1Leads || [])) {
+    const matched = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates });
+    if (matched) matchedAppByStage1Id.set(lead.id, matched);
+  }
+
+  // 1. CV Screening tally per Position
+  for (const scr of (cvScreenings || [])) {
+    const b = ensureBucket(scr.position);
+    b.cvScreeningCount += Math.max(0, Number.parseInt(scr.screening_count, 10) || 0);
+  }
+
+  // 2. Invited count per Position (deduplicated view rows)
+  const invitedRows = buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants, stage1Leads });
+  for (const row of invitedRows) {
+    const pos = String(row.appliedPosition || '').trim();
+    if (!pos || pos === '—') continue;
+    ensureBucket(pos).invitedCount += 1;
+  }
+
+  // 3. HR Test (DISC completed) & Hired/Accepted from applicants
+  const getDisc = a => (Array.isArray(a.disc_submissions) ? a.disc_submissions[0] : a.disc_submissions) || null;
+  const hiredApplicantIds = new Set((employees || []).map(e => e.applicant_id).filter(Boolean));
+
+  for (const app of (applicants || [])) {
+    if (app.stage === 'stage1_pending') continue;
+    const pos = String(app.position || app.application_data?.posisi || '').trim();
+    if (!pos) continue;
+    const bucket = ensureBucket(pos);
+    const hasDisc = Boolean(getDisc(app) || app.stage === 'disc_completed');
+    if (hasDisc) bucket.hrTestCount += 1;
+    if (app.stage === 'hired' || hiredApplicantIds.has(app.id)) {
+      bucket.acceptedCandidates.add(`app:${app.id}`);
+    }
+  }
+
+  // 4. Interviews per Position (deduplicating HR 1+2 and User 1+2 per candidate per position)
+  for (const row of (interviews || [])) {
+    const linkedApp = row.applicant_id
+      ? applicantById.get(row.applicant_id)
+      : (row.stage1_id ? matchedAppByStage1Id.get(row.stage1_id) : null);
+    const linkedLead = row.stage1_id ? leadById.get(row.stage1_id) : null;
+    const rawPos = String(linkedApp?.position || linkedLead?.position || row.applied_position || '').trim();
+    if (!rawPos) continue;
+
+    const bucket = ensureBucket(rawPos);
+    const candKey = linkedApp?.id
+      ? `app:${linkedApp.id}`
+      : row.applicant_id
+        ? `app:${row.applicant_id}`
+        : row.stage1_id
+          ? `stage1:${row.stage1_id}`
+          : `name:${normalizePersonName(row.candidate_name)}`;
+
+    if (row.interview_stage === 'HR 1' || row.interview_stage === 'HR 2') {
+      bucket.hrCandidates.add(candKey);
+    } else if (row.interview_stage === 'User 1' || row.interview_stage === 'User 2') {
+      bucket.userCandidates.add(candKey);
+    } else if (row.interview_stage === 'Final Interview') {
+      bucket.finalCandidates.add(candKey);
+      if (normalizeInterviewDecision(row.decision) === 'Accepted') {
+        bucket.acceptedCandidates.add(candKey);
+      }
+    }
+  }
+
+  const ordered = [...buckets.values()].filter(b => {
+    if (b.position !== 'Unspecified') return true;
+    return b.cvScreeningCount > 0 || b.invitedCount > 0 || b.hrTestCount > 0 ||
+      b.hrCandidates.size > 0 || b.userCandidates.size > 0 || b.finalCandidates.size > 0 || b.acceptedCandidates.size > 0;
+  });
+
+  const rows = ordered.map((b, idx) => ({
+    no: idx + 1,
+    position: b.position,
+    cvScreeningCount: b.cvScreeningCount,
+    invitedCount: b.invitedCount,
+    hrTestCount: b.hrTestCount,
+    hrInterviewCount: b.hrCandidates.size,
+    userInterviewCount: b.userCandidates.size,
+    finalInterviewCount: b.finalCandidates.size,
+    acceptedCount: b.acceptedCandidates.size
+  }));
+
+  const totals = rows.reduce((acc, r) => ({
+    cvScreeningCount: acc.cvScreeningCount + r.cvScreeningCount,
+    invitedCount: acc.invitedCount + r.invitedCount,
+    hrTestCount: acc.hrTestCount + r.hrTestCount,
+    hrInterviewCount: acc.hrInterviewCount + r.hrInterviewCount,
+    userInterviewCount: acc.userInterviewCount + r.userInterviewCount,
+    finalInterviewCount: acc.finalInterviewCount + r.finalInterviewCount,
+    acceptedCount: acc.acceptedCount + r.acceptedCount
+  }), {
+    cvScreeningCount: 0,
+    invitedCount: 0,
+    hrTestCount: 0,
+    hrInterviewCount: 0,
+    userInterviewCount: 0,
+    finalInterviewCount: 0,
+    acceptedCount: 0
+  });
+
+  return { rows, totals };
 }
 
 export function findDefaultInterviewer(stage, employees = []) {

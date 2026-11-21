@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261121-hrga-workspace-12';
+import { $, esc } from './common.js?v=20261121-hrga-workspace-13';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -15,7 +15,7 @@ import {
   normalizeInterviewDecision,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261121-hrga-workspace-12';
+} from './workspace-logic.js?v=20261121-hrga-workspace-13';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -207,6 +207,9 @@ export function openInterviewModal({
               <label>Employee NIK
                 <input class="input" type="text" name="assigned_nik" maxlength="40" placeholder="e.g., ST 260706">
               </label>
+              <label class="employee-notes">Contract Number
+                <input class="input" type="text" name="contract_number" maxlength="80" placeholder="e.g., 045/HRD-PKWT/XI/2026">
+              </label>
             </div>
           </div>
         </div>
@@ -300,6 +303,7 @@ export function openInterviewModal({
   form.elements.contract_duration_months.value = existing?.contract_duration_months ? String(existing.contract_duration_months) : '12';
   form.elements.official_position.value = existing?.official_position || '';
   form.elements.assigned_nik.value = existing?.assigned_nik || '';
+  form.elements.contract_number.value = existing?.contract_number || '';
 
   const rejectGroup = $('#int-final-reject-group', modal);
   const rejectDetailWrap = $('#int-reject-detail-wrap', modal);
@@ -376,7 +380,8 @@ export function openInterviewModal({
       contract_start_date: null,
       contract_end_date: null,
       official_position: '',
-      assigned_nik: ''
+      assigned_nik: '',
+      contract_number: ''
     };
 
     if (isFinal && dec === 'Rejected') {
@@ -393,6 +398,7 @@ export function openInterviewModal({
       const salaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
       const officialPos = form.elements.official_position.value.trim();
       const nik = form.elements.assigned_nik.value.trim().toUpperCase();
+      const contractNo = form.elements.contract_number.value.trim();
       if (!calc) { errorBox.textContent = 'Please complete Join Date and Contract Duration.'; return; }
       if (!officialPos) { errorBox.textContent = 'Official Position Title is required.'; return; }
       if (!nik) { errorBox.textContent = 'Employee NIK is required before saving.'; return; }
@@ -404,7 +410,8 @@ export function openInterviewModal({
         contract_start_date: calc.startIso,
         contract_end_date: calc.endIso,
         official_position: officialPos,
-        assigned_nik: nik
+        assigned_nik: nik,
+        contract_number: contractNo
       };
     }
 
@@ -522,7 +529,8 @@ export function openInvitedCandidateModal({
   posSelect.innerHTML = `<option value="">Select position…</option>` +
     posOptions.map(pos => `<option value="${esc(pos)}">${esc(pos)}</option>`).join('');
 
-  sourceSelect.innerHTML = INVITE_SOURCES.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
+  const sourceChoices = [...new Set([...INVITE_SOURCES, ...(existing?.source && existing.source !== '—' ? [existing.source] : [])])];
+  sourceSelect.innerHTML = sourceChoices.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
   statusSelect.innerHTML = INVITE_STATUSES.map(st => `<option value="${esc(st)}">${esc(st)}</option>`).join('');
 
   const availableApplicants = (applicants || []).filter(a => a.stage !== 'stage1_pending');
@@ -536,15 +544,16 @@ export function openInvitedCandidateModal({
   form.elements.invite_date.value = existing?.inviteDate || new Date().toISOString().slice(0, 10);
   form.elements.candidate_name.value = existing?.candidateName && existing.candidateName !== '—' ? existing.candidateName : '';
   posSelect.value = currentPos && currentPos !== '—' ? currentPos : '';
-  sourceSelect.value = INVITE_SOURCES.includes(existing?.source) ? existing.source : 'Jobstreet';
+  sourceSelect.value = sourceChoices.includes(existing?.source) ? existing.source : 'Jobstreet';
   statusSelect.value = existing?.status === 'Responded' ? 'Responded' : 'No Response';
   linkSelect.value = existing?.linkedApplicantId || '';
   form.elements.notes.value = existing?.notes || '';
 
+  const hasStage1Link = Boolean(existing?.linkedStage1Id);
   const syncLinkVisibility = () => {
     const isResponded = statusSelect.value === 'Responded';
     linkWrap.classList.toggle('hidden', !isResponded);
-    linkSelect.required = isResponded;
+    linkSelect.required = isResponded && !hasStage1Link;
   };
   statusSelect.onchange = syncLinkVisibility;
 
@@ -569,11 +578,12 @@ export function openInvitedCandidateModal({
     const source = sourceSelect.value;
     const status = statusSelect.value;
     const linkedApplicantId = status === 'Responded' ? (linkSelect.value || null) : null;
+    const linkedStage1Id = existing?.linkedStage1Id || null;
 
     if (!inviteDate) { errorBox.textContent = 'Please select an invitation date.'; return; }
     if (!candidateName) { errorBox.textContent = 'Candidate name is required.'; return; }
     if (!appliedPosition) { errorBox.textContent = 'Please select the applied position.'; return; }
-    if (status === 'Responded' && !linkedApplicantId) {
+    if (status === 'Responded' && !linkedApplicantId && !linkedStage1Id) {
       errorBox.textContent = 'Please connect this Responded entry to a candidate in Candidate List to avoid duplicates.';
       linkSelect.focus();
       return;
@@ -590,6 +600,7 @@ export function openInvitedCandidateModal({
         source,
         status,
         linked_applicant_id: linkedApplicantId,
+        linked_stage1_id: linkedStage1Id,
         notes: form.elements.notes.value.trim()
       });
       modal.classList.add('hidden');
@@ -605,7 +616,7 @@ export function openInvitedCandidateModal({
   form.elements.candidate_name.focus();
 }
 
-export function openCvScreeningModal({ existing = null, onSave }) {
+export function openCvScreeningModal({ existing = null, positions = [], onSave }) {
   let modal = $('#cv-screening-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -621,6 +632,9 @@ export function openCvScreeningModal({ existing = null, onSave }) {
       </div>
       <form id="cv-scr-form">
         <div class="employee-form-grid">
+          <label class="employee-notes">Position
+            <select class="select" name="position" required></select>
+          </label>
           <label class="employee-notes">Source
             <select class="select" name="source" required></select>
           </label>
@@ -650,22 +664,35 @@ export function openCvScreeningModal({ existing = null, onSave }) {
   form.reset();
   errorBox.textContent = '';
 
+  const positionSelect = form.elements.position;
+  const existingPos = String(existing?.position || '').trim();
+  const posList = [...new Set([...(positions || []), ...(existingPos ? [existingPos] : [])].filter(Boolean))];
+  positionSelect.innerHTML = `<option value="">Select position…</option>` +
+    posList.map(pos => `<option value="${esc(pos)}">${esc(pos)}</option>`).join('');
+  positionSelect.value = existingPos || '';
+  positionSelect.disabled = Boolean(existing?.id && existingPos);
+
   const sourceSelect = form.elements.source;
   const sourceList = [...new Set([...INVITE_SOURCES, ...(existing?.source ? [existing.source] : [])])];
   sourceSelect.innerHTML = sourceList.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
   sourceSelect.value = existing?.source || 'Jobstreet';
-  sourceSelect.disabled = Boolean(existing?.id);
+  sourceSelect.disabled = Boolean(existing?.id && existingPos);
+
   form.elements.screening_count.value = existing ? String(existing.screeningCount ?? existing.screening_count ?? 0) : '';
   form.elements.notes.value = existing?.notes || '';
-  $('#cv-scr-title', modal).textContent = existing ? `Edit Screening · ${existing.source}` : 'Add CV Screening Count';
+  $('#cv-scr-title', modal).textContent = existing
+    ? `Edit Screening · ${existingPos ? `${existingPos} · ` : ''}${existing.source}`
+    : 'Add CV Screening Count';
 
   form.onsubmit = async event => {
     event.preventDefault();
     errorBox.textContent = '';
     const saveBtn = $('#cv-scr-save', modal);
-    const source = existing?.source || sourceSelect.value;
+    const position = positionSelect.disabled ? existingPos : positionSelect.value.trim();
+    const source = sourceSelect.disabled ? (existing?.source || '') : sourceSelect.value;
     const count = Number.parseInt(form.elements.screening_count.value, 10);
-    if (!source) { errorBox.textContent = 'Please select a source.'; return; }
+    if (!position) { errorBox.textContent = 'Please select a position.'; positionSelect.focus(); return; }
+    if (!source) { errorBox.textContent = 'Please select a source.'; sourceSelect.focus(); return; }
     if (!Number.isInteger(count) || count < 0) {
       errorBox.textContent = 'Screening count must be 0 or higher.';
       return;
@@ -676,6 +703,7 @@ export function openCvScreeningModal({ existing = null, onSave }) {
     try {
       await onSave({
         id: existing?.id || null,
+        position,
         source,
         screening_count: count,
         notes: form.elements.notes.value.trim()
@@ -690,7 +718,7 @@ export function openCvScreeningModal({ existing = null, onSave }) {
   };
 
   modal.classList.remove('hidden');
-  (existing ? form.elements.screening_count : sourceSelect).focus();
+  (existing && existingPos ? form.elements.screening_count : positionSelect).focus();
 }
 
 export function openFullEmployeeModal({ employee = null, applicant = null, onSave }) {

@@ -1,4 +1,4 @@
-export const APP_BUILD = '20261121-hrga-workspace-12';
+export const APP_BUILD = '20261121-hrga-workspace-13';
 const DB_NAME = 'hrga-workspace-cache-db';
 const STORE_NAME = 'kv';
 

@@ -101,6 +101,7 @@ import {
   buildInvitedCandidatesViewRows,
   aggregateCvScreeningBySource,
   buildUnifiedTrackingRows,
+  buildRecruitmentConclusionSummary,
   parseEmployeeSpreadsheetRows,
   formatEmployeeExportRow,
   verifyPinRevealPassword,
@@ -356,3 +357,108 @@ test('isRootAdminAccount and buildEmployeeUserOptionLabel identify root Admin an
     'ST 130116 — ABD. KHAMID (MMD)'
   );
 });
+
+test('Lead Register source auto-syncs to Invited Candidates as Responded and Tracking without duplicates', () => {
+  const stage1Leads = [
+    { id: 'lead-1', full_name: 'Sari Indah', position: 'Admin Gudang', source: 'Glints', whatsapp: '0811111222', created_at: '2026-03-14T09:00:00Z' },
+    { id: 'lead-2', full_name: 'Tanpa Source', position: 'CNC', source: '', whatsapp: '0899999888', created_at: '2026-03-15T09:00:00Z' },
+    { id: 'lead-3', full_name: 'Bima Pratama', position: 'Production Lead', source: 'Indeed', whatsapp: '0822222333', created_at: '2026-03-01T09:00:00Z' }
+  ];
+  const applicants = [
+    {
+      id: 'app-1',
+      full_name: 'Bima Pratama',
+      position: 'Production Lead',
+      stage: 'disc_completed',
+      created_at: '2026-03-02T00:00:00Z',
+      application_data: { telepon: '0822222333' },
+      disc_submissions: [{ completed_at: '2026-03-03T00:00:00Z' }]
+    }
+  ];
+
+  const invitedRows = buildInvitedCandidatesViewRows({ manualInvites: [], applicants, stage1Leads });
+  // lead-3 matched app-1 -> merged once, carrying Indeed source; lead-1 added with Responded; lead-2 skipped (no source)
+  assert.equal(invitedRows.length, 2);
+  const bimaInvite = invitedRows.find(r => r.linkedApplicantId === 'app-1');
+  const sariInvite = invitedRows.find(r => r.linkedStage1Id === 'lead-1');
+  assert.equal(bimaInvite?.source, 'Indeed');
+  assert.equal(bimaInvite?.status, 'Responded');
+  assert.equal(sariInvite?.source, 'Glints');
+  assert.equal(sariInvite?.status, 'Responded');
+
+  const tracking = buildUnifiedTrackingRows({ applicants, stage1Leads, interviews: [], employees: [], invitedCandidates: [] });
+  assert.equal(tracking.length, 3);
+  assert.equal(tracking.find(r => r.id === 'app:app-1')?.inviteSource, 'Indeed');
+  assert.equal(tracking.find(r => r.id === 'stage1:lead-1')?.inviteSource, 'Glints');
+  assert.equal(tracking.find(r => r.id === 'stage1:lead-1')?.inviteStatus, 'Responded');
+  assert.equal(tracking.find(r => r.id === 'stage1:lead-2')?.inviteSource, 'Lead Register');
+});
+
+test('aggregateCvScreeningBySource groups screening counts cleanly by Position and Source', () => {
+  const agg = aggregateCvScreeningBySource([
+    { id: '1', position: 'CNC', source: 'Jobstreet', screening_count: 10 },
+    { id: '2', position: 'CNC', source: 'Glints', screening_count: 5 },
+    { id: '3', position: 'QA', source: 'Jobstreet', screening_count: 8 }
+  ]);
+  assert.equal(agg.totalCount, 23);
+  assert.equal(agg.items.length, 3);
+  assert.equal(agg.items[0].position, 'CNC');
+  assert.equal(agg.items[0].source, 'Jobstreet');
+  assert.equal(agg.items[0].screeningCount, 10);
+});
+
+test('buildRecruitmentConclusionSummary deduplicates HR 1+2 and User 1+2 interviews per candidate per position', () => {
+  const applicants = [
+    { id: 'a1', full_name: 'Kandidat Satu', position: 'CNC', stage: 'hired', disc_submissions: [{ completed_at: '2026-03-03' }] },
+    { id: 'a2', full_name: 'Kandidat Dua', position: 'CNC', stage: 'disc_completed', disc_submissions: [{ completed_at: '2026-03-04' }] },
+    { id: 'a3', full_name: 'Kandidat Tiga', position: 'QA', stage: 'application_submitted', disc_submissions: [] }
+  ];
+  const interviews = [
+    // Kandidat Satu attended BOTH HR 1 & HR 2 + BOTH User 1 & User 2 + Final -> counts as 1 HR, 1 User, 1 Final
+    { applicant_id: 'a1', applied_position: 'CNC', interview_stage: 'HR 1', decision: 'Recommended' },
+    { applicant_id: 'a1', applied_position: 'CNC', interview_stage: 'HR 2', decision: 'Recommended' },
+    { applicant_id: 'a1', applied_position: 'CNC', interview_stage: 'User 1', decision: 'Recommended' },
+    { applicant_id: 'a1', applied_position: 'CNC', interview_stage: 'User 2', decision: 'Recommended' },
+    { applicant_id: 'a1', applied_position: 'CNC', interview_stage: 'Final Interview', decision: 'Accepted', contract_number: '045/PKWT/2026' },
+    // Kandidat Dua attended HR 1 only -> HR interview count for CNC becomes 2
+    { applicant_id: 'a2', applied_position: 'CNC', interview_stage: 'HR 1', decision: 'Not Recommended' },
+    // Kandidat Tiga attended User 2 only in QA -> QA User interview = 1
+    { applicant_id: 'a3', applied_position: 'QA', interview_stage: 'User 2', decision: 'Recommended' }
+  ];
+  const cvScreenings = [
+    { id: 's1', position: 'CNC', source: 'Jobstreet', screening_count: 15 },
+    { id: 's2', position: 'CNC', source: 'Glints', screening_count: 5 }
+  ];
+  const summary = buildRecruitmentConclusionSummary({
+    positions: ['CNC', 'QA'],
+    cvScreenings,
+    invitedCandidates: [],
+    stage1Leads: [],
+    applicants,
+    interviews,
+    employees: []
+  });
+
+  const cnc = summary.rows.find(r => r.position === 'CNC');
+  const qa = summary.rows.find(r => r.position === 'QA');
+  assert.equal(cnc.cvScreeningCount, 20);
+  assert.equal(cnc.invitedCount, 2);
+  assert.equal(cnc.hrTestCount, 2);
+  assert.equal(cnc.hrInterviewCount, 2);
+  assert.equal(cnc.userInterviewCount, 1);
+  assert.equal(cnc.finalInterviewCount, 1);
+  assert.equal(cnc.acceptedCount, 1);
+
+  assert.equal(qa.invitedCount, 1);
+  assert.equal(qa.hrTestCount, 0);
+  assert.equal(qa.userInterviewCount, 1);
+
+  assert.equal(summary.totals.cvScreeningCount, 20);
+  assert.equal(summary.totals.hrInterviewCount, 2);
+  assert.equal(summary.totals.userInterviewCount, 2);
+  assert.equal(summary.totals.acceptedCount, 1);
+
+  const dupInts = buildDuplicatedInterviewPayloads([interviews[4]], { id: 'a4', full_name: 'Kandidat Satu', nik: '123', position: 'QA' }, 'admin');
+  assert.equal(dupInts[0].contract_number, '045/PKWT/2026');
+});
+

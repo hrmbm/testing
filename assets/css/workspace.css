@@ -705,11 +705,15 @@
     width: min(286px, 84vw);
     z-index: 100;
     transform: translateX(-105%);
-    transition: transform 0.2s ease;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.2s ease, visibility 0.2s ease;
     box-shadow: 16px 0 40px rgba(0, 0, 0, 0.35);
   }
   .sidebar.is-open {
     transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
   }
 }
 

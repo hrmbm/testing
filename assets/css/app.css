@@ -442,15 +442,18 @@ textarea:focus-visible {
 
 .table-panel {
   margin-top: 20px;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .table-wrap, .recruitment-data-scroll, .ocr-map-table-wrap {
   position: relative;
-  max-height: min(68vh, 760px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .data-table {
@@ -2523,7 +2526,9 @@ body.candidate-page {
 .interview-stage-scroll {
   max-height: 270px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .interview-mini-table {
