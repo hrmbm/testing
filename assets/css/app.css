@@ -2429,64 +2429,189 @@ body.candidate-page {
   color: #007850;
 }
 
-/* Desktop guard below 1024px on index.html */
-@media (max-width: 1023px) {
-  #desktop-guard {
-    display: grid;
-    min-height: 100vh;
-    place-content: center;
-    justify-items: center;
-    gap: 14px;
-    background: var(--navy);
-    color: #ffffff;
-  }
-  #desktop-guard .guard-mark {
-    width: 160px;
-  }
-  #desktop-guard .guard-mark img {
-    display: block;
-    width: 100%;
-    height: auto;
-  }
-  #desktop-guard .guard-title {
-    font-family: var(--font-display);
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-  }
-  .login-screen, .admin-shell {
-    display: none !important;
-  }
-}
-
-@media (min-width: 1024px) {
-  #desktop-guard {
-    display: none !important;
-  }
-}
-
+/* Responsive layout across desktop and mobile viewports (no desktop guard) */
 @media (max-width: 1200px) {
-  .admin-shell { grid-template-columns: 232px minmax(0, 1fr); }
-  .admin-content { padding: 24px; }
+  .admin-shell { grid-template-columns: 242px minmax(0, 1fr); }
+  .admin-content { padding: 20px; }
   .dashboard-v2-grid { grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr); }
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1023px) {
+  .admin-shell { grid-template-columns: minmax(0, 1fr); }
+  .admin-topbar { padding: 0 16px; height: 58px; }
+  .topbar-title { font-size: 18px; }
+  .admin-content { padding: 16px 14px 36px; }
   .stat-grid, .dashboard-metrics, .reports-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-v2-grid { grid-template-columns: 1fr; }
+  .panel-head { flex-wrap: wrap; padding: 12px 14px; }
+  .table-search { width: 100%; }
+  .table-search input { width: 100%; }
 }
 
 @media (max-width: 720px) {
   .candidate-wrap { padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); }
   .candidate-card, .form-wizard-card, .ktp-card, .disc-card { padding: 18px 16px; }
-  .form-grid, .employee-form-grid, .admin-attachment-grid, .template-upload, .print-brand-grid { grid-template-columns: 1fr; }
+  .form-grid, .employee-form-grid, .admin-attachment-grid, .template-upload, .print-brand-grid, .interview-grid { grid-template-columns: 1fr; }
   .form-field.wide, .employee-notes, .template-upload-copy { grid-column: auto; }
   .form-field input, .form-field select, .form-field textarea { font-size: 16px; min-height: 44px; }
   .wizard-actions .btn, .candidate-actions .btn { min-height: 46px; }
   .disc-option { grid-template-columns: minmax(0, 1fr) 48px 48px; gap: 6px; }
   .disc-column-head { gap: 8px; }
-  .stage2-candidate-panel .data-table th:nth-child(1), .stage2-candidate-panel .data-table td:nth-child(1) { min-width: 168px; max-width: 168px; }
-  .stage2-candidate-panel .data-table th:nth-child(2), .stage2-candidate-panel .data-table td:nth-child(2) { left: 168px; min-width: 150px; max-width: 150px; }
+  .stage2-candidate-panel .data-table th:nth-child(1), .stage2-candidate-panel .data-table td:nth-child(1) { min-width: 152px; max-width: 152px; }
+  .stage2-candidate-panel .data-table th:nth-child(2), .stage2-candidate-panel .data-table td:nth-child(2) { left: 152px; min-width: 132px; max-width: 132px; }
+  .modal-backdrop { padding: 12px; }
+  .employee-modal-card { padding: 18px 16px; max-height: 94vh; }
+  .page-actions { flex-wrap: wrap; width: 100%; justify-content: flex-start; }
+}
+
+/* Modal text-selection friendliness */
+.employee-modal-card, .print-brand-modal-card {
+  user-select: text;
+}
+
+/* Interview compact 1-page grid (max 5 latest rows + scroll) */
+.interview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.interview-stage-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.interview-stage-card.is-final {
+  grid-column: 1 / -1;
+}
+
+.interview-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff 0%, #faf8f4 100%);
+}
+
+.interview-stage-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.interview-stage-head small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.interview-stage-scroll {
+  max-height: 270px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.interview-mini-table {
+  width: 100%;
+  white-space: normal;
+}
+
+.interview-mini-table thead th {
+  padding: 8px 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.interview-mini-table thead th::after {
+  margin-left: 3px;
+  font-size: 10px;
+}
+
+.interview-mini-table tbody td {
+  padding: 8px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.interview-mini-table th:last-child,
+.interview-mini-table td:last-child:not(.table-empty) {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.interview-mini-table .status-pill {
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.interview-mini-table .icon-btn {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+}
+
+@media (max-width: 1120px) {
+  .interview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btn-xs {
+  min-height: 30px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+.contract-range-preview {
+  background: var(--teal-soft);
+  border-color: rgba(13, 92, 107, 0.25);
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+
+.pin-cell-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+
+.pin-eye-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ink-2);
+}
+
+.pin-eye-btn:hover {
+  background: var(--surface-subtle);
+  color: var(--teal);
+}
+
+.pin-eye-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.upload-preview-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+  font-size: 12.5px;
 }
 
 @media print {

@@ -1,8 +1,34 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-09';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261120-hrga-workspace-09';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-09';
-import { extractKtpText, formatKtpAddress } from './ktp-ocr.js?v=20261120-hrga-workspace-09';
-import { recognizeWithPaddle } from './ocr-engine.js?v=20261120-hrga-workspace-09';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-10';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261120-hrga-workspace-10';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261120-hrga-workspace-10';
+
+function formatKtpAddress(data={}){
+  const tidyPart=v=>String(v||'').replace(/\s+/g,' ').replace(/^\s*[:：\-]+\s*/,'').replace(/[,;]+$/,'').trim();
+  const titlePart=v=>tidyPart(v).toLowerCase().replace(/\b\p{L}/gu,c=>c.toUpperCase());
+  const parts=[];
+  const street=tidyPart(data.alamat_jalan),type=tidyPart(data.alamat_tipe);
+  if(street){
+    const legacy=street.match(/^(DSN\.?|DUSUN|JL\.?|JALAN|PERUM(?:AHAN)?\.?|KOMP\.?|KOMPLEK(?:S)?|GG\.?|GANG|BLOK)\s*(.*)$/i);
+    const raw=legacy?legacy[2]:street;
+    const prefixMap={'Dusun':'Dusun','Kampung':'Kampung','Jalan':'Jl.','Perumahan':'Perumahan','Komplek':'Komplek','Lingkungan':'Lingk.','Gang':'Gg.','Lorong':'Lorong','Blok':'Blok','Apartemen':'Apartemen'};
+    const effective=type || (legacy ? (/^(DSN|DUSUN)/i.test(legacy[1])?'Dusun':/^(KAMP)/i.test(legacy[1])?'Kampung':/^(JL|JALAN)/i.test(legacy[1])?'Jalan':/^(PERUM)/i.test(legacy[1])?'Perumahan':/^(KOMP|KOMPLEK)/i.test(legacy[1])?'Komplek':/^(LINGK)/i.test(legacy[1])?'Lingkungan':/^(GG|GANG)/i.test(legacy[1])?'Gang':/^(LOR)/i.test(legacy[1])?'Lorong':/^(APT|APARTEMEN)/i.test(legacy[1])?'Apartemen':'Blok') : '');
+    const prefix=prefixMap[effective]||'';
+    parts.push(prefix?`${prefix} ${titlePart(raw)}`:titlePart(raw));
+  }
+  const rt=String(data.alamat_rt||'').replace(/\D/g,'').slice(0,3);
+  const rw=String(data.alamat_rw||'').replace(/\D/g,'').slice(0,3);
+  if(rt||rw)parts.push(`RT ${rt.padStart(3,'0')||'___'}/RW ${rw.padStart(3,'0')||'___'}`);
+  if(data.alamat_desa){
+    const areaType=data.alamat_wilayah_type==='Kelurahan'?'Kel.':data.alamat_wilayah_type==='Desa'?'Desa':'Desa/Kel.';
+    parts.push(`${areaType} ${titlePart(data.alamat_desa)}`);
+  }
+  if(data.alamat_kecamatan)parts.push(`Kec. ${titlePart(data.alamat_kecamatan)}`);
+  if(data.alamat_kota_nama)parts.push(`${data.alamat_kota_jenis==='Kota'?'Kota':'Kab. '} ${titlePart(data.alamat_kota_nama)}`.replace(/\s+/g,' ').trim());
+  if(data.alamat_provinsi)parts.push(titlePart(data.alamat_provinsi));
+  const postal=String(data.alamat_kodepos||'').replace(/\D/g,'').slice(0,5);
+  if(postal)parts.push(postal);
+  return parts.filter(Boolean).join(', ');
+}
 
 const root = $('#candidate-app');
 const queryAll = (selector, scope=document) => [...scope.querySelectorAll(selector)];
@@ -449,7 +475,28 @@ export async function bindAdminEditorForm(form, values={}){
   });
   showStep(0,false);
   rerenderGroups(form);
-  try{await initAddressDropdowns(form,values);updateAddressPreview(form);}catch(error){console.warn('Admin address options could not be restored:',error);}
+  // Populate saved KTP region values immediately in Admin Edit mode without
+  // blocking on external emsifa.com cascading HTTP requests/cache lookups.
+  const savedRegions=[
+    ['alamat_provinsi',values.alamat_provinsi,'Pilih provinsi',values.alamat_provinsi_id],
+    ['alamat_kota_nama',values.alamat_kota_nama,'Pilih kabupaten / kota',values.alamat_kota_id],
+    ['alamat_kecamatan',values.alamat_kecamatan,'Pilih kecamatan',values.alamat_kecamatan_id],
+    ['alamat_desa',values.alamat_desa,'Pilih desa / kelurahan',values.alamat_desa_id]
+  ];
+  for(const [fieldName,savedVal,placeholder,savedId] of savedRegions){
+    const select=form.elements.namedItem(fieldName);
+    if(!select)continue;
+    select.innerHTML=`<option value="">${placeholder}</option>`;
+    if(savedVal){
+      const opt=document.createElement('option');
+      opt.value=String(savedVal);
+      opt.textContent=String(savedVal);
+      if(savedId)opt.dataset.regionId=String(savedId);
+      opt.selected=true;
+      select.append(opt);
+    }
+  }
+  updateAddressPreview(form);
   return {goToStep:showStep};
 }
 
@@ -901,6 +948,10 @@ function setOcrProgress(message){const progress=$('#ocr-progress');if(progress)p
 async function runOcr(canvas,generation){
   ktpPhotoDataUrl=canvasToKtpDataUrl(canvas);
   setOcrProgress('Menyiapkan mesin OCR lokal…');
+  const [{ recognizeWithPaddle }, { extractKtpText }] = await Promise.all([
+    import('./ocr-engine.js?v=20261120-hrga-workspace-10'),
+    import('./ktp-ocr.js?v=20261120-hrga-workspace-10')
+  ]);
   let result;
   try{
     result=await withTimeout(

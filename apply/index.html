@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="pk-build" content="20261120-hrga-workspace-09"><meta name="theme-color" content="#0D5C6B"><title>Application Portal | HR&amp;GA Workspace</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"><link rel="stylesheet" href="../assets/css/app.css?v=20261120-hrga-workspace-09"><link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261120-hrga-workspace-09"></head><body class="candidate-page apply-page">
+  <meta name="pk-build" content="20261120-hrga-workspace-10"><meta name="theme-color" content="#0D5C6B"><title>Application Portal | HR&amp;GA Workspace</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"><link rel="stylesheet" href="../assets/css/app.css?v=20261120-hrga-workspace-10"><link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261120-hrga-workspace-10"></head><body class="candidate-page apply-page">
   <header class="candidate-topbar">
     <div class="candidate-topbar-inner">
       <div class="candidate-topbar-brand">
@@ -148,7 +148,7 @@
   async function loadPositionOptions(){
     let positions=defaultPositions.slice();
     try{
-      const {supabase}=await import('../assets/js/supabase.js?v=20261120-hrga-workspace-09');
+      const {supabase}=await import('../assets/js/supabase.js?v=20261120-hrga-workspace-10');
       const {data,error}=await supabase.from('portal_settings').select('value').eq('key','application_positions').maybeSingle();
       if(error)throw error;
       const configured=Array.isArray(data?.value)
@@ -323,7 +323,7 @@
         district:district,whatsapp:$('whatsapp').value.trim(),
         details:collectDetails()
       };
-      const {supabase}=await import('../assets/js/supabase.js?v=20261120-hrga-workspace-09');
+      const {supabase}=await import('../assets/js/supabase.js?v=20261120-hrga-workspace-10');
       if(!supabase) throw new Error('Server belum terhubung. Silakan coba kembali nanti.');
       const ext=(file.name.split('.').pop()||'').toLowerCase();
       const id=crypto.randomUUID();

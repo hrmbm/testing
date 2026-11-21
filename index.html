@@ -1,24 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#014b59">
-  <meta name="pk-build" content="20261120-hrga-workspace-09">
+  <meta name="pk-build" content="20261120-hrga-workspace-10">
   <title>HR&GA Workspace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="assets/css/app.css?v=20261120-hrga-workspace-09">
-  <link rel="stylesheet" href="assets/css/mitra-theme.css?v=20261120-hrga-workspace-09">
-  <link rel="stylesheet" href="assets/css/workspace.css?v=20261120-hrga-workspace-09">
+  <link rel="stylesheet" href="assets/css/app.css?v=20261120-hrga-workspace-10">
+  <link rel="stylesheet" href="assets/css/mitra-theme.css?v=20261120-hrga-workspace-10">
+  <link rel="stylesheet" href="assets/css/workspace.css?v=20261120-hrga-workspace-10">
 </head>
 <body class="admin-page">
-  <div id="desktop-guard" class="desktop-guard">
-    <div class="guard-mark"><img src="assets/img/logo-mitra.png" alt="Mitra"></div>
-    <div class="guard-title">HR&GA WORKSPACE</div>
-  </div>
-
   <div id="login-view" class="login-screen">
     <section class="login-art" aria-label="PT. Mitra Binamandiri Makmur">
       <img class="login-hero-photo" src="assets/img/login-architecture.jpg" alt="PT. Mitra Binamandiri Makmur headquarters interior">
@@ -36,12 +31,13 @@
       <div class="login-box">
         <div class="login-mobile-brand">
           <img class="brand-logo brand-logo-dark" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+          <span>HR&amp;GA Workspace</span>
         </div>
         <h1>Masuk ke Workspace</h1>
         <form id="login-form" autocomplete="on">
-          <label class="field-label" for="login-user">Username</label>
-          <input id="login-user" class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Masukkan username">
-          <label class="field-label" for="login-pin">Access PIN</label>
+          <label class="field-label" for="login-user">NIK Karyawan</label>
+          <input id="login-user" class="input" name="username" autocomplete="username" autocapitalize="characters" spellcheck="false" minlength="3" maxlength="40" required placeholder="Masukkan NIK Karyawan (contoh: ST 130116)">
+          <label class="field-label" for="login-pin">PIN</label>
           <div class="pin-input-wrap">
             <input id="login-pin" class="input" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="current-password" required placeholder="Masukkan PIN">
             <button type="button" id="toggle-pin-visibility" class="pin-toggle-btn" aria-label="Tampilkan PIN" aria-pressed="false">
@@ -56,10 +52,12 @@
   </div>
 
   <div id="admin-shell" class="admin-shell hidden">
-    <aside class="sidebar">
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
+    <aside id="workspace-sidebar" class="sidebar" aria-label="Navigasi Workspace">
       <div class="sidebar-brand">
         <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
         <div class="sidebar-brand-name">HR&amp;GA <b>Workspace</b></div>
+        <button type="button" id="mobile-nav-close" class="sidebar-mobile-close" aria-label="Tutup menu">×</button>
       </div>
       <nav id="admin-nav" class="side-nav" aria-label="Main navigation">
         <button class="nav-item active" data-view="dashboard">
@@ -67,100 +65,150 @@
           Dashboard
         </button>
 
-        <div class="nav-group-title">Recruitment</div>
-        <div class="nav-subgroup-label">Raw Sourcing</div>
-        <button class="nav-item nav-child" data-view="stage1">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg></span>
-          Lead Register
-        </button>
-        <button class="nav-item nav-child" data-view="filterSettings">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></span>
-          Filter Settings
-        </button>
-        <a class="nav-item nav-child nav-link" href="apply/" target="_blank" rel="noopener">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-          Application Portal
-        </a>
+        <div class="nav-accordion" data-group-id="recruitment">
+          <button type="button" class="nav-group-toggle" data-collapse-target="group-recruitment" aria-expanded="true">
+            <span>Recruitment</span>
+            <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="group-recruitment" class="nav-group-body">
+            <button type="button" class="nav-subgroup-toggle" data-collapse-target="subgroup-raw-sourcing" aria-expanded="true">
+              <span>Raw Sourcing</span>
+              <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="subgroup-raw-sourcing" class="nav-subgroup-body">
+              <button class="nav-item nav-child" data-view="stage1">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg></span>
+                Lead Register
+              </button>
+              <button class="nav-item nav-child" data-view="filterSettings">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></span>
+                Filter Settings
+              </button>
+            </div>
 
-        <div class="nav-subgroup-label">Proposals</div>
-        <button class="nav-item nav-child" data-view="stage2">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 12h6"/><path d="M9 16h6"/></svg></span>
-          Candidate List
-        </button>
-        <button class="nav-item nav-child" data-view="stage3">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
-          DISC Assessment
-        </button>
-        <a class="nav-item nav-child nav-link" href="spm/" target="_blank" rel="noopener">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-          SPM Assessment
-        </a>
-        <button class="nav-item nav-child" data-view="settings">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
-          Settings
-        </button>
-        <button class="nav-item nav-child" data-view="print">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
-          Application Print
-        </button>
-        <button class="nav-item nav-child" data-view="reports">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
-          Recruitment Reports
-        </button>
-        <button class="nav-item nav-child" data-view="tracking">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
-          Tracking
-        </button>
+            <button type="button" class="nav-subgroup-toggle" data-collapse-target="subgroup-proposals" aria-expanded="true">
+              <span>Proposals</span>
+              <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="subgroup-proposals" class="nav-subgroup-body">
+              <button class="nav-item nav-child" data-view="stage2">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 12h6"/><path d="M9 16h6"/></svg></span>
+                Candidate List
+              </button>
+              <button class="nav-item nav-child" data-view="stage3">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
+                DISC Assessment
+              </button>
+              <a class="nav-item nav-child nav-link" href="spm/" target="_blank" rel="noopener">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+                SPM Assessment
+              </a>
+              <button class="nav-item nav-child" data-view="interview">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                Interview
+              </button>
+              <button class="nav-item nav-child" data-view="settings">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                Settings
+              </button>
+              <button class="nav-item nav-child" data-view="print">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
+                Application Print
+              </button>
+              <button class="nav-item nav-child" data-view="tracking">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                Tracking
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <div class="nav-group-title">Attendance Suite</div>
-        <button class="nav-item" data-view="attendanceCalendar">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
-          Calendar Settings
-        </button>
-        <div class="nav-subgroup-label">Staff</div>
-        <button class="nav-item nav-child" data-view="attendanceStaffHoliday">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>
-          Conditional Holiday Schedule
-        </button>
-        <button class="nav-item nav-child" data-view="attendanceStaffManagement">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
-          Attendance Management
-        </button>
-        <button class="nav-item nav-child" data-view="attendanceStaffReports">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
-          Reports
-        </button>
-        <button class="nav-item nav-child" data-view="employees">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-          Employee Directory
-        </button>
-        <div class="nav-subgroup-label">Drivers</div>
-        <button class="nav-item nav-child" data-view="attendanceDriverSchedule">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
-          Manual Driver Schedule
-        </button>
-        <button class="nav-item nav-child" data-view="attendanceDriverManagement">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
-          Attendance Management
-        </button>
-        <button class="nav-item nav-child" data-view="attendanceDriverReports">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
-          Reports
-        </button>
+        <div class="nav-accordion" data-group-id="attendance">
+          <button type="button" class="nav-group-toggle" data-collapse-target="group-attendance" aria-expanded="true">
+            <span>Attendance Suite</span>
+            <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="group-attendance" class="nav-group-body">
+            <button class="nav-item" data-view="attendanceCalendar">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+              Calendar Settings
+            </button>
+            <button type="button" class="nav-subgroup-toggle" data-collapse-target="subgroup-staff" aria-expanded="true">
+              <span>Staff</span>
+              <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="subgroup-staff" class="nav-subgroup-body">
+              <button class="nav-item nav-child" data-view="attendanceStaffHoliday">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>
+                Conditional Holiday Schedule
+              </button>
+              <button class="nav-item nav-child" data-view="attendanceStaffManagement">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+                Attendance Management
+              </button>
+              <button class="nav-item nav-child" data-view="attendanceStaffReports">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+                Reports
+              </button>
+              <button class="nav-item nav-child" data-view="employees">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                Employee Directory
+              </button>
+            </div>
+            <button type="button" class="nav-subgroup-toggle" data-collapse-target="subgroup-drivers" aria-expanded="true">
+              <span>Drivers</span>
+              <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="subgroup-drivers" class="nav-subgroup-body">
+              <button class="nav-item nav-child" data-view="attendanceDriverSchedule">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                Manual Driver Schedule
+              </button>
+              <button class="nav-item nav-child" data-view="attendanceDriverManagement">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+                Attendance Management
+              </button>
+              <button class="nav-item nav-child" data-view="attendanceDriverReports">
+                <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+                Reports
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <div class="nav-group-title">Vehicle Management</div>
-        <button class="nav-item" data-view="vehicleDatabase">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
-          Vehicle Database
-        </button>
-        <button class="nav-item" data-view="vehicleExpenses">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
-          Vehicle Expenses
-        </button>
-        <button class="nav-item" data-view="vehicleReports">
-          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
-          Reports
-        </button>
+        <div class="nav-accordion" data-group-id="vehicle">
+          <button type="button" class="nav-group-toggle" data-collapse-target="group-vehicle" aria-expanded="true">
+            <span>Vehicle Management</span>
+            <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="group-vehicle" class="nav-group-body">
+            <button class="nav-item" data-view="vehicleDatabase">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+              Vehicle Database
+            </button>
+            <button class="nav-item" data-view="vehicleExpenses">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
+              Vehicle Expenses
+            </button>
+            <button class="nav-item" data-view="vehicleReports">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
+              Reports
+            </button>
+          </div>
+        </div>
+
+        <div class="nav-accordion" data-group-id="access">
+          <button type="button" class="nav-group-toggle" data-collapse-target="group-access" aria-expanded="true">
+            <span>Administration</span>
+            <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="group-access" class="nav-group-body">
+            <button class="nav-item" data-view="userManagement">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+              Manajemen User
+            </button>
+          </div>
+        </div>
       </nav>
       <div class="sidebar-bottom">
         <button id="logout-btn" class="logout-btn">Sign Out <span aria-hidden="true">↗</span></button>
@@ -168,14 +216,27 @@
     </aside>
     <main class="admin-main">
       <header class="admin-topbar">
-        <div class="topbar-left"><div class="topbar-org">PT. Mitra Binamandiri Makmur</div><div id="page-title" class="topbar-title">Dashboard</div></div>
-        <div class="topbar-right"><div class="profile-chip"><span class="profile-avatar">HR</span><span><b id="admin-name">HR Admin</b><small>Administrator</small></span></div></div>
+        <div class="topbar-left">
+          <button type="button" id="mobile-nav-toggle" class="mobile-nav-toggle" aria-label="Buka menu navigasi" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div>
+            <div class="topbar-org">PT. Mitra Binamandiri Makmur</div>
+            <div id="page-title" class="topbar-title">Dashboard</div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="profile-chip">
+            <span class="profile-avatar">HR</span>
+            <span><b id="admin-name">HR Admin</b><small>Superadmin</small></span>
+          </div>
+        </div>
       </header>
       <section id="admin-content" class="admin-content"></section>
     </main>
   </div>
   <script type="module">
-    const BUILD = '20261120-hrga-workspace-09';
+    const BUILD = '20261120-hrga-workspace-10';
     const BUILD_KEY = 'portal-karir-static-build';
     const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 

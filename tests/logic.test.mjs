@@ -90,3 +90,128 @@ test('Mitra and ReHolz masters isolate mobile query to screen and support robust
   assert.ok(printJs.includes('99.6vh!important'), 'print.js .aux-sheet must use 99.6vh in print');
 });
 
+import {
+  calculateContractDates,
+  buildDuplicateCandidatePayload,
+  deriveCandidateProgress,
+  parseEmployeeSpreadsheetRows,
+  formatEmployeeExportRow,
+  verifyPinRevealPassword,
+  normalizeLoginIdentifier,
+  validateLoginIdentifier,
+  validatePin,
+  findDefaultInterviewer,
+  EMPLOYEE_TABLE_HEADERS
+} from '../assets/js/workspace-logic.js';
+
+test('calculateContractDates computes exact inclusive end date matching 17 Maret 2026 - 16 Maret 2027', () => {
+  const oneYear = calculateContractDates('2026-03-17', 12);
+  assert.deepEqual(oneYear, {
+    startIso: '2026-03-17',
+    endIso: '2027-03-16',
+    months: 12,
+    displayRange: '17 Maret 2026 - 16 Maret 2027'
+  });
+  const sixMonths = calculateContractDates('2026-07-13', 6);
+  assert.equal(sixMonths.endIso, '2027-01-12');
+  const threeMonths = calculateContractDates('2026-01-31', 3);
+  assert.equal(threeMonths.endIso, '2026-04-29');
+  assert.equal(calculateContractDates('2026-03-17', 2), null);
+  assert.equal(calculateContractDates('invalid', 12), null);
+});
+
+test('NIK login normalization and PIN reveal password check enforce rules', () => {
+  assert.equal(normalizeLoginIdentifier(' ST 130116 '), 'st130116');
+  assert.equal(validateLoginIdentifier('ST 130116'), true);
+  assert.equal(validateLoginIdentifier('ab'), false);
+  assert.equal(validatePin('123456'), true);
+  assert.equal(validatePin('12ab'), false);
+  assert.equal(verifyPinRevealPassword('8karakterH!'), true);
+  assert.equal(verifyPinRevealPassword('wrong'), false);
+});
+
+test('buildDuplicateCandidatePayload enforces position change and strips heavy KTP base64', () => {
+  const source = {
+    id: 'app-1',
+    full_name: 'Budi Santoso',
+    nik: '3514122006840004',
+    position: 'CNC',
+    cv_path: 'candidate-cv/uuid/cv.pdf',
+    ktp_path: 'candidate-identity/uuid/ktp.jpg',
+    application_data: { nama: 'Budi Santoso', posisi: 'CNC', ktp_foto: 'data:image/jpeg;base64,HUGE' }
+  };
+  assert.throws(() => buildDuplicateCandidatePayload(source, 'CNC'), /berbeda/);
+  const dup = buildDuplicateCandidatePayload(source, 'Maintenance');
+  assert.equal(dup.position, 'Maintenance');
+  assert.equal(dup.application_data.posisi, 'Maintenance');
+  assert.equal(dup.application_data.ktp_foto, undefined);
+  assert.equal(dup.duplicated_from, 'app-1');
+  assert.equal(dup.stage, 'application_submitted');
+});
+
+test('deriveCandidateProgress follows interview and employee progression', () => {
+  const base = { id: 'a1', stage: 'application_submitted', disc_submissions: [] };
+  assert.equal(deriveCandidateProgress(base, [], null).label, 'Formulir Masuk');
+  assert.equal(
+    deriveCandidateProgress({ ...base, stage: 'disc_completed' }, [{ interview_stage: 'HR 1', decision: 'Direkomendasikan', created_at: '2026-03-01T00:00:00Z' }], null).label,
+    'Interview HR 1 · Direkomendasikan'
+  );
+  assert.equal(
+    deriveCandidateProgress(base, [{ interview_stage: 'Final Interview', decision: 'Kirim Ke OS', created_at: '2026-03-05T00:00:00Z' }], null).label,
+    'Final Interview · Kirim Ke OS'
+  );
+  assert.equal(
+    deriveCandidateProgress(base, [{ interview_stage: 'Final Interview', decision: 'Ditolak', created_at: '2026-03-05T00:00:00Z' }], null).label,
+    'Final Interview · Ditolak'
+  );
+  assert.equal(
+    deriveCandidateProgress(base, [], { id: 'emp-1' }).label,
+    'Diterima · Karyawan'
+  );
+});
+
+test('Employee Directory spreadsheet parser and formatter align with 16-column format', () => {
+  assert.equal(EMPLOYEE_TABLE_HEADERS.length, 16);
+  const { rows, errors } = parseEmployeeSpreadsheetRows([
+    {
+      Nama: 'ABD. KHAMID',
+      Nik: 'ST 130116',
+      Departement: 'PURCHASING',
+      'Tgl Masuk': '05-11-2004',
+      Jabatan: 'MMD',
+      'Mulai Kontrak': '-',
+      'Kontrak Berakhir': '-',
+      Alamat: 'Subontoro Rt 16/07',
+      Nik2: '3516112304830004',
+      'Tempat Lahir': 'Mojokerto',
+      'Tanggal Lahir': '31-12-1983',
+      'No. Telp': '82230164498',
+      Status: 'TETAP',
+      Pendidikan: 'SMP',
+      'Jenis Kelamin': 'Laki-laki',
+      Agama: 'Islam'
+    }
+  ]);
+  assert.deepEqual(errors, []);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].employee_no, 'ST 130116');
+  assert.equal(rows[0].join_date, '2004-11-05');
+  assert.equal(rows[0].contract_start_date, null);
+  assert.equal(rows[0].birth_date, '1983-12-31');
+  const exported = formatEmployeeExportRow(rows[0]);
+  assert.deepEqual(Object.keys(exported), EMPLOYEE_TABLE_HEADERS);
+  assert.equal(exported['Tgl Masuk'], '05-11-2004');
+  assert.equal(exported['Mulai Kontrak'], '-');
+});
+
+test('findDefaultInterviewer matches Samsul Haiyadi for HR 1 and Diana Anita Sari for HR 2', () => {
+  const list = [
+    { id: 'e1', employee_no: 'ST 1001', full_name: 'Samsul Haiyadi' },
+    { id: 'e2', employee_no: 'ST 1002', full_name: 'Diana Anita Sari' }
+  ];
+  assert.equal(findDefaultInterviewer('HR 1', list).employeeId, 'e1');
+  assert.equal(findDefaultInterviewer('HR 2', list).employeeId, 'e2');
+  assert.equal(findDefaultInterviewer('User 1', list), null);
+});
+
+
