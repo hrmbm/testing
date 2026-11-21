@@ -224,7 +224,7 @@ textarea:focus-visible {
   top: 0;
   z-index: 30;
   height: 62px;
-  padding: 0 28px;
+  padding: 0 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -295,9 +295,10 @@ textarea:focus-visible {
 }
 
 .admin-content {
-  max-width: 1520px;
-  margin: 0 auto;
-  padding: 20px 28px 48px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 14px 18px 32px;
 }
 
 .page-intro {
@@ -995,9 +996,19 @@ textarea:focus-visible {
   font-size: 13px;
 }
 
+.settings-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-stack .position-manager,
+.settings-stack .template-manager {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 .settings-panel {
-  padding: 24px;
-  max-width: 720px;
+  padding: 22px 24px;
 }
 
 .settings-row {

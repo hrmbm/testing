@@ -1,9 +1,10 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-10';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-10';
-import { $, $$, esc, idDate } from './common.js?v=20261120-hrga-workspace-10';
-import { printApplication } from './print.js?v=20261120-hrga-workspace-10';
-import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-10';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-10';
+import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-11';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-11';
+import { $, $$, esc, idDate } from './common.js?v=20261120-hrga-workspace-11';
+import { printApplication, invalidateMasterHtmlCache } from './print.js?v=20261120-hrga-workspace-11';
+import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-11';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-11';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261120-hrga-workspace-11';
 import {
   EMPLOYEE_TABLE_HEADERS,
   INTERVIEW_STAGES,
@@ -18,8 +19,9 @@ import {
   formatEmployeeExportRow,
   formatDmyDash,
   calculateContractDates,
+  isRootAdminAccount,
   maskPin
-} from './workspace-logic.js?v=20261120-hrga-workspace-10';
+} from './workspace-logic.js?v=20261120-hrga-workspace-11';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -28,7 +30,7 @@ import {
   openEmployeeUploadModal,
   openUserModal,
   openPinRevealPrompt
-} from './admin-modals.js?v=20261120-hrga-workspace-10';
+} from './admin-modals.js?v=20261120-hrga-workspace-11';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -45,10 +47,20 @@ let interviewsTableMissing = false;
 let stage1HasRecommendationCol = true;
 let employeesExtendedMissing = false;
 let lastDataFetchedAt = 0;
+let inflightRefreshPromise = null;
+let bgRevalidatePromise = null;
 
 let activeView = 'dashboard';
 let adminDisplayName = 'HR Admin';
 let currentUserId = null;
+let currentAdminProfile = {
+  userId: null,
+  username: '',
+  employeeNik: '',
+  displayName: 'HR Admin',
+  role: 'Superadmin',
+  isRootAdmin: false
+};
 let printTemplates = [];
 let editingApplicantId = null;
 let stage2PositionsCache = [];
@@ -57,13 +69,14 @@ let defaultMasterSyncPromise = null;
 let pendingPrintRecord = null;
 let pendingPrintSourceButton = null;
 
-const DATA_CACHE_TTL_MS = 45000;
+const DATA_CACHE_TTL_MS = 120000;
+const SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
 const SIDEBAR_STATE_KEY = 'hrga_sidebar_collapse_v1';
+const SESSION_PROFILE_KEY = 'hrga_session_profile_v1';
 
 const TITLES = {
   dashboard: 'Dashboard',
   stage1: 'Lead Register',
-  filterSettings: 'Filter Settings',
   stage2: 'Candidate List',
   stage3: 'DISC Assessment',
   interview: 'Interview Pipeline',
@@ -121,6 +134,7 @@ function say(message) {
 
 function invalidateDataCache() {
   lastDataFetchedAt = 0;
+  cacheDelete('workspace_snapshot').catch(() => {});
 }
 
 function isMissingSchemaError(err) {
@@ -313,32 +327,120 @@ async function fetchInterviewsSafe() {
   return res.data || [];
 }
 
-async function refreshData(force = false) {
-  if (!force && lastDataFetchedAt && (Date.now() - lastDataFetchedAt) < DATA_CACHE_TTL_MS) {
-    return;
-  }
-  const [candidateResult, empRows, leadRows, intRows] = await Promise.all([
-    supabase.from('applicants')
-      .select('id,full_name,nik,position,stage,application_data,cv_path,ktp_path,created_at,disc_submissions(id,answers,completed_at),employees(id)')
-      .order('created_at', { ascending: false }).limit(1000),
-    fetchEmployeesSafe(),
-    fetchStage1Safe(),
-    fetchInterviewsSafe()
-  ]);
-  if (candidateResult.error) throw candidateResult.error;
-  // Strip embedded base64 ktp_foto from memory so filtering & table renders stay fast
-  applicants = (candidateResult.data || []).map(row => {
-    if (row.application_data && row.application_data.ktp_foto) {
+function stripEmbeddedKtpPhoto(rows = []) {
+  return (rows || []).map(row => {
+    if (row?.application_data && row.application_data.ktp_foto) {
       const copy = { ...row.application_data };
       delete copy.ktp_foto;
       return { ...row, application_data: copy };
     }
     return row;
   });
-  employees = empRows;
-  stage1Leads = leadRows;
-  interviews = intRows;
-  lastDataFetchedAt = Date.now();
+}
+
+async function fetchApplicantsLean() {
+  try {
+    const { data, error } = await supabase.rpc('list_applicants_lean');
+    if (!error && Array.isArray(data)) {
+      return stripEmbeddedKtpPhoto(data);
+    }
+    if (error && !isMissingSchemaError(error) && !String(error.message || '').includes('list_applicants_lean')) {
+      throw error;
+    }
+  } catch (err) {
+    if (!isMissingSchemaError(err) && !String(err?.message || '').includes('list_applicants_lean')) {
+      throw err;
+    }
+  }
+  const candidateResult = await supabase.from('applicants')
+    .select('id,full_name,nik,position,stage,application_data,cv_path,ktp_path,created_at,disc_submissions(id,answers,completed_at),employees(id)')
+    .order('created_at', { ascending: false }).limit(1000);
+  if (candidateResult.error) throw candidateResult.error;
+  return stripEmbeddedKtpPhoto(candidateResult.data || []);
+}
+
+function hydrateSnapshotIntoMemory(snapshot, savedAt) {
+  if (!snapshot) return false;
+  applicants = Array.isArray(snapshot.applicants) ? snapshot.applicants : [];
+  employees = Array.isArray(snapshot.employees) ? snapshot.employees : [];
+  stage1Leads = Array.isArray(snapshot.stage1Leads) ? snapshot.stage1Leads : [];
+  interviews = Array.isArray(snapshot.interviews) ? snapshot.interviews : [];
+  interviewsTableMissing = Boolean(snapshot.interviewsTableMissing);
+  stage1HasRecommendationCol = snapshot.stage1HasRecommendationCol !== false;
+  employeesExtendedMissing = Boolean(snapshot.employeesExtendedMissing);
+  lastDataFetchedAt = savedAt || Date.now();
+  return true;
+}
+
+async function fetchAndCacheFreshSnapshot() {
+  if (inflightRefreshPromise) return inflightRefreshPromise;
+  inflightRefreshPromise = (async () => {
+    const [appRows, empRows, leadRows, intRows] = await Promise.all([
+      fetchApplicantsLean(),
+      fetchEmployeesSafe(),
+      fetchStage1Safe(),
+      fetchInterviewsSafe()
+    ]);
+    applicants = appRows;
+    employees = empRows;
+    stage1Leads = leadRows;
+    interviews = intRows;
+    lastDataFetchedAt = Date.now();
+    await cacheSet('workspace_snapshot', {
+      applicants,
+      employees,
+      stage1Leads,
+      interviews,
+      interviewsTableMissing,
+      stage1HasRecommendationCol,
+      employeesExtendedMissing
+    });
+  })().finally(() => {
+    inflightRefreshPromise = null;
+  });
+  return inflightRefreshPromise;
+}
+
+function triggerBackgroundRevalidate() {
+  if (bgRevalidatePromise || inflightRefreshPromise) return;
+  bgRevalidatePromise = fetchAndCacheFreshSnapshot()
+    .then(() => {
+      const hasOpenModal = Boolean($('.modal-backdrop:not(.hidden)'));
+      const searchVal = $('#table-search')?.value?.trim();
+      const autoRefreshViews = new Set(['dashboard', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
+      if (!hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
+        if (activeView === 'dashboard') renderDashboard();
+        else if (activeView === 'stage1') renderStage1();
+        else if (activeView === 'stage2') renderStage2();
+        else if (activeView === 'stage3') renderStage3();
+        else if (activeView === 'interview') renderInterviewView();
+        else if (activeView === 'tracking') renderTrackingView();
+        else if (activeView === 'employees') renderEmployees();
+        else if (activeView === 'print') renderPrint();
+      }
+    })
+    .catch(() => {})
+    .finally(() => { bgRevalidatePromise = null; });
+}
+
+async function refreshData(force = false) {
+  if (!force && lastDataFetchedAt && (Date.now() - lastDataFetchedAt) < DATA_CACHE_TTL_MS) {
+    return;
+  }
+  if (!force && !lastDataFetchedAt) {
+    const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
+    if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
+      if (cached.stale || (Date.now() - cached.savedAt) >= DATA_CACHE_TTL_MS) {
+        triggerBackgroundRevalidate();
+      }
+      return;
+    }
+  }
+  if (!force && lastDataFetchedAt) {
+    triggerBackgroundRevalidate();
+    return;
+  }
+  await fetchAndCacheFreshSnapshot();
 }
 
 function renderDashboard() {
@@ -499,21 +601,29 @@ function bindStage1Actions(rows) {
 }
 
 async function renderSettings() {
-  const { data, error } = await supabase.from('portal_settings').select('value').eq('key', 'ktp_ocr_enabled').maybeSingle();
-  if (error) throw error;
-  const enabled = data?.value === true;
-  content.innerHTML = `<section class="panel settings-panel">
-    <div class="settings-row">
-      <div>
-        <h3 class="settings-title">ID Card Scanning (OCR)</h3>
-        <p class="settings-sub">Aktifkan pemindaian KTP otomatis untuk formulir kandidat Tahap 2.</p>
+  const [ocrResult, positions, tplError] = await Promise.all([
+    supabase.from('portal_settings').select('value').eq('key', 'ktp_ocr_enabled').maybeSingle(),
+    loadPositionList(),
+    loadPrintTemplates()
+  ]);
+  if (ocrResult.error) throw ocrResult.error;
+  const enabled = ocrResult.data?.value === true;
+  content.innerHTML = `<div class="settings-stack">
+    <section class="panel settings-panel">
+      <div class="settings-row">
+        <div>
+          <h3 class="settings-title">ID Card Scanning (OCR)</h3>
+          <p class="settings-sub">Aktifkan pemindaian KTP otomatis untuk formulir kandidat Tahap 2.</p>
+        </div>
+        <label class="settings-toggle" for="ocr-feature-toggle">
+          <span>${enabled ? 'Enabled' : 'Disabled'}</span>
+          <input id="ocr-feature-toggle" type="checkbox" ${enabled ? 'checked' : ''}>
+        </label>
       </div>
-      <label class="settings-toggle" for="ocr-feature-toggle">
-        <span>${enabled ? 'Enabled' : 'Disabled'}</span>
-        <input id="ocr-feature-toggle" type="checkbox" ${enabled ? 'checked' : ''}>
-      </label>
-    </div>
-  </section>`;
+    </section>
+    ${positionManagerHtml(positions)}
+    ${templateManagerHtml(tplError)}
+  </div>`;
   $('#ocr-feature-toggle').addEventListener('change', async event => {
     const value = event.target.checked;
     const { error: upsertErr } = await supabase.from('portal_settings')
@@ -521,6 +631,8 @@ async function renderSettings() {
     if (upsertErr) { event.target.checked = !value; say(upsertErr.message); }
     else { say(value ? 'OCR enabled.' : 'OCR disabled.'); loadView('settings'); }
   });
+  bindPositionManager(positions);
+  bindTemplateManager(Boolean(tplError));
 }
 
 /* ============================================================================
@@ -643,10 +755,16 @@ function bindStage2DocumentActions() {
 
 async function loadPositionList() {
   if (stage2PositionsCache.length) return stage2PositionsCache;
+  const cached = await cacheGet('positions_list', { maxAgeMs: 10 * 60 * 1000 });
+  if (cached?.value?.length && !cached.stale) {
+    stage2PositionsCache = cached.value;
+    return stage2PositionsCache;
+  }
   const { data, error } = await supabase.from('portal_settings').select('value').eq('key', 'application_positions').maybeSingle();
   if (error) throw error;
   const values = Array.isArray(data?.value) ? data.value : [];
   stage2PositionsCache = [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+  cacheSet('positions_list', stage2PositionsCache).catch(() => {});
   return stage2PositionsCache;
 }
 
@@ -658,6 +776,7 @@ async function savePositionList(positions) {
     .upsert({ key: 'application_positions', value: clean, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (error) throw error;
   stage2PositionsCache = clean;
+  cacheSet('positions_list', clean).catch(() => {});
 }
 
 function positionManagerHtml(positions) {
@@ -672,20 +791,20 @@ function bindPositionManager(positions) {
     const value = $('#new-position')?.value.trim() || '';
     if (!value) { say('Isi nama posisi terlebih dahulu.'); return; }
     if (positions.some(item => item.toLocaleLowerCase('id') === value.toLocaleLowerCase('id'))) { say('Nama posisi sudah ada.'); return; }
-    try { await savePositionList([...positions, value]); say('Posisi baru ditambahkan.'); loadView('stage2'); }
+    try { await savePositionList([...positions, value]); say('Posisi baru ditambahkan.'); loadView('settings'); }
     catch (error) { say(error.message || 'Posisi gagal ditambahkan.'); }
   });
   $$('[data-position-delete]').forEach(button => button.addEventListener('click', async () => {
     const index = Number(button.dataset.positionDelete);
     const next = positions.filter((_, i) => i !== index);
-    try { await savePositionList(next); say('Posisi dihapus dari daftar kandidat.'); loadView('stage2'); }
+    try { await savePositionList(next); say('Posisi dihapus dari daftar kandidat.'); loadView('settings'); }
     catch (error) { say(error.message || 'Posisi gagal dihapus.'); }
   }));
   $('#save-positions')?.addEventListener('click', async () => {
     const values = $$('[data-position-index]').map(input => input.value.trim());
     if (values.some(value => !value)) { say('Nama posisi tidak boleh kosong.'); return; }
     if (new Set(values.map(value => value.toLocaleLowerCase('id'))).size !== values.length) { say('Nama posisi tidak boleh duplikat.'); return; }
-    try { await savePositionList(values); say('Daftar posisi diperbarui.'); loadView('stage2'); }
+    try { await savePositionList(values); say('Daftar posisi diperbarui.'); loadView('settings'); }
     catch (error) { say(error.message || 'Daftar posisi gagal disimpan.'); }
   });
 }
@@ -800,17 +919,24 @@ async function saveStage2Candidate() {
 }
 
 function bindStage2CandidateActions() {
-  $$('[data-stage2-edit]').forEach(button => button.addEventListener('click', () => {
+  $$('[data-stage2-edit]').forEach(button => button.addEventListener('click', async () => {
     const applicant = applicants.find(item => item.id === button.dataset.stage2Edit);
-    if (applicant) openStage2CandidateEditor(applicant).catch(error => say(error.message || 'Form koreksi gagal dibuka.'));
+    if (!applicant) return;
+    try {
+      await loadPositionList();
+      await openStage2CandidateEditor(applicant);
+    } catch (error) {
+      say(error.message || 'Form koreksi gagal dibuka.');
+    }
   }));
 
-  $$('[data-stage2-dup]').forEach(button => button.addEventListener('click', () => {
+  $$('[data-stage2-dup]').forEach(button => button.addEventListener('click', async () => {
     const applicant = applicants.find(item => item.id === button.dataset.stage2Dup);
     if (!applicant) return;
+    const positions = await loadPositionList().catch(() => stage2PositionsCache);
     openDuplicateCandidateModal({
       applicant,
-      positions: stage2PositionsCache,
+      positions,
       onSave: async newPosition => {
         const payload = buildDuplicateCandidatePayload(applicant, newPosition);
         let { error } = await supabase.from('applicants').insert(payload);
@@ -857,9 +983,8 @@ function bindStage2CandidateActions() {
   }));
 }
 
-async function renderStage2() {
+function renderStage2() {
   const allRows = applicants.filter(row => row.stage !== 'stage1_pending');
-  const positions = await loadPositionList();
   const keys = stage2FieldKeys(allRows);
   const renderRows = rows => rows.length ? rows.map(row => stage2RowHtml(row, keys)).join('') : emptyRow(6 + keys.length, 'No candidate forms');
   const headerCells = [
@@ -873,9 +998,7 @@ async function renderStage2() {
   ].join('');
   content.innerHTML = header('Candidate List', '', '<button class="btn btn-secondary" id="refresh-stage2">Refresh ↻</button>') +
     `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Search name / NIK / position…', 'Candidate List')}
-      <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>` +
-    positionManagerHtml(positions);
-  bindPositionManager(positions);
+      <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`;
   $('#refresh-stage2')?.addEventListener('click', () => loadView('stage2', true));
   const repaint = query => {
     const filtered = allRows.filter(row => `${row.full_name} ${row.nik} ${row.position} ${JSON.stringify(row.application_data || {})}`.toLocaleLowerCase('id').includes(query));
@@ -969,7 +1092,7 @@ function renderInterviewStageCard(stage) {
     <div class="interview-stage-head">
       <div>
         <h3>${esc(INTERVIEW_STAGE_LABELS[stage])}</h3>
-        <small>Maksimal 5 kandidat terbaru${stage === 'HR 1' ? ' · Default PIC: Samsul Haiyadi' : stage === 'HR 2' ? ' · Default PIC: Diana Anita Sari' : ''}</small>
+        <small>Maksimal 5 kandidat terbaru${stage === 'HR 1' ? ' · Default PIC: Samsul Hariyadi (Employee Directory)' : stage === 'HR 2' ? ' · Default PIC: Diana Anita Sari (Employee Directory)' : ''}</small>
       </div>
       <button type="button" class="btn btn-primary btn-xs" data-interview-add="${esc(stage)}">+ Tambah Kandidat</button>
     </div>
@@ -1423,10 +1546,15 @@ async function exportEmployees() {
  * MANAJEMEN USER (NIK, Nama Karyawan, Role Superadmin, PIN + Eye 8karakterH!)
  * ============================================================================ */
 async function renderUserManagement() {
+  const canManageUsers = isRootAdminAccount(currentAdminProfile);
   let migrationMissing = false;
   let rows = [];
   try {
-    const { data, error } = await supabase.rpc('list_portal_users');
+    const [{ data, error }, empList] = await Promise.all([
+      supabase.rpc('list_portal_users'),
+      employees.length ? Promise.resolve(employees) : fetchEmployeesSafe().catch(() => [])
+    ]);
+    if (Array.isArray(empList) && empList.length) employees = empList;
     if (error) {
       if (isMissingSchemaError(error) || String(error.message || '').includes('list_portal_users')) {
         migrationMissing = true;
@@ -1449,6 +1577,10 @@ async function renderUserManagement() {
     ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">RPC Manajemen User belum aktif di Supabase. Jalankan file migrasi <code>database/migrations/20261120_hrga_workspace_v2.sql</code> di Supabase SQL Editor untuk mengaktifkan Tambah User &amp; Intip PIN.</div>`
     : '';
 
+  const accessNotice = !canManageUsers
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Akses hanya-baca: Hanya akun <b>Admin</b> utama yang dapat menambahkan, mengedit, menghapus, atau membuka PIN user.</div>`
+    : '';
+
   const renderRowsHtml = list => list.length
     ? list.map(u => `<tr>
         <td style="font-family:var(--font-mono)"><b>${esc(u.employee_nik || u.username)}</b></td>
@@ -1457,21 +1589,28 @@ async function renderUserManagement() {
         <td>
           <div class="pin-cell-wrap">
             <span data-pin-mask="${esc(u.username)}">${esc(maskPin())}</span>
-            <button type="button" class="pin-eye-btn" data-pin-reveal="${esc(u.username)}" data-pin-label="${esc(u.employee_nik || u.username)}" aria-label="Intip PIN ${esc(u.display_name || u.username)}" title="Intip PIN">
+            ${canManageUsers ? `<button type="button" class="pin-eye-btn" data-pin-reveal="${esc(u.username)}" data-pin-label="${esc(u.employee_nik || u.username)}" aria-label="Intip PIN ${esc(u.display_name || u.username)}" title="Intip PIN">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
+            </button>` : ''}
           </div>
         </td>
         <td>${u.last_login ? esc(idDate(u.last_login)) : '—'}</td>
-        <td><div class="row-actions">
-          <button type="button" class="icon-btn" data-user-edit="${esc(u.username)}">Edit</button>
-          <button type="button" class="icon-btn danger" data-user-delete="${esc(u.username)}">Delete</button>
-        </div></td>
+        <td>${canManageUsers
+          ? `<div class="row-actions">
+              <button type="button" class="icon-btn" data-user-edit="${esc(u.username)}">Edit</button>
+              ${String(u.username || '').toLowerCase() === 'admin' ? '' : `<button type="button" class="icon-btn danger" data-user-delete="${esc(u.username)}">Delete</button>`}
+            </div>`
+          : '<span class="subtle">Hanya Admin</span>'}</td>
       </tr>`).join('')
     : emptyRow(6, 'Belum ada data user');
 
-  content.innerHTML = header('Manajemen User', '', '<button id="add-portal-user" class="btn btn-primary">+ Tambah User</button>') +
+  const addButtonHtml = canManageUsers
+    ? '<button id="add-portal-user" class="btn btn-primary">+ Tambah User</button>'
+    : '';
+
+  content.innerHTML = header('Manajemen User', '', addButtonHtml) +
     migrationNotice +
+    accessNotice +
     `<section class="panel table-panel">${tableToolbar('Cari NIK / nama karyawan…', 'Daftar User Workspace')}
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>NIK</th><th>NAMA KARYAWAN</th><th>ROLE</th><th>PIN</th><th>LOGIN TERAKHIR</th><th>AKSI</th></tr></thead>
@@ -1479,6 +1618,7 @@ async function renderUserManagement() {
       </table></div></section>`;
 
   const bindUserActions = () => {
+    if (!canManageUsers) return;
     $$('[data-pin-reveal]').forEach(btn => btn.addEventListener('click', () => {
       const username = btn.dataset.pinReveal;
       const maskEl = $(`[data-pin-mask="${CSS.escape(username)}"]`);
@@ -1509,6 +1649,7 @@ async function renderUserManagement() {
       if (!user) return;
       openUserModal({
         existing: user,
+        employees,
         onSave: async fields => {
           const { error } = await supabase.rpc('upsert_portal_user', {
             p_nik: fields.nik,
@@ -1538,25 +1679,28 @@ async function renderUserManagement() {
     }));
   };
 
-  $('#add-portal-user').addEventListener('click', () => {
-    openUserModal({
-      existing: null,
-      onSave: async fields => {
-        if (migrationMissing) {
-          throw new Error('Jalankan file migrasi SQL v2 di Supabase SQL Editor terlebih dahulu.');
+  if (canManageUsers) {
+    $('#add-portal-user')?.addEventListener('click', () => {
+      openUserModal({
+        existing: null,
+        employees,
+        onSave: async fields => {
+          if (migrationMissing) {
+            throw new Error('Jalankan file migrasi SQL v2 di Supabase SQL Editor terlebih dahulu.');
+          }
+          const { error } = await supabase.rpc('upsert_portal_user', {
+            p_nik: fields.nik,
+            p_full_name: fields.full_name,
+            p_role: fields.role,
+            p_pin: fields.pin
+          });
+          if (error) throw error;
+          say(`User ${fields.full_name} berhasil ditambahkan.`);
+          await loadView('userManagement');
         }
-        const { error } = await supabase.rpc('upsert_portal_user', {
-          p_nik: fields.nik,
-          p_full_name: fields.full_name,
-          p_role: fields.role,
-          p_pin: fields.pin
-        });
-        if (error) throw error;
-        say(`User ${fields.full_name} berhasil ditambahkan.`);
-        await loadView('userManagement');
-      }
+      });
     });
-  });
+  }
 
   bindSearch('#table-search', query => {
     const filtered = rows.filter(u => `${u.employee_nik} ${u.username} ${u.display_name} ${u.role}`.toLocaleLowerCase('id').includes(query));
@@ -1626,19 +1770,12 @@ function renderPrint() {
     <section class="panel table-panel">${tableToolbar('Cari kandidat…', 'Application Print')}<div class="table-wrap"><table class="data-table">
       <thead><tr><th>APPLICANT</th><th>POSITION</th><th>STAGE</th><th>DISC</th><th>DOCUMENTS</th></tr></thead>
       <tbody id="candidate-rows">${renderPrintRows(applicants)}</tbody>
-    </table></div></section>
-    <div id="template-manager-slot"></div>`;
+    </table></div></section>`;
   bindSearch('#table-search', query => {
     $('#candidate-rows').innerHTML = renderPrintRows(applicants.filter(a => `${a.full_name} ${a.nik} ${a.position}`.toLocaleLowerCase('id').includes(query)));
     bindPrint();
   });
   bindPrint();
-  loadPrintTemplates().then(error => {
-    const slot = $('#template-manager-slot');
-    if (!slot) return;
-    slot.innerHTML = templateManagerHtml(error);
-    bindTemplateManager(Boolean(error));
-  });
 }
 
 function renderPlaceholder(title) {
@@ -1798,8 +1935,9 @@ function bindTemplateManager(migrationMissing) {
     try {
       await storeAndActivateTemplate(await file.text(), file.name);
       await markDefaultMasterSynced();
+      await invalidateMasterHtmlCache();
       say('Master HTML baru berhasil diaktifkan.');
-      await loadView('print');
+      await loadView('settings');
     } catch (error) { say(error.message || 'Master HTML gagal disimpan.'); }
     finally { button.disabled = false; button.textContent = 'Simpan & aktifkan'; }
   });
@@ -1812,8 +1950,9 @@ function bindTemplateManager(migrationMissing) {
       if (!response.ok) throw new Error('Master bawaan tidak ditemukan.');
       await storeAndActivateTemplate(await response.text(), 'Master bawaan repository');
       await markDefaultMasterSynced();
+      await invalidateMasterHtmlCache();
       say('Master bawaan berhasil diaktifkan.');
-      await loadView('print');
+      await loadView('settings');
     } catch (error) { say(error.message || 'Master bawaan gagal diaktifkan.'); }
     finally { button.disabled = false; button.textContent = 'Pulihkan master bawaan'; }
   });
@@ -1823,8 +1962,9 @@ function bindTemplateManager(migrationMissing) {
       const { error } = await supabase.rpc('activate_print_template', { p_template_id: button.dataset.templateActivate });
       if (error) throw error;
       await markDefaultMasterSynced();
+      await invalidateMasterHtmlCache();
       say('Versi master berhasil diaktifkan.');
-      await loadView('print');
+      await loadView('settings');
     } catch (error) { say(error.message || 'Versi master gagal diaktifkan.'); button.disabled = false; }
   }));
 }
@@ -1876,14 +2016,23 @@ async function loadView(view, forceRefresh = false) {
 
   const dataViews = new Set(['dashboard', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
-    content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Memuat data</h2></div></section>';
+    let hasCached = false;
+    if (!forceRefresh) {
+      const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
+      if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
+        hasCached = true;
+      }
+    }
+    if (!hasCached) {
+      content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Memuat data</h2></div></section>';
+    }
   }
 
   try {
     if (dataViews.has(view)) await refreshData(forceRefresh);
     if (view === 'dashboard') renderDashboard();
     else if (view === 'stage1') renderStage1();
-    else if (view === 'stage2') await renderStage2();
+    else if (view === 'stage2') renderStage2();
     else if (view === 'stage3') renderStage3();
     else if (view === 'interview') renderInterviewView();
     else if (view === 'tracking') renderTrackingView();
@@ -1899,8 +2048,107 @@ async function loadView(view, forceRefresh = false) {
   }
 }
 
-async function openAdmin(session) {
-  const { data: isAdmin, error } = await supabase.rpc('is_portal_admin');
+function readCachedSessionProfile() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_PROFILE_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSessionProfile(profile) {
+  try {
+    localStorage.setItem(SESSION_PROFILE_KEY, JSON.stringify(profile));
+  } catch {}
+}
+
+function applyAdminProfileUi(profile) {
+  currentAdminProfile = profile;
+  currentUserId = profile.userId;
+  adminDisplayName = profile.displayName || 'HR Admin';
+  const nameEl = $('#admin-name');
+  if (nameEl) nameEl.textContent = adminDisplayName;
+  const roleEl = $('#admin-role-label');
+  if (roleEl) roleEl.textContent = profile.isRootAdmin ? 'Admin Utama' : (profile.role || 'Superadmin');
+}
+
+async function resolveAdminProfileFromServer(session) {
+  const meta = session?.user?.user_metadata || {};
+  let username = meta.username || '';
+  let employeeNik = meta.employee_nik || '';
+  let displayName = meta.display_name || '';
+  let role = 'Superadmin';
+  let isRootAdmin = false;
+
+  const [rpcProfile, userRow] = await Promise.all([
+    supabase.rpc('get_my_admin_profile').then(res => res, () => ({ data: null, error: true })),
+    supabase.from('admin_users').select('display_name,role').eq('user_id', session.user.id).maybeSingle()
+  ]);
+
+  if (!rpcProfile.error && Array.isArray(rpcProfile.data) && rpcProfile.data[0]) {
+    const p = rpcProfile.data[0];
+    username = p.username || username;
+    employeeNik = p.employee_nik || employeeNik;
+    displayName = p.display_name || displayName;
+    role = p.role || role;
+    isRootAdmin = Boolean(p.is_root_admin);
+  }
+  if (!displayName && userRow?.data?.display_name) {
+    displayName = userRow.data.display_name;
+  }
+  if (userRow?.data?.role && role === 'Superadmin') {
+    role = userRow.data.role;
+  }
+  displayName = displayName || session.user.email || 'HR Admin';
+  isRootAdmin = isRootAdmin || isRootAdminAccount({ username, employeeNik, displayName });
+
+  return {
+    userId: session.user.id,
+    username,
+    employeeNik,
+    displayName,
+    role,
+    isRootAdmin
+  };
+}
+
+function verifyAdminAccessInBackground(session) {
+  Promise.all([
+    supabase.rpc('is_portal_admin'),
+    resolveAdminProfileFromServer(session)
+  ]).then(async ([adminCheck, freshProfile]) => {
+    if (adminCheck?.error || !adminCheck?.data) {
+      await supabase.auth.signOut().catch(() => {});
+      localStorage.removeItem(SESSION_PROFILE_KEY);
+      shell.classList.add('hidden');
+      loginView.classList.remove('hidden');
+      $('#login-error').textContent = 'Sesi admin berakhir atau hak akses belum aktif. Silakan masuk kembali.';
+      return;
+    }
+    writeCachedSessionProfile(freshProfile);
+    const changed = JSON.stringify(freshProfile) !== JSON.stringify(currentAdminProfile);
+    applyAdminProfileUi(freshProfile);
+    if (changed && activeView === 'userManagement') {
+      renderUserManagement().catch(() => {});
+    }
+  }).catch(() => {});
+}
+
+async function openAdmin(session, { fromSessionRestore = false } = {}) {
+  const cachedProfile = readCachedSessionProfile();
+  if (fromSessionRestore && cachedProfile?.userId === session.user.id) {
+    applyAdminProfileUi(cachedProfile);
+    loginView.classList.add('hidden');
+    shell.classList.remove('hidden');
+    await loadView(activeView || 'dashboard', false);
+    verifyAdminAccessInBackground(session);
+    return;
+  }
+
+  const [{ data: isAdmin, error }, profile] = await Promise.all([
+    supabase.rpc('is_portal_admin'),
+    resolveAdminProfileFromServer(session)
+  ]);
   if (error) {
     await supabase.auth.signOut();
     throw new Error('Login berhasil, tetapi pemeriksaan akses admin gagal.');
@@ -1909,13 +2157,11 @@ async function openAdmin(session) {
     await supabase.auth.signOut();
     throw new Error('Akun berhasil login, tetapi hak akses HR belum aktif.');
   }
-  currentUserId = session.user.id;
-  const { data: profile } = await supabase.from('admin_users').select('display_name').eq('user_id', session.user.id).maybeSingle();
-  adminDisplayName = profile?.display_name || session.user.email || 'HR Admin';
-  $('#admin-name').textContent = adminDisplayName;
+  writeCachedSessionProfile(profile);
+  applyAdminProfileUi(profile);
   loginView.classList.add('hidden');
   shell.classList.remove('hidden');
-  await loadView('dashboard', true);
+  await loadView(activeView || 'dashboard', false);
 }
 
 $('#toggle-pin-visibility')?.addEventListener('click', () => {
@@ -1971,11 +2217,12 @@ $('#login-form').addEventListener('submit', async event => {
       refresh_token: result.session.refresh_token
     });
     if (error) throw error;
-    await openAdmin(data.session);
+    await openAdmin(data.session, { fromSessionRestore: false });
     $('#login-pin').value = '';
   } catch (error) {
     console.error('NIK/PIN login failed:', error);
     errorBox.textContent = error.message || 'Sign-in gagal. Periksa NIK Karyawan dan PIN Anda.';
+  } finally {
     button.disabled = false;
     button.textContent = 'Sign In ↗';
   }
@@ -1986,15 +2233,24 @@ $('#admin-nav').addEventListener('click', event => {
   if (button) loadView(button.dataset.view);
 });
 
-$('#logout-btn').addEventListener('click', async () => {
-  await supabase?.auth.signOut();
+$('#logout-btn').addEventListener('click', () => {
+  localStorage.removeItem(SESSION_PROFILE_KEY);
   invalidateDataCache();
+  currentAdminProfile = null;
+  currentUserId = null;
+  applicants = [];
+  stage1Leads = [];
+  employees = [];
+  interviews = [];
+  portalUsers = [];
+  activeView = 'dashboard';
   shell.classList.add('hidden');
   loginView.classList.remove('hidden');
   $('#login-pin').value = '';
   const loginButton = $('#login-form button[type="submit"]');
   if (loginButton) { loginButton.disabled = false; loginButton.textContent = 'Sign In ↗'; }
-  currentUserId = null;
+  supabase?.auth.signOut({ scope: 'local' }).catch(() => {});
+  clearAllWorkspaceCache().catch(() => {});
 });
 
 async function init() {
@@ -2005,7 +2261,7 @@ async function init() {
   }
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
-    try { await openAdmin(session); }
+    try { await openAdmin(session, { fromSessionRestore: true }); }
     catch (error) { $('#login-error').textContent = error.message; }
   }
 }

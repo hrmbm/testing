@@ -113,7 +113,59 @@ BEGIN
 END;
 $$;
 
--- User Management RPCs (authenticated admins only)
+-- Helper to check whether the signed-in user is the root 'admin' (Superuser) account
+CREATE OR REPLACE FUNCTION public.is_root_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.admin_login_credentials c
+    WHERE c.auth_user_id = auth.uid()
+      AND lower(c.username) = 'admin'
+  );
+$$;
+
+-- Returns profile & root-admin status for current authenticated portal user
+CREATE OR REPLACE FUNCTION public.get_my_admin_profile()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT COALESCE(
+    (
+      SELECT jsonb_build_object(
+        'username', c.username,
+        'employee_nik', coalesce(nullif(c.employee_nik, ''), upper(c.username)),
+        'display_name', c.display_name,
+        'role', c.role,
+        'is_root_admin', (lower(c.username) = 'admin')
+      )
+      FROM public.admin_login_credentials c
+      WHERE c.auth_user_id = auth.uid()
+      LIMIT 1
+    ),
+    (
+      SELECT jsonb_build_object(
+        'username', CASE WHEN lower(u.display_name) = 'administrator' THEN 'admin' ELSE '' END,
+        'employee_nik', CASE WHEN lower(u.display_name) = 'administrator' THEN 'ADMIN' ELSE '' END,
+        'display_name', u.display_name,
+        'role', u.role,
+        'is_root_admin', (lower(u.display_name) = 'administrator')
+      )
+      FROM public.admin_users u
+      WHERE u.user_id = auth.uid()
+      LIMIT 1
+    )
+  );
+$$;
+
+-- User Management RPCs (authenticated admins can view; only root 'admin' can add/edit/delete/reveal)
 CREATE OR REPLACE FUNCTION public.list_portal_users()
 RETURNS TABLE(
   username text,
@@ -168,8 +220,8 @@ DECLARE
   v_auth_user_id uuid;
   v_secret text := 'hrga-workspace-pin-vault-v2-key';
 BEGIN
-  IF NOT public.is_portal_admin() THEN
-    RAISE EXCEPTION 'Akses admin diperlukan.';
+  IF NOT public.is_portal_admin() OR NOT public.is_root_admin() THEN
+    RAISE EXCEPTION 'Hanya akun Admin utama yang dapat menambahkan atau mengubah user.';
   END IF;
   IF length(v_username) < 3 OR length(v_username) > 32 THEN
     RAISE EXCEPTION 'NIK Karyawan minimal 3 karakter alfanumerik dan maksimal 32 karakter.';
@@ -240,8 +292,8 @@ DECLARE
   v_encrypted text;
   v_secret text := 'hrga-workspace-pin-vault-v2-key';
 BEGIN
-  IF NOT public.is_portal_admin() THEN
-    RAISE EXCEPTION 'Akses admin diperlukan.';
+  IF NOT public.is_portal_admin() OR NOT public.is_root_admin() THEN
+    RAISE EXCEPTION 'Hanya akun Admin utama yang dapat melihat PIN user.';
   END IF;
   IF coalesce(p_password, '') <> '8karakterH!' THEN
     RAISE EXCEPTION 'Password konfirmasi tidak sesuai.';
@@ -268,8 +320,8 @@ AS $$
 DECLARE
   v_target public.admin_login_credentials%rowtype;
 BEGIN
-  IF NOT public.is_portal_admin() THEN
-    RAISE EXCEPTION 'Akses admin diperlukan.';
+  IF NOT public.is_portal_admin() OR NOT public.is_root_admin() THEN
+    RAISE EXCEPTION 'Hanya akun Admin utama yang dapat menghapus user.';
   END IF;
   SELECT * INTO v_target
   FROM public.admin_login_credentials
@@ -277,8 +329,8 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'User tidak ditemukan.';
   END IF;
-  IF v_target.auth_user_id = auth.uid() THEN
-    RAISE EXCEPTION 'Tidak dapat menghapus akun yang sedang aktif digunakan.';
+  IF lower(v_target.username) = 'admin' OR v_target.auth_user_id = auth.uid() THEN
+    RAISE EXCEPTION 'Tidak dapat menghapus akun Admin utama atau akun yang sedang aktif digunakan.';
   END IF;
   DELETE FROM public.admin_login_credentials WHERE username = v_target.username;
   IF v_target.auth_user_id IS NOT NULL THEN
@@ -288,6 +340,61 @@ BEGIN
 END;
 $$;
 
+-- Server-side lean applicants query: strips heavy base64 ktp_foto before network serialization
+CREATE OR REPLACE FUNCTION public.list_applicants_lean()
+RETURNS TABLE(
+  id uuid,
+  full_name text,
+  nik text,
+  "position" text,
+  stage text,
+  application_data jsonb,
+  cv_path text,
+  ktp_path text,
+  created_at timestamptz,
+  disc_submissions jsonb,
+  employees jsonb
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  IF NOT public.is_portal_admin() THEN
+    RAISE EXCEPTION 'Akses admin diperlukan.';
+  END IF;
+  RETURN QUERY
+  SELECT
+    a.id,
+    a.full_name,
+    a.nik,
+    a."position",
+    a.stage,
+    coalesce(a.application_data, '{}'::jsonb) - 'ktp_foto',
+    a.cv_path,
+    a.ktp_path,
+    a.created_at,
+    coalesce((
+      SELECT jsonb_agg(jsonb_build_object('id', d.id, 'answers', d.answers, 'completed_at', d.completed_at))
+      FROM public.disc_submissions d
+      WHERE d.applicant_id = a.id
+    ), '[]'::jsonb),
+    coalesce((
+      SELECT jsonb_agg(jsonb_build_object('id', e.id))
+      FROM public.employees e
+      WHERE e.applicant_id = a.id
+    ), '[]'::jsonb)
+  FROM public.applicants a
+  ORDER BY a.created_at DESC
+  LIMIT 1000;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_root_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_root_admin() TO authenticated;
+REVOKE ALL ON FUNCTION public.get_my_admin_profile() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_my_admin_profile() TO authenticated;
 REVOKE ALL ON FUNCTION public.list_portal_users() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.list_portal_users() TO authenticated;
 REVOKE ALL ON FUNCTION public.upsert_portal_user(text, text, text, text) FROM PUBLIC;
@@ -296,6 +403,8 @@ REVOKE ALL ON FUNCTION public.reveal_portal_user_pin(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reveal_portal_user_pin(text, text) TO authenticated;
 REVOKE ALL ON FUNCTION public.delete_portal_user(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.delete_portal_user(text) TO authenticated;
+REVOKE ALL ON FUNCTION public.list_applicants_lean() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.list_applicants_lean() TO authenticated;
 
 -- ============================================================================
 -- 2. LEAD REGISTER: KETERANGAN REKOMENDASI

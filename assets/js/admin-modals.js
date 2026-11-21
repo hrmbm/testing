@@ -1,4 +1,4 @@
-import { $, $$, esc } from './common.js?v=20261120-hrga-workspace-10';
+import { $, $$, esc } from './common.js?v=20261120-hrga-workspace-11';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -9,9 +9,10 @@ import {
   calculateContractDates,
   findDefaultInterviewer,
   parseEmployeeSpreadsheetRows,
+  buildEmployeeUserOptionLabel,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261120-hrga-workspace-10';
+} from './workspace-logic.js?v=20261120-hrga-workspace-11';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -242,34 +243,26 @@ export function openInterviewModal({
     candSelect.value = existingKey;
   }
 
-  // Populate PIC dropdown from Employee Directory
+  // Populate PIC dropdown strictly from Employee Directory
   const picSelect = form.elements.pic_value;
   const defaultPic = findDefaultInterviewer(stage, employees);
-  const picOptions = employees.map(emp => ({
+  const picOptions = (employees || []).map(emp => ({
     value: `emp:${emp.id}`,
     label: `${emp.full_name || emp.employee_no} — ${emp.employee_no}${emp.position ? ` (${emp.position})` : ''}`,
     empId: emp.id,
     nik: emp.employee_no || '',
     name: emp.full_name || emp.employee_no || ''
   }));
-  if (defaultPic && !defaultPic.employeeId) {
-    picOptions.unshift({
-      value: `default:${defaultPic.name}`,
-      label: `${defaultPic.name} (Default ${stage})`,
-      empId: '',
-      nik: defaultPic.nik || '',
-      name: defaultPic.name
-    });
-  }
-  picSelect.innerHTML = `<option value="">Pilih PIC Interviewer…</option>` +
+  picSelect.innerHTML = `<option value="">${picOptions.length ? 'Pilih PIC Interviewer (Employee Directory)…' : 'Employee Directory masih kosong…'}</option>` +
     picOptions.map(o => `<option value="${esc(o.value)}" data-emp-id="${esc(o.empId)}" data-nik="${esc(o.nik)}" data-name="${esc(o.name)}">${esc(o.label)}</option>`).join('');
 
   if (existing?.pic_employee_id && [...picSelect.options].some(o => o.value === `emp:${existing.pic_employee_id}`)) {
     picSelect.value = `emp:${existing.pic_employee_id}`;
   } else if (existing?.pic_name) {
     const matchOpt = [...picSelect.options].find(o => o.dataset.name?.toLowerCase() === existing.pic_name.toLowerCase());
-    if (matchOpt) picSelect.value = matchOpt.value;
-    else {
+    if (matchOpt) {
+      picSelect.value = matchOpt.value;
+    } else {
       const opt = document.createElement('option');
       opt.value = `custom:${existing.pic_name}`;
       opt.dataset.name = existing.pic_name;
@@ -278,8 +271,10 @@ export function openInterviewModal({
       picSelect.append(opt);
       picSelect.value = opt.value;
     }
-  } else if (defaultPic) {
-    picSelect.value = defaultPic.employeeId ? `emp:${defaultPic.employeeId}` : `default:${defaultPic.name}`;
+  } else if (defaultPic?.employeeId) {
+    picSelect.value = `emp:${defaultPic.employeeId}`;
+  } else {
+    picSelect.value = '';
   }
 
   // Populate Decision dropdown
@@ -674,7 +669,7 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
   modal.classList.remove('hidden');
 }
 
-export function openUserModal({ existing = null, onSave }) {
+export function openUserModal({ existing = null, employees = [], onSave }) {
   let modal = $('#user-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -687,8 +682,11 @@ export function openUserModal({ existing = null, onSave }) {
       </div>
       <form id="user-modal-form">
         <div class="employee-form-grid">
-          <label>NIK Karyawan<input class="input" name="nik" required maxlength="32" placeholder="Contoh: ST 130116"></label>
-          <label>Nama Karyawan<input class="input" name="full_name" required maxlength="100" placeholder="Nama lengkap karyawan"></label>
+          <label class="employee-notes" id="user-emp-select-wrap">Pilih Karyawan (Employee Directory)
+            <select class="select" name="employee_id"></select>
+          </label>
+          <label>NIK Karyawan<input class="input" name="nik" required maxlength="32" placeholder="Otomatis dari Employee Directory"></label>
+          <label>Nama Karyawan<input class="input" name="full_name" required maxlength="100" placeholder="Otomatis dari Employee Directory"></label>
           <label>Role<select class="select" name="role"><option value="Superadmin">Superadmin</option></select></label>
           <label>PIN (4–12 Angka)
             <div class="pin-input-wrap" style="margin-top:6px">
@@ -716,13 +714,44 @@ export function openUserModal({ existing = null, onSave }) {
   const form = $('#user-modal-form', modal);
   const errorBox = $('#user-modal-error', modal);
   const eyeBtn = $('#user-pin-eye', modal);
+  const empSelectWrap = $('#user-emp-select-wrap', modal);
+  const empSelect = form.elements.employee_id;
   form.reset();
   errorBox.textContent = '';
 
-  $('#user-modal-title', modal).textContent = existing ? `Edit User · ${existing.employee_nik}` : 'Tambah User';
-  form.elements.nik.value = existing?.employee_nik || '';
-  form.elements.nik.readOnly = Boolean(existing);
-  form.elements.full_name.value = existing?.display_name || '';
+  const eligibleEmployees = [...(employees || [])]
+    .filter(emp => String(emp.employee_no || '').trim().length >= 3)
+    .sort((a, b) => String(a.full_name || a.employee_no || '').localeCompare(String(b.full_name || b.employee_no || ''), 'id'));
+
+  if (!existing) {
+    empSelectWrap.classList.remove('hidden');
+    empSelect.required = true;
+    empSelect.innerHTML = `<option value="">${eligibleEmployees.length ? 'Pilih karyawan dari Employee Directory…' : 'Employee Directory masih kosong…'}</option>` +
+      eligibleEmployees.map(emp => `<option value="${esc(emp.id)}" data-nik="${esc(emp.employee_no || '')}" data-name="${esc(emp.full_name || '')}">${esc(buildEmployeeUserOptionLabel(emp))}</option>`).join('');
+    empSelect.value = '';
+    form.elements.nik.readOnly = true;
+    form.elements.full_name.readOnly = true;
+    if (!eligibleEmployees.length) {
+      errorBox.textContent = 'Data Employee Directory belum tersedia. Tambahkan karyawan di Employee Directory terlebih dahulu.';
+    }
+    empSelect.onchange = () => {
+      const opt = empSelect.selectedOptions[0];
+      form.elements.nik.value = opt?.dataset.nik || '';
+      form.elements.full_name.value = opt?.dataset.name || '';
+      errorBox.textContent = '';
+    };
+  } else {
+    empSelectWrap.classList.add('hidden');
+    empSelect.required = false;
+    empSelect.innerHTML = '';
+    empSelect.onchange = null;
+    form.elements.nik.value = existing.employee_nik || '';
+    form.elements.nik.readOnly = true;
+    form.elements.full_name.value = existing.display_name || '';
+    form.elements.full_name.readOnly = true;
+  }
+
+  $('#user-modal-title', modal).textContent = existing ? `Edit User · ${existing.employee_nik}` : 'Tambah User (Employee Directory)';
   form.elements.role.value = 'Superadmin';
   form.elements.pin.type = 'password';
   form.elements.pin.required = !existing;
@@ -745,6 +774,11 @@ export function openUserModal({ existing = null, onSave }) {
     event.preventDefault();
     const saveBtn = $('#user-modal-save', modal);
     errorBox.textContent = '';
+    if (!existing && !empSelect.value) {
+      errorBox.textContent = 'Pilih karyawan dari Employee Directory terlebih dahulu.';
+      empSelect.focus();
+      return;
+    }
     const nik = form.elements.nik.value.trim();
     const fullName = form.elements.full_name.value.trim();
     const pin = form.elements.pin.value.trim();
@@ -768,7 +802,7 @@ export function openUserModal({ existing = null, onSave }) {
   };
 
   modal.classList.remove('hidden');
-  (existing ? form.elements.full_name : form.elements.nik).focus();
+  (existing ? form.elements.pin : empSelect).focus();
 }
 
 export function openPinRevealPrompt({ label = '', onUnlocked }) {

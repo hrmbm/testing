@@ -69,8 +69,8 @@ export const CONTRACT_DURATION_OPTIONS = [
 ];
 
 export const DEFAULT_INTERVIEW_PICS = {
-  'HR 1': { name: 'Samsul Haiyadi', fallbackDisplay: 'Samsul Haiyadi' },
-  'HR 2': { name: 'Diana Anita Sari', fallbackDisplay: 'Diana Anita Sari' }
+  'HR 1': { name: 'Samsul Hariyadi' },
+  'HR 2': { name: 'Diana Anita Sari' }
 };
 
 export const LEAD_RECOMMENDATION_OPTIONS = [
@@ -109,6 +109,21 @@ export function verifyPinRevealPassword(input = '') {
 export function maskPin(pin = '') {
   const len = Math.max(4, Math.min(12, String(pin || '').length || 4));
   return '•'.repeat(len);
+}
+
+export function isRootAdminAccount({ username = '', employeeNik = '', displayName = '' } = {}) {
+  const normUser = normalizeLoginIdentifier(username);
+  const normNik = normalizeLoginIdentifier(employeeNik);
+  const normDisplay = String(displayName ?? '').trim().toLowerCase();
+  return normUser === 'admin' || normNik === 'admin' || normDisplay === 'administrator';
+}
+
+export function buildEmployeeUserOptionLabel(emp = {}) {
+  const nik = String(emp.employee_no || '').trim();
+  const name = String(emp.full_name || '').trim();
+  const roleMeta = String(emp.position || emp.department || '').trim();
+  const base = nik && name ? `${nik} — ${name}` : name || nik || 'Karyawan';
+  return roleMeta ? `${base} (${roleMeta})` : base;
 }
 
 export function formatIndonesianDateLong(isoDate = '') {
@@ -274,17 +289,11 @@ export function findDefaultInterviewer(stage, employees = []) {
     const empName = String(emp.full_name || emp.applicant?.full_name || '').toLowerCase();
     return empName.includes(target);
   });
-  if (match) {
-    return {
-      employeeId: match.id,
-      nik: match.employee_no || '',
-      name: match.full_name || def.name
-    };
-  }
+  if (!match) return null;
   return {
-    employeeId: '',
-    nik: '',
-    name: def.fallbackDisplay
+    employeeId: match.id,
+    nik: match.employee_no || '',
+    name: match.full_name || def.name
   };
 }
 

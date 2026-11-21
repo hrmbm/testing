@@ -101,6 +101,8 @@ import {
   validateLoginIdentifier,
   validatePin,
   findDefaultInterviewer,
+  isRootAdminAccount,
+  buildEmployeeUserOptionLabel,
   EMPLOYEE_TABLE_HEADERS
 } from '../assets/js/workspace-logic.js';
 
@@ -204,14 +206,26 @@ test('Employee Directory spreadsheet parser and formatter align with 16-column f
   assert.equal(exported['Mulai Kontrak'], '-');
 });
 
-test('findDefaultInterviewer matches Samsul Haiyadi for HR 1 and Diana Anita Sari for HR 2', () => {
+test('findDefaultInterviewer matches Samsul Hariyadi for HR 1 and Diana Anita Sari for HR 2 strictly from Employee Directory', () => {
   const list = [
-    { id: 'e1', employee_no: 'ST 1001', full_name: 'Samsul Haiyadi' },
+    { id: 'e1', employee_no: 'ST 1001', full_name: 'Samsul Hariyadi' },
     { id: 'e2', employee_no: 'ST 1002', full_name: 'Diana Anita Sari' }
   ];
   assert.equal(findDefaultInterviewer('HR 1', list).employeeId, 'e1');
   assert.equal(findDefaultInterviewer('HR 2', list).employeeId, 'e2');
+  assert.equal(findDefaultInterviewer('HR 1', []), null);
   assert.equal(findDefaultInterviewer('User 1', list), null);
+});
+
+test('isRootAdminAccount and buildEmployeeUserOptionLabel identify root Admin and format options cleanly', () => {
+  assert.equal(isRootAdminAccount({ username: 'admin' }), true);
+  assert.equal(isRootAdminAccount({ employeeNik: 'ADMIN' }), true);
+  assert.equal(isRootAdminAccount({ displayName: 'Administrator' }), true);
+  assert.equal(isRootAdminAccount({ username: 'st130116', displayName: 'ABD. KHAMID' }), false);
+  assert.equal(
+    buildEmployeeUserOptionLabel({ employee_no: 'ST 130116', full_name: 'ABD. KHAMID', position: 'MMD' }),
+    'ST 130116 — ABD. KHAMID (MMD)'
+  );
 });
 
 
