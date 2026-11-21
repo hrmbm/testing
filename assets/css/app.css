@@ -2625,6 +2625,85 @@ body.candidate-page {
   font-size: 12.5px;
 }
 
+/* Invited view (Invited Candidates + CV Screening on 1 page) */
+.invited-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.invited-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .invited-kpis {
+    grid-template-columns: 1fr;
+  }
+}
+
+.invited-kpi-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.invited-kpi-card small {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.invited-kpi-card b {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-screening-panel .panel-head {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.tracking-stage-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 118px;
+}
+
+.tracking-date-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tracking-reason-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.interview-date-meta {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @media print {
   .candidate-topbar, .candidate-actions, .wizard-actions, .btn { display: none !important; }
 }

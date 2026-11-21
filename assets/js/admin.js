@@ -1,36 +1,46 @@
-import { supabase, isConfigured } from './supabase.js?v=20261120-hrga-workspace-11';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261120-hrga-workspace-11';
-import { $, $$, esc, idDate } from './common.js?v=20261120-hrga-workspace-11';
-import { printApplication, invalidateMasterHtmlCache } from './print.js?v=20261120-hrga-workspace-11';
-import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-11';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261120-hrga-workspace-11';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261120-hrga-workspace-11';
+import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-12';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-12';
+import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-12';
+import { printApplication, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-12';
+import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-12';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-12';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-12';
 import {
   EMPLOYEE_TABLE_HEADERS,
+  EMPLOYEE_UI_HEADERS,
   INTERVIEW_STAGES,
   INTERVIEW_STAGE_LABELS,
   LEAD_RECOMMENDATION_OPTIONS,
+  normalizeInterviewDecision,
+  normalizeLeadRecommendation,
   normalizeLoginIdentifier,
   validateLoginIdentifier,
   validatePin,
   buildDuplicateCandidatePayload,
+  buildDuplicatedDiscPayload,
+  buildDuplicatedInterviewPayloads,
+  buildDuplicatedInvitePayload,
   deriveCandidateProgress,
-  getLatestInterviewsByStage,
+  resolveLeadUnifiedStatus,
+  buildInvitedCandidatesViewRows,
+  aggregateCvScreeningBySource,
+  buildUnifiedTrackingRows,
   formatEmployeeExportRow,
   formatDmyDash,
-  calculateContractDates,
   isRootAdminAccount,
   maskPin
-} from './workspace-logic.js?v=20261120-hrga-workspace-11';
+} from './workspace-logic.js?v=20261121-hrga-workspace-12';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
   openInterviewModal,
+  openInvitedCandidateModal,
+  openCvScreeningModal,
   openFullEmployeeModal,
   openEmployeeUploadModal,
   openUserModal,
   openPinRevealPrompt
-} from './admin-modals.js?v=20261120-hrga-workspace-11';
+} from './admin-modals.js?v=20261121-hrga-workspace-12';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -42,8 +52,13 @@ let applicants = [];
 let stage1Leads = [];
 let employees = [];
 let interviews = [];
+let invitedCandidates = [];
+let cvScreenings = [];
 let portalUsers = [];
 let interviewsTableMissing = false;
+let invitedTableMissing = false;
+let cvScreeningsTableMissing = false;
+let interviewDateColMissing = false;
 let stage1HasRecommendationCol = true;
 let employeesExtendedMissing = false;
 let lastDataFetchedAt = 0;
@@ -76,6 +91,7 @@ const SESSION_PROFILE_KEY = 'hrga_session_profile_v1';
 
 const TITLES = {
   dashboard: 'Dashboard',
+  invited: 'Invited',
   stage1: 'Lead Register',
   stage2: 'Candidate List',
   stage3: 'DISC Assessment',
@@ -84,7 +100,7 @@ const TITLES = {
   employees: 'Employee Directory',
   print: 'Application Print',
   settings: 'Recruitment Settings',
-  userManagement: 'Manajemen User',
+  userManagement: 'User Management',
   attendanceSuite: 'Attendance Suite',
   attendanceCalendar: 'Calendar Settings',
   attendanceStaffHoliday: 'Conditional Holiday Schedule',
@@ -99,24 +115,6 @@ const TITLES = {
   vehicleReports: 'Vehicle Reports'
 };
 
-const stageLabel = {
-  stage1_pending: 'Lead Register',
-  application_submitted: 'Form Submitted',
-  disc_completed: 'DISC Completed',
-  stage4_pending: 'Proses Interview',
-  os_sent: 'Kirim Ke OS',
-  hired: 'Employee',
-  rejected: 'Ditolak'
-};
-const stageClass = {
-  stage1_pending: 'gray',
-  application_submitted: 'blue',
-  disc_completed: 'green',
-  stage4_pending: 'gold',
-  os_sent: 'gold',
-  hired: 'green',
-  rejected: 'gray'
-};
 
 function say(message) {
   let element = $('#admin-toast');
@@ -145,12 +143,9 @@ function isMissingSchemaError(err) {
     msg.includes('could not find the');
 }
 
-function statusPill(stage) {
-  return `<span class="status-pill ${stageClass[stage] || 'gray'}">${esc(stageLabel[stage] || stage || '—')}</span>`;
-}
 
 function fmtAge(applicant) {
-  return applicant?.application_data?.umur ? `${esc(applicant.application_data.umur)} th` : '—';
+  return applicant?.application_data?.umur ? `${esc(applicant.application_data.umur)} yrs` : '—';
 }
 
 function header(_title, _subtitle, actions = '') {
@@ -180,20 +175,20 @@ function getInterviewsForApplicant(applicantId) {
 }
 
 const APPLICATION_FIELD_LABELS = {
-  nama: 'Nama lengkap', nik: 'NIK', posisi: 'Posisi dilamar', tempat_lahir: 'Tempat lahir', tanggal_lahir: 'Tanggal lahir',
-  gender: 'Jenis kelamin', tinggi: 'Tinggi badan (cm)', berat: 'Berat badan (kg)', gol_darah: 'Golongan darah', agama: 'Agama',
-  warga_negara: 'Kewarganegaraan', telepon: 'WhatsApp / telepon', email: 'Email', alamat_provinsi: 'Provinsi KTP',
-  alamat_kota_nama: 'Kabupaten / kota KTP', alamat_kecamatan: 'Kecamatan KTP', alamat_desa: 'Desa / kelurahan KTP',
-  alamat_tipe: 'Jenis alamat KTP', alamat_jalan: 'Jalan / dusun KTP', alamat_rt: 'RT', alamat_rw: 'RW', alamat_kodepos: 'Kode pos',
-  domisili_berbeda: 'Alamat domisili berbeda', domisili: 'Alamat domisili', status_kawin: 'Status perkawinan', hobby: 'Hobi dan minat',
-  ayah_nama: 'Nama ayah', ayah_umur: 'Umur ayah', ayah_pendidikan: 'Pendidikan ayah', ayah_pekerjaan: 'Pekerjaan ayah',
-  ibu_nama: 'Nama ibu', ibu_umur: 'Umur ibu', ibu_pendidikan: 'Pendidikan ibu', ibu_pekerjaan: 'Pekerjaan ibu',
-  saudara_count: 'Jumlah saudara kandung', anak_count: 'Jumlah anak', bahasa_count: 'Jumlah bahasa', kerja_count: 'Jumlah pengalaman kerja',
-  pendidikan_terakhir: 'Pendidikan terakhir', mulai_kerja: 'Tanggal mulai bekerja', gaji_harapan: 'Gaji yang diharapkan',
-  fasilitas_harapan: 'Fasilitas yang diharapkan', referensi1_nama: 'Nama kontak darurat', referensi1_alamat: 'Alamat kontak darurat',
-  referensi1_telepon: 'Telepon kontak darurat', referensi1_pekerjaan: 'Pekerjaan kontak darurat', referensi1_hubungan: 'Hubungan kontak darurat',
-  jawaban1: 'Pengetahuan tentang perusahaan', jawaban2: 'Deskripsi diri', jawaban3: 'Kontribusi untuk perusahaan',
-  setuju: 'Pernyataan kebenaran data'
+  nama: 'Full Name', nik: 'NIK', posisi: 'Applied Position', tempat_lahir: 'Birth Place', tanggal_lahir: 'Birth Date',
+  gender: 'Gender', tinggi: 'Height (cm)', berat: 'Weight (kg)', gol_darah: 'Blood Type', agama: 'Religion',
+  warga_negara: 'Nationality', telepon: 'WhatsApp / Phone', email: 'Email', alamat_provinsi: 'ID Card Province',
+  alamat_kota_nama: 'ID Card City / Regency', alamat_kecamatan: 'District', alamat_desa: 'Village',
+  alamat_tipe: 'Address Type', alamat_jalan: 'Street / Hamlet', alamat_rt: 'RT', alamat_rw: 'RW', alamat_kodepos: 'Postal Code',
+  domisili_berbeda: 'Different Domicile', domisili: 'Domicile Address', status_kawin: 'Marital Status', hobby: 'Hobbies & Interests',
+  ayah_nama: "Father's Name", ayah_umur: "Father's Age", ayah_pendidikan: "Father's Education", ayah_pekerjaan: "Father's Occupation",
+  ibu_nama: "Mother's Name", ibu_umur: "Mother's Age", ibu_pendidikan: "Mother's Education", ibu_pekerjaan: "Mother's Occupation",
+  saudara_count: 'Siblings Count', anak_count: 'Children Count', bahasa_count: 'Languages Count', kerja_count: 'Work History Count',
+  pendidikan_terakhir: 'Latest Education', mulai_kerja: 'Available Start Date', gaji_harapan: 'Expected Salary',
+  fasilitas_harapan: 'Expected Benefits', referensi1_nama: 'Emergency Contact Name', referensi1_alamat: 'Emergency Contact Address',
+  referensi1_telepon: 'Emergency Contact Phone', referensi1_pekerjaan: 'Emergency Contact Occupation', referensi1_hubungan: 'Emergency Contact Relationship',
+  jawaban1: 'Company Knowledge', jawaban2: 'Self Description', jawaban3: 'Planned Contribution',
+  setuju: 'Declaration Agreement'
 };
 
 function applicationFieldLabel(key) {
@@ -201,13 +196,13 @@ function applicationFieldLabel(key) {
   const repeat = String(key).match(/^(saudara|anak|bahasa|kerja)(\d+)_(.+)$/);
   if (repeat) {
     const [, group, index, field] = repeat;
-    const groups = { saudara: 'Saudara kandung', anak: 'Anak', bahasa: 'Bahasa', kerja: 'Pengalaman kerja' };
+    const groups = { saudara: 'Sibling', anak: 'Child', bahasa: 'Language', kerja: 'Work Experience' };
     const labels = {
-      nama: 'Nama', lp: 'Jenis kelamin', umur: 'Umur', pendidikan: 'Pendidikan', pekerjaan: 'Pekerjaan',
-      bicara: 'Berbicara', baca: 'Membaca', tulis: 'Menulis', lainnya: 'Keterangan bahasa',
-      perusahaan: 'Nama perusahaan', periode_mulai: 'Mulai', periode_selesai: 'Selesai',
-      jabatan: 'Jabatan', usaha: 'Jenis usaha', jumlah: 'Jumlah karyawan', atasan: 'Nama atasan',
-      gaji: 'Gaji terakhir', alasan: 'Alasan berhenti'
+      nama: 'Name', lp: 'Gender', umur: 'Age', pendidikan: 'Education', pekerjaan: 'Occupation',
+      bicara: 'Speaking', baca: 'Reading', tulis: 'Writing', lainnya: 'Language Note',
+      perusahaan: 'Company Name', periode_mulai: 'Start', periode_selesai: 'End',
+      jabatan: 'Position', usaha: 'Industry', jumlah: 'Employees', atasan: 'Supervisor',
+      gaji: 'Last Salary', alasan: 'Reason for Leaving'
     };
     const number = group === 'saudara' ? Number(index) - 1 : Number(index);
     return `${groups[group]} ${number} · ${labels[field] || field.replace(/_/g, ' ')}`;
@@ -218,7 +213,7 @@ function applicationFieldLabel(key) {
 
 function displayApplicationValue(value) {
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'boolean') return value ? 'Ya' : 'Tidak';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (Array.isArray(value)) return value.map(displayApplicationValue).join(', ');
   if (typeof value === 'object') {
     return Object.entries(value)
@@ -236,7 +231,7 @@ function discGraphSvg(result) {
     const points = values.map((value, index) => `${xs[index]},${y(value)}`).join(' ');
     return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>${values.map((value, index) => `<circle cx="${xs[index]}" cy="${y(value)}" r="3" fill="${color}"/>`).join('')}`;
   }).join('');
-  return `<div class="disc-mini-graph"><svg viewBox="0 0 252 104" role="img" aria-label="Grafik skor DISC untuk D, I, S, C"><line x1="15" y1="49" x2="237" y2="49" stroke="#cbd4e1" stroke-dasharray="3 4"/><line x1="15" y1="15" x2="237" y2="15" stroke="#edf0f5"/><line x1="15" y1="83" x2="237" y2="83" stroke="#edf0f5"/>${lines}${['D', 'I', 'S', 'C'].map((letter, index) => `<text x="${xs[index]}" y="99" text-anchor="middle">${letter}</text>`).join('')}</svg><div class="disc-graph-legend"><span><i class="g1"></i>G1</span><span><i class="g2"></i>G2</span><span><i class="g3"></i>G3</span></div></div>`;
+  return `<div class="disc-mini-graph"><svg viewBox="0 0 252 104" role="img" aria-label="DISC score chart for D, I, S, C"><line x1="15" y1="49" x2="237" y2="49" stroke="#cbd4e1" stroke-dasharray="3 4"/><line x1="15" y1="15" x2="237" y2="15" stroke="#edf0f5"/><line x1="15" y1="83" x2="237" y2="83" stroke="#edf0f5"/>${lines}${['D', 'I', 'S', 'C'].map((letter, index) => `<text x="${xs[index]}" y="99" text-anchor="middle">${letter}</text>`).join('')}</svg><div class="disc-graph-legend"><span><i class="g1"></i>G1</span><span><i class="g2"></i>G2</span><span><i class="g3"></i>G3</span></div></div>`;
 }
 
 function applicantRows(rows, action = 'print') {
@@ -245,32 +240,31 @@ function applicantRows(rows, action = 'print') {
     const employee = getEmployeeForApplicant(applicant);
     const disc = getDiscForApplicant(applicant);
     const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id), employee);
-    let graph = '<span class="status-pill gray">Belum ada grafik</span>';
+    let graph = '<span class="status-pill gray">No graph yet</span>';
     let personality = '—';
     if (disc?.answers) {
       try {
         const result = computeDisc(disc.answers);
         const natural = result.pola[2];
         graph = discGraphSvg(result);
-        personality = `<b>${esc(natural.title)}</b><small class="table-subline">${esc(natural.nama)} · Dominan ${esc(result.hurufDominan)}</small>`;
+        personality = `<b>${esc(natural.title)}</b><small class="table-subline">${esc(natural.nama)} · Dominant ${esc(result.hurufDominan)}</small>`;
       } catch {
-        graph = '<span class="status-pill gray">Hasil perlu diperiksa</span>';
-        personality = 'Perlu diperiksa';
+        graph = '<span class="status-pill gray">Check result</span>';
+        personality = 'Needs review';
       }
     }
     return `<tr><td><b class="cell-clamp-2" title="${esc(applicant.full_name)}">${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
       <td><div class="cell-clamp-2" title="${esc(applicant.position || '—')}">${esc(applicant.position || '—')}</div></td><td>${fmtAge(applicant)}</td>
       <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
       ${action === 'both' ? `<td>${graph}</td><td>${personality}</td>` : ''}
-      <td><div class="row-actions">${action === 'both' && !employee ? `<button class="icon-btn" data-hire="${esc(applicant.id)}">Jadikan karyawan</button>` : ''}
-      <button class="icon-btn" data-print="${esc(applicant.id)}">Cetak</button></div></td></tr>`;
+      <td><div class="row-actions"><button class="icon-btn" data-print="${esc(applicant.id)}">Print</button></div></td></tr>`;
   }).join('');
 }
 
 function bindSearch(selector, rerender) {
   const input = $(selector);
   if (!input) return;
-  input.addEventListener('input', () => rerender(input.value.trim().toLocaleLowerCase('id')));
+  input.addEventListener('input', () => rerender(input.value.trim().toLowerCase()));
 }
 
 async function fetchEmployeesSafe() {
@@ -303,10 +297,12 @@ async function fetchStage1Safe() {
   if (res.error) throw res.error;
   return (res.data || []).map(item => ({
     ...item,
-    recommendation: item.recommendation || (
-      item.status === 'invited' ? 'Direkomendasikan'
-        : item.status === 'rejected' ? 'Tidak Direkomendasikan'
-          : 'Belum Ditentukan'
+    recommendation: normalizeLeadRecommendation(
+      item.recommendation || (
+        item.status === 'invited' ? 'Recommended'
+          : item.status === 'rejected' ? 'Not Recommended'
+            : 'Pending'
+      )
     )
   }));
 }
@@ -324,6 +320,39 @@ async function fetchInterviewsSafe() {
     throw res.error;
   }
   interviewsTableMissing = false;
+  return res.data || [];
+}
+
+async function fetchInvitedSafe() {
+  const res = await supabase.from('invited_candidates')
+    .select('*')
+    .order('invite_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1000);
+  if (res.error) {
+    if (isMissingSchemaError(res.error)) {
+      invitedTableMissing = true;
+      return [];
+    }
+    throw res.error;
+  }
+  invitedTableMissing = false;
+  return res.data || [];
+}
+
+async function fetchCvScreeningsSafe() {
+  const res = await supabase.from('cv_screenings')
+    .select('*')
+    .order('source', { ascending: true })
+    .limit(200);
+  if (res.error) {
+    if (isMissingSchemaError(res.error)) {
+      cvScreeningsTableMissing = true;
+      return [];
+    }
+    throw res.error;
+  }
+  cvScreeningsTableMissing = false;
   return res.data || [];
 }
 
@@ -365,7 +394,11 @@ function hydrateSnapshotIntoMemory(snapshot, savedAt) {
   employees = Array.isArray(snapshot.employees) ? snapshot.employees : [];
   stage1Leads = Array.isArray(snapshot.stage1Leads) ? snapshot.stage1Leads : [];
   interviews = Array.isArray(snapshot.interviews) ? snapshot.interviews : [];
+  invitedCandidates = Array.isArray(snapshot.invitedCandidates) ? snapshot.invitedCandidates : [];
+  cvScreenings = Array.isArray(snapshot.cvScreenings) ? snapshot.cvScreenings : [];
   interviewsTableMissing = Boolean(snapshot.interviewsTableMissing);
+  invitedTableMissing = Boolean(snapshot.invitedTableMissing);
+  cvScreeningsTableMissing = Boolean(snapshot.cvScreeningsTableMissing);
   stage1HasRecommendationCol = snapshot.stage1HasRecommendationCol !== false;
   employeesExtendedMissing = Boolean(snapshot.employeesExtendedMissing);
   lastDataFetchedAt = savedAt || Date.now();
@@ -375,23 +408,31 @@ function hydrateSnapshotIntoMemory(snapshot, savedAt) {
 async function fetchAndCacheFreshSnapshot() {
   if (inflightRefreshPromise) return inflightRefreshPromise;
   inflightRefreshPromise = (async () => {
-    const [appRows, empRows, leadRows, intRows] = await Promise.all([
+    const [appRows, empRows, leadRows, intRows, invRows, scrRows] = await Promise.all([
       fetchApplicantsLean(),
       fetchEmployeesSafe(),
       fetchStage1Safe(),
-      fetchInterviewsSafe()
+      fetchInterviewsSafe(),
+      fetchInvitedSafe(),
+      fetchCvScreeningsSafe()
     ]);
     applicants = appRows;
     employees = empRows;
     stage1Leads = leadRows;
     interviews = intRows;
+    invitedCandidates = invRows;
+    cvScreenings = scrRows;
     lastDataFetchedAt = Date.now();
     await cacheSet('workspace_snapshot', {
       applicants,
       employees,
       stage1Leads,
       interviews,
+      invitedCandidates,
+      cvScreenings,
       interviewsTableMissing,
+      invitedTableMissing,
+      cvScreeningsTableMissing,
       stage1HasRecommendationCol,
       employeesExtendedMissing
     });
@@ -407,9 +448,10 @@ function triggerBackgroundRevalidate() {
     .then(() => {
       const hasOpenModal = Boolean($('.modal-backdrop:not(.hidden)'));
       const searchVal = $('#table-search')?.value?.trim();
-      const autoRefreshViews = new Set(['dashboard', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
+      const autoRefreshViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
       if (!hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
         if (activeView === 'dashboard') renderDashboard();
+        else if (activeView === 'invited') renderInvitedView();
         else if (activeView === 'stage1') renderStage1();
         else if (activeView === 'stage2') renderStage2();
         else if (activeView === 'stage3') renderStage3();
@@ -470,18 +512,18 @@ function renderDashboard() {
   const maxPosition = Math.max(1, ...topPositions.map(item => item[1]));
   const recent = applicants.slice(0, 7);
   content.innerHTML = `
-    <section class="dashboard-atelier-hero" aria-label="Ringkasan ruang kerja">
-      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="Showroom dan studio interior PT. Mitra Binamandiri Makmur">
+    <section class="dashboard-atelier-hero" aria-label="Workspace overview">
+      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio">
       <div class="atelier-hero-scrim" aria-hidden="true"></div>
       <div class="atelier-hero-content">
         <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
-        <h1 class="atelier-hero-title">Selamat datang, ${esc(adminDisplayName)}</h1>
+        <h1 class="atelier-hero-title">Welcome, ${esc(adminDisplayName)}</h1>
         <div class="atelier-hero-meta">
-          <span><b>${total}</b> kandidat tercatat</span>
+          <span><b>${total}</b> recorded candidates</span>
           <span aria-hidden="true">·</span>
-          <span><b>${submitted}</b> formulir masuk</span>
+          <span><b>${submitted}</b> forms submitted</span>
           <span aria-hidden="true">·</span>
-          <span><b>${hired}</b> karyawan aktif</span>
+          <span><b>${hired}</b> active employees</span>
         </div>
       </div>
     </section>
@@ -493,14 +535,14 @@ function renderDashboard() {
       </button>
       <button type="button" class="workspace-module" data-view="employees" data-module="vehicle">
         <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-        <span class="workspace-module-copy"><b>Employee Directory</b><span>Data &amp; Upload Karyawan</span></span>
+        <span class="workspace-module-copy"><b>Employee Directory</b><span>Employee Records &amp; Import</span></span>
         <span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
     </section>
     <section class="dashboard-metrics" aria-label="Recruitment metrics">
-      <article class="stat-card"><div class="stat-top"><span>Lead Register</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span></div><div class="stat-number">${stage1}</div><div class="stat-note">Pelamar awal masuk</div></article>
-      <article class="stat-card"><div class="stat-top"><span>Forms Submitted</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span></div><div class="stat-number">${submitted}</div><div class="stat-note">Formulir Tahap 2</div></article>
-      <article class="stat-card"><div class="stat-top"><span>DISC Completed</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span></div><div class="stat-number">${discDone}</div><div class="stat-note">Asesmen DISC selesai</div></article>
+      <article class="stat-card"><div class="stat-top"><span>Lead Register</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span></div><div class="stat-number">${stage1}</div><div class="stat-note">Initial incoming leads</div></article>
+      <article class="stat-card"><div class="stat-top"><span>Forms Submitted</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span></div><div class="stat-number">${submitted}</div><div class="stat-note">Stage 2 applications</div></article>
+      <article class="stat-card"><div class="stat-top"><span>DISC Completed</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span></div><div class="stat-number">${discDone}</div><div class="stat-note">Completed DISC tests</div></article>
       <article class="stat-card"><div class="stat-top"><span>Employees</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span></div><div class="stat-number">${hired}</div><div class="stat-note">Employee Directory</div></article>
     </section>
     <div id="recruitment-routemap" class="dashboard-v2-grid">
@@ -523,23 +565,29 @@ function renderDashboard() {
 }
 
 /* ============================================================================
- * LEAD REGISTER (stage1) — Hanya 5 kolom:
- * Nama Pelamar | Posisi | No. Whatsapp | CV | Keterangan
+ * LEAD REGISTER (stage1) — Connected live status synced with Candidate List
  * ============================================================================ */
 function stage1RowsHtml(rows) {
-  if (!rows.length) return emptyRow(5, 'Belum ada data pelamar');
+  if (!rows.length) return emptyRow(6, 'No lead records yet');
   return rows.map(row => {
-    const rec = row.recommendation || 'Belum Ditentukan';
+    const rec = normalizeLeadRecommendation(row.recommendation);
+    const unified = resolveLeadUnifiedStatus(row, {
+      applicants,
+      interviews,
+      employees,
+      invitedCandidates
+    });
     return `<tr>
       <td><b>${esc(row.full_name)}</b></td>
       <td>${esc(row.position || '—')}</td>
       <td>${esc(row.whatsapp || '—')}</td>
-      <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Buka CV</button>` : '—'}</td>
+      <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '—'}</td>
       <td>
-        <select class="select" style="min-width:190px" data-stage1-rec="${esc(row.id)}" aria-label="Keterangan rekomendasi ${esc(row.full_name)}">
+        <select class="select" style="min-width:170px" data-stage1-rec="${esc(row.id)}" aria-label="Recommendation remarks for ${esc(row.full_name)}">
           ${LEAD_RECOMMENDATION_OPTIONS.map(opt => `<option value="${esc(opt)}" ${rec === opt ? 'selected' : ''}>${esc(opt)}</option>`).join('')}
         </select>
       </td>
+      <td data-stage1-status="${esc(row.id)}"><span class="status-pill ${unified.tone}">${esc(unified.label)}</span></td>
     </tr>`;
   }).join('');
 }
@@ -547,14 +595,17 @@ function stage1RowsHtml(rows) {
 function renderStage1() {
   const rows = stage1Leads;
   const paint = query => {
-    const filtered = rows.filter(row => `${row.full_name} ${row.position} ${row.whatsapp} ${row.recommendation || ''}`.toLocaleLowerCase('id').includes(query));
+    const filtered = rows.filter(row => {
+      const unified = resolveLeadUnifiedStatus(row, { applicants, interviews, employees, invitedCandidates });
+      return `${row.full_name} ${row.position} ${row.whatsapp} ${row.recommendation || ''} ${unified.label}`.toLowerCase().includes(query);
+    });
     $('#stage1-rows').innerHTML = stage1RowsHtml(filtered);
     bindStage1Actions(rows);
   };
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
-    `<section class="panel table-panel">${tableToolbar('Cari nama / posisi / WhatsApp / keterangan…', 'Lead Register')}
+    `<section class="panel table-panel">${tableToolbar('Search name / position / WhatsApp / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>NAMA PELAMAR</th><th>POSISI</th><th>NO. WHATSAPP</th><th>CV</th><th>KETERANGAN</th></tr></thead>
+        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>WHATSAPP NO.</th><th>CV</th><th>REMARKS</th><th>STATUS</th></tr></thead>
         <tbody id="stage1-rows">${stage1RowsHtml(rows)}</tbody>
       </table></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
@@ -565,29 +616,37 @@ function renderStage1() {
 function bindStage1Actions(rows) {
   $$('[data-stage1-rec]').forEach(select => select.addEventListener('change', async () => {
     const id = select.dataset.stage1Rec;
-    const value = select.value;
+    const value = normalizeLeadRecommendation(select.value);
+    const legacyRec = value === 'Recommended' ? 'Direkomendasikan' : value === 'Not Recommended' ? 'Tidak Direkomendasikan' : 'Belum Ditentukan';
+    const nextStatus = value === 'Recommended' ? 'invited' : value === 'Not Recommended' ? 'rejected' : 'reviewed';
     select.disabled = true;
     try {
       const payload = stage1HasRecommendationCol
-        ? {
-            recommendation: value,
-            status: value === 'Direkomendasikan' ? 'invited' : value === 'Tidak Direkomendasikan' ? 'rejected' : 'reviewed',
-            updated_at: new Date().toISOString()
-          }
-        : {
-            status: value === 'Direkomendasikan' ? 'invited' : value === 'Tidak Direkomendasikan' ? 'rejected' : 'reviewed',
-            updated_at: new Date().toISOString()
-          };
-      const { error } = await supabase.from('candidate_stage1_applications').update(payload).eq('id', id);
+        ? { recommendation: value, status: nextStatus, updated_at: new Date().toISOString() }
+        : { status: nextStatus, updated_at: new Date().toISOString() };
+      let { error } = await supabase.from('candidate_stage1_applications').update(payload).eq('id', id);
+      if (error && stage1HasRecommendationCol && String(error.message || '').toLowerCase().includes('check')) {
+        ({ error } = await supabase.from('candidate_stage1_applications').update({
+          recommendation: legacyRec,
+          status: nextStatus,
+          updated_at: new Date().toISOString()
+        }).eq('id', id));
+      }
       if (error) throw error;
       const target = stage1Leads.find(item => item.id === id);
       if (target) {
         target.recommendation = value;
-        target.status = payload.status;
+        target.status = nextStatus;
+        const statusCell = $(`[data-stage1-status="${CSS.escape(id)}"]`);
+        if (statusCell) {
+          const unified = resolveLeadUnifiedStatus(target, { applicants, interviews, employees, invitedCandidates });
+          statusCell.innerHTML = `<span class="status-pill ${unified.tone}">${esc(unified.label)}</span>`;
+        }
       }
-      say(`Keterangan disimpan: ${value}.`);
+      invalidateDataCache();
+      say(`Remarks updated: ${value}.`);
     } catch (err) {
-      say(err.message || 'Gagal memperbarui keterangan.');
+      say(err.message || 'Failed to update remarks.');
     } finally {
       select.disabled = false;
     }
@@ -595,7 +654,7 @@ function bindStage1Actions(rows) {
 
   $$('[data-stage1-cv]').forEach(button => button.addEventListener('click', () => {
     const record = rows.find(item => item.id === button.dataset.stage1Cv);
-    if (!record?.cv_path) { say('Path CV tidak ditemukan.'); return; }
+    if (!record?.cv_path) { say('CV file path not found.'); return; }
     openSignedDocumentInNewTab('candidate-stage1-cv', record.cv_path, 'CV', button);
   }));
 }
@@ -613,7 +672,7 @@ async function renderSettings() {
       <div class="settings-row">
         <div>
           <h3 class="settings-title">ID Card Scanning (OCR)</h3>
-          <p class="settings-sub">Aktifkan pemindaian KTP otomatis untuk formulir kandidat Tahap 2.</p>
+          <p class="settings-sub">Enable automatic ID card scanning for the Stage 2 candidate application form.</p>
         </div>
         <label class="settings-toggle" for="ocr-feature-toggle">
           <span>${enabled ? 'Enabled' : 'Disabled'}</span>
@@ -636,8 +695,7 @@ async function renderSettings() {
 }
 
 /* ============================================================================
- * CANDIDATE LIST (stage2) — Tanpa Background Check, Form Status dinamis,
- * Actions: Edit, Delete, Duplikasi
+ * CANDIDATE LIST (stage2) — Live unified STATUS, Actions: Edit, Delete, Duplicate
  * ============================================================================ */
 const STAGE2_FIELD_ORDER = [
   'tempat_lahir', 'tanggal_lahir', 'gender', 'gol_darah', 'agama', 'warga_negara',
@@ -685,7 +743,7 @@ function stage2FieldKeys(rows) {
     const ma = a.match(/^(saudara|anak|bahasa|kerja)(\d+)_/);
     const mb = b.match(/^(saudara|anak|bahasa|kerja)(\d+)_/);
     if (ma && mb && ma[1] === mb[1] && Number(ma[2]) !== Number(mb[2])) return Number(ma[2]) - Number(mb[2]);
-    return applicationFieldLabel(a).localeCompare(applicationFieldLabel(b), 'id', { numeric: true, sensitivity: 'base' });
+    return applicationFieldLabel(a).localeCompare(applicationFieldLabel(b), 'en', { numeric: true, sensitivity: 'base' });
   });
 }
 
@@ -709,35 +767,35 @@ function stage2RowHtml(row, keys) {
       const cls = stage2CellClass(key);
       return `<td${cls ? ` class="${cls}"` : ''}><div class="cell-clamp-2" title="${esc(val)}">${esc(val)}</div></td>`;
     }).join('')}
-    <td>${row.ktp_path ? `<button class="icon-btn" data-stage2-ktp="${esc(row.id)}">Buka KTP</button>` : '—'}</td>
-    <td>${row.cv_path ? `<button class="icon-btn" data-stage2-cv="${esc(row.id)}">Buka CV</button>` : '—'}</td>
+    <td>${row.ktp_path ? `<button class="icon-btn" data-stage2-ktp="${esc(row.id)}">Open ID Card</button>` : '—'}</td>
+    <td>${row.cv_path ? `<button class="icon-btn" data-stage2-cv="${esc(row.id)}">Open CV</button>` : '—'}</td>
     <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
     <td><div class="row-actions stage2-actions">
       <button class="icon-btn" data-stage2-edit="${esc(row.id)}">Edit</button>
-      <button class="icon-btn" data-stage2-dup="${esc(row.id)}">Duplikasi</button>
+      <button class="icon-btn" data-stage2-dup="${esc(row.id)}">Duplicate</button>
       <button class="icon-btn danger" data-stage2-delete="${esc(row.id)}">Delete</button>
     </div></td></tr>`;
 }
 
 function openSignedDocumentInNewTab(bucket, path, label, button) {
   const tab = window.open('about:blank', '_blank');
-  if (!tab) { say('Tab dokumen diblokir browser. Izinkan pop-up lalu coba lagi.'); return; }
+  if (!tab) { say('Document tab was blocked by your browser. Please allow pop-ups and retry.'); return; }
   try {
     tab.opener = null;
-    tab.document.title = `Menyiapkan ${label}`;
-    tab.document.body.innerHTML = `<p style="font:14px Arial,sans-serif;padding:24px;color:#243238">Menyiapkan dokumen…</p>`;
+    tab.document.title = `Preparing ${label}`;
+    tab.document.body.innerHTML = `<p style="font:14px Arial,sans-serif;padding:24px;color:#243238">Preparing document…</p>`;
   } catch {}
   const original = button?.textContent;
-  if (button) { button.disabled = true; button.textContent = 'Membuka…'; }
+  if (button) { button.disabled = true; button.textContent = 'Opening…'; }
   supabase.storage.from(bucket).createSignedUrl(path, 300).then(({ data, error }) => {
     if (error) throw error;
-    if (!data?.signedUrl) throw new Error(`Tautan ${label} tidak berhasil dibuat.`);
+    if (!data?.signedUrl) throw new Error(`Unable to generate link for ${label}.`);
     tab.location.replace(data.signedUrl);
   }).catch(error => {
     try { tab.close(); } catch {}
-    say(error.message || `${label} tidak dapat dibuka.`);
+    say(error.message || `Unable to open ${label}.`);
   }).finally(() => {
-    if (button) { button.disabled = false; button.textContent = original || `Buka ${label}`; }
+    if (button) { button.disabled = false; button.textContent = original || `Open ${label}`; }
   });
 }
 
@@ -745,11 +803,11 @@ function bindStage2DocumentActions() {
   const bind = (selector, bucket, pathKey, label, datasetKey) => {
     $$(selector).forEach(button => button.addEventListener('click', () => {
       const record = applicants.find(item => item.id === button.dataset[datasetKey]);
-      if (!record?.[pathKey]) { say(`Path ${label} tidak ditemukan.`); return; }
+      if (!record?.[pathKey]) { say(`${label} file path not found.`); return; }
       openSignedDocumentInNewTab(bucket, record[pathKey], label, button);
     }));
   };
-  bind('[data-stage2-ktp]', 'candidate-identity', 'ktp_path', 'KTP', 'stage2Ktp');
+  bind('[data-stage2-ktp]', 'candidate-identity', 'ktp_path', 'ID Card', 'stage2Ktp');
   bind('[data-stage2-cv]', 'candidate-files', 'cv_path', 'CV', 'stage2Cv');
 }
 
@@ -770,8 +828,8 @@ async function loadPositionList() {
 
 async function savePositionList(positions) {
   const clean = [...new Set(positions.map(value => String(value || '').trim()).filter(Boolean))];
-  if (!clean.length) throw new Error('Daftar posisi tidak boleh kosong.');
-  if (clean.length !== positions.length) throw new Error('Nama posisi kosong atau duplikat.');
+  if (!clean.length) throw new Error('Position list cannot be empty.');
+  if (clean.length !== positions.length) throw new Error('Position names must be unique and non-empty.');
   const { error } = await supabase.from('portal_settings')
     .upsert({ key: 'application_positions', value: clean, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (error) throw error;
@@ -780,32 +838,32 @@ async function savePositionList(positions) {
 }
 
 function positionManagerHtml(positions) {
-  return `<section class="panel position-manager"><div class="panel-head"><div><h3>Daftar Lowongan</h3><p>Perubahan digunakan oleh pilihan posisi di /form dan /apply.</p></div></div>
-    <div class="position-manager-body"><div id="position-rows">${positions.map((position, index) => `<div class="position-row"><input class="input" maxlength="100" data-position-index="${index}" value="${esc(position)}" aria-label="Nama posisi ${index + 1}"><button type="button" class="icon-btn" data-position-delete="${index}" ${positions.length === 1 ? 'disabled' : ''}>Delete</button></div>`).join('')}</div>
-    <div class="position-add-row"><input class="input" id="new-position" maxlength="100" placeholder="Nama posisi baru"><button type="button" class="btn btn-secondary" id="add-position">Tambah posisi</button></div>
-    <div class="position-manager-foot"><small>Nama posisi akan menjadi pilihan resmi kandidat.</small><button type="button" class="btn btn-primary" id="save-positions">Simpan daftar posisi</button></div></div></section>`;
+  return `<section class="panel position-manager"><div class="panel-head"><div><h3>Open Positions</h3><p>Managed positions are shared across Application Form, Invited Candidates, and Candidate Duplication.</p></div></div>
+    <div class="position-manager-body"><div id="position-rows">${positions.map((position, index) => `<div class="position-row"><input class="input" maxlength="100" data-position-index="${index}" value="${esc(position)}" aria-label="Position name ${index + 1}"><button type="button" class="icon-btn" data-position-delete="${index}" ${positions.length === 1 ? 'disabled' : ''}>Delete</button></div>`).join('')}</div>
+    <div class="position-add-row"><input class="input" id="new-position" maxlength="100" placeholder="New position title"><button type="button" class="btn btn-secondary" id="add-position">Add Position</button></div>
+    <div class="position-manager-foot"><small>Official position options used throughout Recruitment forms.</small><button type="button" class="btn btn-primary" id="save-positions">Save Positions</button></div></div></section>`;
 }
 
 function bindPositionManager(positions) {
   $('#add-position')?.addEventListener('click', async () => {
     const value = $('#new-position')?.value.trim() || '';
-    if (!value) { say('Isi nama posisi terlebih dahulu.'); return; }
-    if (positions.some(item => item.toLocaleLowerCase('id') === value.toLocaleLowerCase('id'))) { say('Nama posisi sudah ada.'); return; }
-    try { await savePositionList([...positions, value]); say('Posisi baru ditambahkan.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Posisi gagal ditambahkan.'); }
+    if (!value) { say('Please enter a position title first.'); return; }
+    if (positions.some(item => item.toLowerCase() === value.toLowerCase())) { say('Position title already exists.'); return; }
+    try { await savePositionList([...positions, value]); say('New position added.'); loadView('settings'); }
+    catch (error) { say(error.message || 'Failed to add position.'); }
   });
   $$('[data-position-delete]').forEach(button => button.addEventListener('click', async () => {
     const index = Number(button.dataset.positionDelete);
     const next = positions.filter((_, i) => i !== index);
-    try { await savePositionList(next); say('Posisi dihapus dari daftar kandidat.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Posisi gagal dihapus.'); }
+    try { await savePositionList(next); say('Position removed.'); loadView('settings'); }
+    catch (error) { say(error.message || 'Failed to remove position.'); }
   }));
   $('#save-positions')?.addEventListener('click', async () => {
     const values = $$('[data-position-index]').map(input => input.value.trim());
-    if (values.some(value => !value)) { say('Nama posisi tidak boleh kosong.'); return; }
-    if (new Set(values.map(value => value.toLocaleLowerCase('id'))).size !== values.length) { say('Nama posisi tidak boleh duplikat.'); return; }
-    try { await savePositionList(values); say('Daftar posisi diperbarui.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Daftar posisi gagal disimpan.'); }
+    if (values.some(value => !value)) { say('Position titles cannot be empty.'); return; }
+    if (new Set(values.map(value => value.toLowerCase())).size !== values.length) { say('Duplicate position titles are not allowed.'); return; }
+    try { await savePositionList(values); say('Position list updated.'); loadView('settings'); }
+    catch (error) { say(error.message || 'Failed to save position list.'); }
   });
 }
 
@@ -816,16 +874,15 @@ function candidateEditModal() {
   modal.id = 'candidate-edit-modal';
   modal.className = 'modal-backdrop hidden';
   modal.innerHTML = `<section class="employee-modal-card candidate-edit-card" role="dialog" aria-modal="true" aria-labelledby="candidate-edit-title">
-    <div class="employee-modal-head candidate-edit-head"><div><small>RECRUITMENT · CANDIDATE REVIEW</small><h2 id="candidate-edit-title">Edit Candidate</h2><p id="candidate-edit-summary"></p></div><button type="button" class="modal-close" id="candidate-edit-close" aria-label="Tutup">×</button></div>
+    <div class="employee-modal-head candidate-edit-head"><div><small>RECRUITMENT · CANDIDATE REVIEW</small><h2 id="candidate-edit-title">Edit Candidate</h2><p id="candidate-edit-summary"></p></div><button type="button" class="modal-close" id="candidate-edit-close" aria-label="Close">×</button></div>
     <div id="candidate-edit-form-slot" class="candidate-edit-form-slot"></div>
     <div id="candidate-edit-error" class="form-error candidate-edit-error" role="alert"></div>
-    <div class="employee-modal-actions candidate-edit-footer"><button type="button" class="btn btn-secondary" id="candidate-edit-cancel">Batal</button><button type="button" class="btn btn-primary" id="candidate-edit-save">Simpan perubahan</button></div>
+    <div class="employee-modal-actions candidate-edit-footer"><button type="button" class="btn btn-secondary" id="candidate-edit-cancel">Cancel</button><button type="button" class="btn btn-primary" id="candidate-edit-save">Save Changes</button></div>
   </section>`;
   document.body.append(modal);
   const close = () => { modal.classList.add('hidden'); editingApplicantId = null; adminEditorBinding = null; };
   $('#candidate-edit-close', modal).addEventListener('click', close);
   $('#candidate-edit-cancel', modal).addEventListener('click', close);
-  // Prevent closing modal when user blocks/highlights text and releases mouse outside card
   bindSafeModalClose(modal, close, { closeOnBackdrop: false });
   $('#candidate-edit-save', modal).addEventListener('click', saveStage2Candidate);
   return modal;
@@ -843,8 +900,8 @@ async function openStage2CandidateEditor(applicant) {
     cv_path: applicant.cv_path || '',
     ktp_path: applicant.ktp_path || ''
   };
-  $('#candidate-edit-title', modal).textContent = `Koreksi · ${applicant.full_name || 'Tanpa nama'}`;
-  $('#candidate-edit-summary', modal).textContent = `${values.nik} · ${values.posisi} · Lima bagian mengikuti formulir kandidat`;
+  $('#candidate-edit-title', modal).textContent = `Edit · ${applicant.full_name || 'Unnamed'}`;
+  $('#candidate-edit-summary', modal).textContent = `${values.nik} · ${values.posisi} · Five sections matching the candidate application form`;
   $('#candidate-edit-error', modal).textContent = '';
   $('#candidate-edit-form-slot', modal).innerHTML = renderAdminEditorMarkup(values, stage2PositionsCache);
   modal.classList.remove('hidden');
@@ -855,8 +912,8 @@ async function openStage2CandidateEditor(applicant) {
     if (!current) return;
     const isKtp = button.dataset.adminDocument === 'ktp';
     const path = isKtp ? current.ktp_path : current.cv_path;
-    if (!path) { say(`${isKtp ? 'Foto KTP' : 'CV'} tidak tersedia.`); return; }
-    openSignedDocumentInNewTab(isKtp ? 'candidate-identity' : 'candidate-files', path, isKtp ? 'KTP' : 'CV', button);
+    if (!path) { say(`${isKtp ? 'ID card photo' : 'CV'} is unavailable.`); return; }
+    openSignedDocumentInNewTab(isKtp ? 'candidate-identity' : 'candidate-files', path, isKtp ? 'ID Card' : 'CV', button);
   }));
   adminEditorBinding = await bindAdminEditorForm(form, values);
 }
@@ -868,17 +925,17 @@ async function saveStage2Candidate() {
   const applicant = applicants.find(item => item.id === editingApplicantId);
   const form = $('#admin-candidate-form', modal);
   if (!applicant || !form || !adminEditorBinding) {
-    errorBox.textContent = 'Form koreksi belum siap. Tutup lalu buka kembali data kandidat.';
+    errorBox.textContent = 'Editor form is not ready. Close and reopen the candidate record.';
     return;
   }
   const fullName = String(form.elements.namedItem('nama')?.value || '').trim();
   const nik = String(form.elements.namedItem('nik')?.value || '').replace(/\D/g, '');
   const position = String(form.elements.namedItem('posisi')?.value || '').trim();
-  if (fullName.length < 2) { errorBox.textContent = 'Nama lengkap minimal 2 karakter.'; adminEditorBinding.goToStep(0); form.elements.namedItem('nama')?.focus(); return; }
-  if (!/^\d{16}$/.test(nik)) { errorBox.textContent = 'NIK harus tepat 16 angka.'; adminEditorBinding.goToStep(0); form.elements.namedItem('nik')?.focus(); return; }
-  if (!position) { errorBox.textContent = 'Posisi dilamar wajib dipilih.'; adminEditorBinding.goToStep(0); form.elements.namedItem('posisi')?.focus(); return; }
-  if (applicants.some(item => item.id !== applicant.id && item.nik === nik && String(item.position || '').toLocaleLowerCase('id') === position.toLocaleLowerCase('id'))) {
-    errorBox.textContent = 'NIK dan posisi yang sama sudah terdaftar.';
+  if (fullName.length < 2) { errorBox.textContent = 'Full name must be at least 2 characters.'; adminEditorBinding.goToStep(0); form.elements.namedItem('nama')?.focus(); return; }
+  if (!/^\d{16}$/.test(nik)) { errorBox.textContent = 'ID Card NIK must be exactly 16 digits.'; adminEditorBinding.goToStep(0); form.elements.namedItem('nik')?.focus(); return; }
+  if (!position) { errorBox.textContent = 'Applied position is required.'; adminEditorBinding.goToStep(0); form.elements.namedItem('posisi')?.focus(); return; }
+  if (applicants.some(item => item.id !== applicant.id && item.nik === nik && String(item.position || '').toLowerCase() === position.toLowerCase())) {
+    errorBox.textContent = 'A candidate record with this NIK and position already exists.';
     adminEditorBinding.goToStep(0);
     form.elements.namedItem('nik')?.focus();
     return;
@@ -894,7 +951,7 @@ async function saveStage2Candidate() {
   nextData.posisi = position;
   errorBox.textContent = '';
   save.disabled = true;
-  save.textContent = 'Menyimpan…';
+  save.textContent = 'Saving…';
   try {
     const { error } = await supabase.from('applicants').update({
       full_name: fullName,
@@ -905,16 +962,16 @@ async function saveStage2Candidate() {
     }).eq('id', applicant.id);
     if (error) throw error;
     invalidateDataCache();
-    say(`Data ${fullName} berhasil diperbarui.`);
+    say(`Updated record for ${fullName}.`);
     modal.classList.add('hidden');
     editingApplicantId = null;
     adminEditorBinding = null;
     await loadView('stage2', true);
   } catch (saveError) {
-    errorBox.textContent = saveError.message || 'Data kandidat gagal disimpan.';
+    errorBox.textContent = saveError.message || 'Failed to save candidate record.';
   } finally {
     save.disabled = false;
-    save.textContent = 'Simpan perubahan';
+    save.textContent = 'Save Changes';
   }
 }
 
@@ -926,7 +983,7 @@ function bindStage2CandidateActions() {
       await loadPositionList();
       await openStage2CandidateEditor(applicant);
     } catch (error) {
-      say(error.message || 'Form koreksi gagal dibuka.');
+      say(error.message || 'Unable to open candidate editor.');
     }
   }));
 
@@ -939,19 +996,43 @@ function bindStage2CandidateActions() {
       positions,
       onSave: async newPosition => {
         const payload = buildDuplicateCandidatePayload(applicant, newPosition);
-        let { error } = await supabase.from('applicants').insert(payload);
-        if (error && isMissingSchemaError(error)) {
+        let insertRes = await supabase.from('applicants').insert(payload).select('*').single();
+        if (insertRes.error && isMissingSchemaError(insertRes.error)) {
           const { duplicated_from: _drop, ...fallbackPayload } = payload;
-          ({ error } = await supabase.from('applicants').insert(fallbackPayload));
+          insertRes = await supabase.from('applicants').insert(fallbackPayload).select('*').single();
         }
-        if (error) {
-          if (String(error.message || '').includes('applicants_nik_unique')) {
-            throw new Error('Database masih membatasi 1 NIK = 1 posisi. Jalankan file migrasi SQL v2 pada Supabase SQL Editor terlebih dahulu.');
+        if (insertRes.error) {
+          if (String(insertRes.error.message || '').includes('applicants_nik_unique')) {
+            throw new Error('Database still enforces unique NIK across positions. Run SQL migration v2/v3 in Supabase SQL Editor.');
           }
-          throw error;
+          throw insertRes.error;
+        }
+        const inserted = insertRes.data;
+        if (inserted?.id) {
+          const sourceDisc = getDiscForApplicant(applicant);
+          const discPayload = buildDuplicatedDiscPayload(sourceDisc, inserted.id);
+          if (discPayload) {
+            await supabase.from('disc_submissions').insert(discPayload).then(() => {}, () => {});
+          }
+
+          const intPayloads = buildDuplicatedInterviewPayloads(getInterviewsForApplicant(applicant.id), inserted, currentUserId);
+          if (intPayloads.length && !interviewsTableMissing) {
+            let { error: intErr } = await supabase.from('candidate_interviews').insert(intPayloads);
+            if (intErr && isMissingSchemaError(intErr) && String(intErr.message || '').toLowerCase().includes('interview_date')) {
+              const stripped = intPayloads.map(({ interview_date: _d, ...rest }) => rest);
+              ({ error: intErr } = await supabase.from('candidate_interviews').insert(stripped));
+            }
+            if (intErr) console.warn('Partial interview clone skipped:', intErr);
+          }
+
+          const sourceInvite = invitedCandidates.find(inv => inv.linked_applicant_id === applicant.id);
+          const invitePayload = buildDuplicatedInvitePayload(sourceInvite, inserted, currentUserId);
+          if (invitePayload && !invitedTableMissing) {
+            await supabase.from('invited_candidates').insert(invitePayload).then(() => {}, () => {});
+          }
         }
         invalidateDataCache();
-        say(`${applicant.full_name} berhasil diduplikasi ke posisi ${newPosition}.`);
+        say(`${applicant.full_name} duplicated to ${newPosition} with existing progress carried over.`);
         await loadView('stage2', true);
       }
     });
@@ -961,24 +1042,24 @@ function bindStage2CandidateActions() {
     const applicant = applicants.find(item => item.id === button.dataset.stage2Delete);
     if (!applicant) return;
     if (employees.some(employee => employee.applicant_id === applicant.id)) {
-      say('Kandidat sudah terhubung dengan Employee Directory. Kelola data karyawan terlebih dahulu.');
+      say('Candidate is already linked to Employee Directory. Remove or update the employee record first.');
       return;
     }
-    const confirmed = window.confirm(`Hapus kandidat ${applicant.full_name} (NIK ${applicant.nik})?`);
+    const confirmed = window.confirm(`Delete candidate ${applicant.full_name} (NIK ${applicant.nik})?`);
     if (!confirmed) return;
     button.disabled = true;
-    button.textContent = 'Menghapus…';
+    button.textContent = 'Deleting…';
     try {
       const { error } = await supabase.from('applicants').delete().eq('id', applicant.id);
       if (error) throw error;
       invalidateDataCache();
       applicants = applicants.filter(item => item.id !== applicant.id);
-      say(`Kandidat ${applicant.full_name} berhasil dihapus.`);
+      say(`Deleted candidate ${applicant.full_name}.`);
       await loadView('stage2', true);
     } catch (error) {
       button.disabled = false;
       button.textContent = 'Delete';
-      say(error.message || 'Kandidat gagal dihapus.');
+      say(error.message || 'Failed to delete candidate.');
     }
   }));
 }
@@ -992,16 +1073,16 @@ function renderStage2() {
     '<th>POSITION</th>',
     ...keys.map(key => {
       const cls = stage2CellClass(key);
-      return `<th${cls ? ` class="${cls}"` : ''}>${esc(applicationFieldLabel(key).toLocaleUpperCase('id'))}</th>`;
+      return `<th${cls ? ` class="${cls}"` : ''}>${esc(applicationFieldLabel(key).toUpperCase())}</th>`;
     }),
-    '<th>ID CARD</th>', '<th>CV</th>', '<th>FORM STATUS</th>', '<th>ACTIONS</th>'
+    '<th>ID CARD</th>', '<th>CV</th>', '<th>STATUS</th>', '<th>ACTIONS</th>'
   ].join('');
   content.innerHTML = header('Candidate List', '', '<button class="btn btn-secondary" id="refresh-stage2">Refresh ↻</button>') +
     `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Search name / NIK / position…', 'Candidate List')}
       <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`;
   $('#refresh-stage2')?.addEventListener('click', () => loadView('stage2', true));
   const repaint = query => {
-    const filtered = allRows.filter(row => `${row.full_name} ${row.nik} ${row.position} ${JSON.stringify(row.application_data || {})}`.toLocaleLowerCase('id').includes(query));
+    const filtered = allRows.filter(row => `${row.full_name} ${row.nik} ${row.position} ${JSON.stringify(row.application_data || {})}`.toLowerCase().includes(query));
     $('#candidate-rows').innerHTML = renderRows(filtered);
     bindStage2DocumentActions();
     bindStage2CandidateActions();
@@ -1018,18 +1099,215 @@ function renderStage3() {
       <thead><tr><th>APPLICANT / NIK</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>DISC GRAPHS (G1 · G2 · G3)</th><th>PERSONALITY / NATURAL PATTERN</th><th>ACTIONS</th></tr></thead>
       <tbody id="candidate-rows">${applicantRows(rows, 'both')}</tbody></table></div></section>`;
   const repaint = query => {
-    $('#candidate-rows').innerHTML = applicantRows(rows.filter(row => `${row.full_name} ${row.nik} ${row.position}`.toLocaleLowerCase('id').includes(query)), 'both');
+    $('#candidate-rows').innerHTML = applicantRows(rows.filter(row => `${row.full_name} ${row.nik} ${row.position}`.toLowerCase().includes(query)), 'both');
     bindPrint();
-    bindHire();
   };
   bindSearch('#table-search', repaint);
   bindPrint();
-  bindHire();
+}
+
+/* ============================================================================
+ * INVITED VIEW — Invited Candidates + CV Screening on 1 Page (Zero Duplicates)
+ * ============================================================================ */
+function invitedCandidateRowHtml(row) {
+  const statusTone = row.status === 'Responded' ? 'green' : 'gray';
+  return `<tr>
+    <td style="white-space:nowrap"><span class="interview-date-meta">${esc(formatDmyDash(row.inviteDate || ''))}</span></td>
+    <td><b>${esc(row.candidateName)}</b>${row.notes ? `<small class="table-subline">${esc(row.notes)}</small>` : ''}</td>
+    <td>${esc(row.appliedPosition)}${row.isDuplicated ? '<small class="table-subline">Duplicated position</small>' : ''}</td>
+    <td>${esc(row.source)}</td>
+    <td><span class="status-pill ${statusTone}">${esc(row.status)}</span></td>
+    <td><div class="row-actions">
+      <button type="button" class="icon-btn" data-inv-edit="${esc(row.rowKey)}">Edit</button>
+      ${row.isManual ? `<button type="button" class="icon-btn danger" data-inv-delete="${esc(row.manualId)}">Delete</button>` : ''}
+    </div></td>
+  </tr>`;
+}
+
+function renderInvitedView() {
+  const allRows = buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants });
+  const respondedCount = allRows.filter(r => r.status === 'Responded').length;
+  const noResponseCount = allRows.filter(r => r.status === 'No Response').length;
+  const screeningSummary = aggregateCvScreeningBySource(cvScreenings);
+  const linkedApplicantIds = new Set(invitedCandidates.map(i => i.linked_applicant_id).filter(Boolean));
+
+  const migrationBanner = (invitedTableMissing || cvScreeningsTableMissing)
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Supabase tables <code>invited_candidates</code> / <code>cv_screenings</code> are not created yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
+    : '';
+
+  const renderInviteRows = rows => rows.length
+    ? rows.map(invitedCandidateRowHtml).join('')
+    : emptyRow(6, 'No invited candidates recorded yet');
+
+  const renderScreeningRows = items => items.length
+    ? items.map(item => `<tr>
+        <td><b>${esc(item.source)}</b>${item.notes ? `<small class="table-subline">${esc(item.notes)}</small>` : ''}</td>
+        <td><span class="status-pill blue">${item.screeningCount}</span></td>
+        <td><div class="row-actions">
+          <button type="button" class="icon-btn" data-scr-edit="${esc(item.source)}">Edit</button>
+          ${item.id ? `<button type="button" class="icon-btn danger" data-scr-delete="${esc(item.id)}">Delete</button>` : ''}
+        </div></td>
+      </tr>`).join('')
+    : emptyRow(3, 'No CV screening counts added yet');
+
+  content.innerHTML = header('Invited', '',
+    '<button type="button" class="btn btn-secondary" id="refresh-invited">Refresh ↻</button>' +
+    '<button type="button" class="btn btn-primary" id="add-invited-candidate">+ Add to List</button>'
+  ) + migrationBanner + `
+    <div class="invited-stack">
+      <div class="invited-kpis">
+        <article class="invited-kpi-card"><small>Total Recorded</small><b>${allRows.length}</b></article>
+        <article class="invited-kpi-card"><small>Responded</small><b>${respondedCount}</b></article>
+        <article class="invited-kpi-card"><small>No Response</small><b>${noResponseCount}</b></article>
+      </div>
+
+      <section class="panel table-panel">
+        ${tableToolbar('Search date / name / position / source / status…', 'Invited Candidates')}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>DATE</th><th>NAME</th><th>APPLIED POSITION</th><th>SOURCE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+            <tbody id="invited-rows">${renderInviteRows(allRows)}</tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel table-panel cv-screening-panel">
+        <div class="panel-head">
+          <div><h3>CV Screening</h3><small class="subtle">Total Screened Across Sources: <b>${screeningSummary.totalCount}</b></small></div>
+          <button type="button" class="btn btn-secondary btn-xs" id="add-cv-screening">+ Add Screening</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>SOURCE</th><th>SCREENING COUNT</th><th>ACTIONS</th></tr></thead>
+            <tbody id="screening-rows">${renderScreeningRows(screeningSummary.items)}</tbody>
+          </table>
+        </div>
+      </section>
+    </div>`;
+
+  $('#refresh-invited')?.addEventListener('click', () => loadView('invited', true));
+
+  const openInviteEditor = async (existingRow = null) => {
+    const positions = await loadPositionList().catch(() => stage2PositionsCache);
+    openInvitedCandidateModal({
+      existing: existingRow,
+      positions,
+      applicants,
+      linkedApplicantIds,
+      onSave: async payload => {
+        if (invitedTableMissing) {
+          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
+        }
+        const recordPayload = {
+          invite_date: payload.invite_date,
+          candidate_name: payload.candidate_name,
+          applied_position: payload.applied_position,
+          source: payload.source,
+          status: payload.status,
+          linked_applicant_id: payload.linked_applicant_id,
+          notes: payload.notes,
+          updated_at: new Date().toISOString()
+        };
+        if (payload.id) {
+          const { error } = await supabase.from('invited_candidates').update(recordPayload).eq('id', payload.id);
+          if (error) throw error;
+          say(`Updated invite record for ${payload.candidate_name}.`);
+        } else {
+          const { error } = await supabase.from('invited_candidates').insert({
+            ...recordPayload,
+            created_by: currentUserId
+          });
+          if (error) throw error;
+          say(`Added ${payload.candidate_name} to Invited Candidates.`);
+        }
+        invalidateDataCache();
+        await loadView('invited', true);
+      }
+    });
+  };
+
+  const bindInviteRowActions = currentRows => {
+    $$('[data-inv-edit]').forEach(btn => btn.addEventListener('click', () => {
+      const target = currentRows.find(r => r.rowKey === btn.dataset.invEdit);
+      if (target) openInviteEditor(target);
+    }));
+    $$('[data-inv-delete]').forEach(btn => btn.addEventListener('click', async () => {
+      const manualId = btn.dataset.invDelete;
+      const target = invitedCandidates.find(i => i.id === manualId);
+      if (!window.confirm(`Delete invited record for ${target?.candidate_name || 'this candidate'}?`)) return;
+      try {
+        const { error } = await supabase.from('invited_candidates').delete().eq('id', manualId);
+        if (error) throw error;
+        invalidateDataCache();
+        say('Invited candidate deleted.');
+        await loadView('invited', true);
+      } catch (err) {
+        say(err.message || 'Failed to delete invited candidate.');
+      }
+    }));
+  };
+
+  const openScreeningEditor = (existing = null) => {
+    openCvScreeningModal({
+      existing,
+      onSave: async payload => {
+        if (cvScreeningsTableMissing) {
+          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
+        }
+        const recordPayload = {
+          source: payload.source,
+          screening_count: payload.screening_count,
+          notes: payload.notes,
+          updated_by: currentUserId,
+          updated_at: new Date().toISOString()
+        };
+        if (payload.id) {
+          const { error } = await supabase.from('cv_screenings').update(recordPayload).eq('id', payload.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('cv_screenings').upsert(recordPayload, { onConflict: 'source' });
+          if (error) throw error;
+        }
+        invalidateDataCache();
+        say(`CV screening count saved for ${payload.source}.`);
+        await loadView('invited', true);
+      }
+    });
+  };
+
+  $$('[data-scr-edit]').forEach(btn => btn.addEventListener('click', () => {
+    const item = screeningSummary.items.find(s => s.source === btn.dataset.scrEdit);
+    if (item) openScreeningEditor(item);
+  }));
+  $$('[data-scr-delete]').forEach(btn => btn.addEventListener('click', async () => {
+    const id = btn.dataset.scrDelete;
+    if (!window.confirm('Remove this CV screening source entry?')) return;
+    try {
+      const { error } = await supabase.from('cv_screenings').delete().eq('id', id);
+      if (error) throw error;
+      invalidateDataCache();
+      say('CV screening entry removed.');
+      await loadView('invited', true);
+    } catch (err) {
+      say(err.message || 'Failed to delete CV screening entry.');
+    }
+  }));
+
+  $('#add-invited-candidate')?.addEventListener('click', () => openInviteEditor(null));
+  $('#add-cv-screening')?.addEventListener('click', () => openScreeningEditor(null));
+
+  bindSearch('#table-search', query => {
+    const filtered = allRows.filter(r =>
+      `${r.inviteDate} ${r.candidateName} ${r.appliedPosition} ${r.source} ${r.status} ${r.notes}`.toLowerCase().includes(query)
+    );
+    $('#invited-rows').innerHTML = renderInviteRows(filtered);
+    bindInviteRowActions(filtered);
+  });
+  bindInviteRowActions(allRows);
 }
 
 /* ============================================================================
  * INTERVIEW PIPELINE (HR 1, HR 2, User 1, User 2, Final Interview)
- * 1 halaman ringkas dengan scroll, maksimal 5 kandidat terbaru per tahap
  * ============================================================================ */
 function buildUnifiedInterviewCandidates() {
   const fromApplicants = applicants.map(a => ({
@@ -1062,43 +1340,46 @@ function renderInterviewStageCard(stage) {
   const stageRows = interviews.filter(row => row.interview_stage === stage).slice(0, 5);
   const rowsHtml = stageRows.length
     ? stageRows.map(row => {
-        const tone = row.decision === 'Direkomendasikan' || row.decision === 'Diterima'
+        const dec = normalizeInterviewDecision(row.decision);
+        const tone = dec === 'Recommended' || dec === 'Accepted'
           ? 'green'
-          : row.decision === 'Tidak Direkomendasikan' || row.decision === 'Ditolak'
+          : dec === 'Not Recommended' || dec === 'Rejected'
             ? 'gray'
             : 'gold';
+        const dateLabel = formatDmyDash(row.interview_date || String(row.created_at || '').slice(0, 10));
         let extra = esc(row.notes || '—');
         if (isFinal) {
-          if (row.decision === 'Ditolak') {
+          if (dec === 'Rejected') {
             extra = `${esc(row.rejection_reason_category)}${row.rejection_reason_detail ? ` · ${esc(row.rejection_reason_detail)}` : ''}`;
-          } else if (row.decision === 'Diterima') {
+          } else if (dec === 'Accepted') {
             const period = row.contract_start_date && row.contract_end_date
-              ? `${formatDmyDash(row.contract_start_date)} s/d ${formatDmyDash(row.contract_end_date)}`
+              ? `${formatDmyDash(row.contract_start_date)} to ${formatDmyDash(row.contract_end_date)}`
               : '—';
             extra = `${esc(row.official_position || row.applied_position)} · NIK ${esc(row.assigned_nik)} · ${period}`;
           }
         }
         return `<tr>
           <td><b>${esc(row.candidate_name)}</b><small class="table-subline">${esc(row.applied_position || '—')}</small></td>
+          <td style="white-space:nowrap"><span class="interview-date-meta">${esc(dateLabel)}</span></td>
           <td>${esc(row.pic_name || '—')}</td>
-          <td><span class="status-pill ${tone}">${esc(row.decision)}</span></td>
-          <td style="max-width:220px;white-space:normal">${extra}</td>
+          <td><span class="status-pill ${tone}">${esc(dec)}</span></td>
+          <td style="max-width:210px;white-space:normal">${extra}</td>
           <td><button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button></td>
         </tr>`;
       }).join('')
-    : emptyRow(5, 'Belum ada kandidat');
+    : emptyRow(6, 'No candidates recorded');
 
   return `<section class="panel interview-stage-card ${isFinal ? 'is-final' : ''}">
     <div class="interview-stage-head">
       <div>
         <h3>${esc(INTERVIEW_STAGE_LABELS[stage])}</h3>
-        <small>Maksimal 5 kandidat terbaru${stage === 'HR 1' ? ' · Default PIC: Samsul Hariyadi (Employee Directory)' : stage === 'HR 2' ? ' · Default PIC: Diana Anita Sari (Employee Directory)' : ''}</small>
+        <small>Latest 5 candidates${stage === 'HR 1' ? ' · Default PIC: Samsul Hariyadi (Employee Directory)' : stage === 'HR 2' ? ' · Default PIC: Diana Anita Sari (Employee Directory)' : ''}</small>
       </div>
-      <button type="button" class="btn btn-primary btn-xs" data-interview-add="${esc(stage)}">+ Tambah Kandidat</button>
+      <button type="button" class="btn btn-primary btn-xs" data-interview-add="${esc(stage)}">+ Add Candidate</button>
     </div>
     <div class="interview-stage-scroll">
       <table class="data-table interview-mini-table">
-        <thead><tr><th>KANDIDAT</th><th>PIC</th><th>KEPUTUSAN</th><th>KETERANGAN</th><th>AKSI</th></tr></thead>
+        <thead><tr><th>CANDIDATE</th><th>DATE</th><th>PIC</th><th>DECISION</th><th>NOTES</th><th>ACTION</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
@@ -1107,7 +1388,7 @@ function renderInterviewStageCard(stage) {
 
 function renderInterviewView() {
   const banner = interviewsTableMissing
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Tabel <code>candidate_interviews</code> belum tersedia di Supabase. Jalankan file migrasi <code>database/migrations/20261120_hrga_workspace_v2.sql</code> di Supabase SQL Editor agar seluruh proses interview tersimpan.</div>`
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Table <code>candidate_interviews</code> is not available in Supabase yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
     : '';
   content.innerHTML = header('Interview Pipeline', '', '<button class="btn btn-secondary" id="refresh-interview">Refresh ↻</button>') +
     banner +
@@ -1124,8 +1405,9 @@ function renderInterviewView() {
       employees,
       onSave: async (payload, selectedCand) => {
         if (interviewsTableMissing) {
-          throw new Error('Jalankan file migrasi SQL v2 di Supabase SQL Editor terlebih dahulu.');
+          throw new Error('Please run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
         }
+        const dec = normalizeInterviewDecision(payload.decision);
         const recordPayload = {
           source_type: payload.source_type,
           applicant_id: payload.applicant_id,
@@ -1135,11 +1417,12 @@ function renderInterviewView() {
           candidate_whatsapp: payload.candidate_whatsapp,
           applied_position: payload.applied_position,
           interview_stage: payload.interview_stage,
+          ...(interviewDateColMissing ? {} : { interview_date: payload.interview_date }),
           pic_employee_id: payload.pic_employee_id || null,
           pic_nik: payload.pic_nik,
           pic_name: payload.pic_name,
           notes: payload.notes,
-          decision: payload.decision,
+          decision: dec,
           rejection_reason_category: payload.rejection_reason_category,
           rejection_reason_detail: payload.rejection_reason_detail,
           work_start_date: payload.work_start_date,
@@ -1152,20 +1435,23 @@ function renderInterviewView() {
           updated_at: new Date().toISOString()
         };
 
-        if (payload.id) {
-          const { error } = await supabase.from('candidate_interviews').update(recordPayload).eq('id', payload.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('candidate_interviews').insert({
-            ...recordPayload,
-            created_by: currentUserId
-          });
-          if (error) throw error;
-        }
+        const persistRecord = async body => {
+          if (payload.id) {
+            return supabase.from('candidate_interviews').update(body).eq('id', payload.id);
+          }
+          return supabase.from('candidate_interviews').insert({ ...body, created_by: currentUserId });
+        };
 
-        // Sync Final Interview decisions with Applicants & Employee Directory
+        let { error } = await persistRecord(recordPayload);
+        if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('interview_date')) {
+          interviewDateColMissing = true;
+          const { interview_date: _dropDate, ...fallbackBody } = recordPayload;
+          ({ error } = await persistRecord(fallbackBody));
+        }
+        if (error) throw error;
+
         if (stage === 'Final Interview') {
-          if (payload.decision === 'Diterima') {
+          if (dec === 'Accepted') {
             const app = selectedCand?.applicantRef || applicants.find(a => a.id === payload.applicant_id);
             const appData = app?.application_data || {};
             const genderRaw = appData.gender || '';
@@ -1189,7 +1475,7 @@ function renderInterviewView() {
               gender: genderNormalized,
               religion: appData.agama || '',
               salary: payload.salary,
-              notes: payload.notes || `Lulus Final Interview (${payload.pic_name})`,
+              notes: payload.notes || `Passed Final Interview (${payload.pic_name})`,
               updated_at: new Date().toISOString()
             };
             const { error: empErr } = await supabase.from('employees')
@@ -1200,13 +1486,13 @@ function renderInterviewView() {
                 .update({ stage: 'hired', updated_at: new Date().toISOString() })
                 .eq('id', payload.applicant_id);
             }
-            say(`${payload.candidate_name} diterima & otomatis masuk ke Employee Directory!`);
-          } else if (payload.decision === 'Ditolak' && payload.applicant_id) {
+            say(`${payload.candidate_name} accepted & added to Employee Directory.`);
+          } else if (dec === 'Rejected' && payload.applicant_id) {
             await supabase.from('applicants')
               .update({ stage: 'rejected', updated_at: new Date().toISOString() })
               .eq('id', payload.applicant_id);
-            say(`Keputusan Final Interview (${payload.candidate_name}: Ditolak) disimpan.`);
-          } else if (payload.decision === 'Kirim Ke OS' && payload.applicant_id) {
+            say(`Final Interview decision (${payload.candidate_name}: Rejected) saved.`);
+          } else if (dec === 'Sent to OS' && payload.applicant_id) {
             const { error: osErr } = await supabase.from('applicants')
               .update({ stage: 'os_sent', updated_at: new Date().toISOString() })
               .eq('id', payload.applicant_id);
@@ -1215,9 +1501,9 @@ function renderInterviewView() {
                 .update({ stage: 'stage4_pending', updated_at: new Date().toISOString() })
                 .eq('id', payload.applicant_id);
             }
-            say(`${payload.candidate_name} ditandai Kirim Ke OS.`);
+            say(`${payload.candidate_name} marked as Sent to OS.`);
           } else {
-            say('Hasil Final Interview disimpan.');
+            say('Final Interview result saved.');
           }
         } else {
           if (payload.applicant_id) {
@@ -1228,7 +1514,7 @@ function renderInterviewView() {
                 .eq('id', payload.applicant_id);
             }
           }
-          say(`Data ${INTERVIEW_STAGE_LABELS[stage]} disimpan.`);
+          say(`Saved ${INTERVIEW_STAGE_LABELS[stage]} record.`);
         }
 
         invalidateDataCache();
@@ -1247,83 +1533,70 @@ function renderInterviewView() {
 }
 
 /* ============================================================================
- * TRACKING VIEW — Rapi & terstruktur dari Lead Register -> Final / Karyawan
+ * RECRUITMENT TRACKING — 12 Structured English Columns
  * ============================================================================ */
-function buildTrackingEntries() {
-  const rows = [];
-  for (const a of applicants) {
-    const ints = getInterviewsForApplicant(a.id);
-    const byStage = getLatestInterviewsByStage(ints);
-    const emp = getEmployeeForApplicant(a);
-    const progress = deriveCandidateProgress(a, ints, emp);
-    const hasDisc = Boolean(getDiscForApplicant(a) || a.stage === 'disc_completed');
-    rows.push({
-      name: a.full_name,
-      sub: a.nik || '—',
-      position: a.position || '—',
-      leadStatus: 'Terdaftar',
-      formStatus: 'Selesai',
-      discStatus: hasDisc ? 'Selesai' : 'Menunggu',
-      byStage,
-      finalProgress: progress,
-      searchText: `${a.full_name} ${a.nik} ${a.position} ${progress.label}`.toLocaleLowerCase('id')
-    });
-  }
-  for (const s of stage1Leads) {
-    const ints = interviews.filter(i => i.stage1_id === s.id);
-    if (!ints.length && applicants.some(a => a.full_name?.toLowerCase() === s.full_name?.toLowerCase())) continue;
-    const byStage = getLatestInterviewsByStage(ints);
-    const progress = deriveCandidateProgress({ stage: 'stage1_pending' }, ints, null);
-    rows.push({
-      name: s.full_name,
-      sub: s.whatsapp || 'Lead Register',
-      position: s.position || '—',
-      leadStatus: s.recommendation || 'Masuk',
-      formStatus: 'Belum',
-      discStatus: 'Belum',
-      byStage,
-      finalProgress: progress,
-      searchText: `${s.full_name} ${s.whatsapp} ${s.position} ${s.recommendation || ''} ${progress.label}`.toLocaleLowerCase('id')
-    });
-  }
-  return rows;
-}
-
-function trackingStageBadge(item) {
-  if (!item) return '<span class="status-pill gray">—</span>';
-  const tone = ['Direkomendasikan', 'Diterima'].includes(item.decision)
+function trackingStageCellHtml(cell) {
+  if (!cell) return '<span class="status-pill gray">—</span>';
+  const dec = normalizeInterviewDecision(cell.decision);
+  const tone = ['Recommended', 'Accepted'].includes(dec)
     ? 'green'
-    : ['Tidak Direkomendasikan', 'Ditolak'].includes(item.decision)
+    : ['Not Recommended', 'Rejected'].includes(dec)
       ? 'gray'
       : 'gold';
-  return `<span class="status-pill ${tone}" title="${esc(item.pic_name || '')}">${esc(item.decision)}</span>`;
+  const dateText = cell.date ? formatDmyDash(cell.date) : '';
+  return `<div class="tracking-stage-cell">
+    <span class="status-pill ${tone}" title="${esc(cell.picName || '')}">${esc(dec)}</span>
+    ${dateText ? `<small class="tracking-date-sub">${esc(dateText)}</small>` : ''}
+  </div>`;
 }
 
 function renderTrackingView() {
-  const allRows = buildTrackingEntries();
+  const allRows = buildUnifiedTrackingRows({
+    applicants,
+    stage1Leads,
+    interviews,
+    employees,
+    invitedCandidates
+  }).map(r => ({
+    ...r,
+    searchText: `${r.name} ${r.sub} ${r.inviteSource} ${r.inviteStatus} ${r.decision} ${r.rejectionReason}`.toLowerCase()
+  }));
+
   const renderRows = rows => rows.length
     ? rows.map(r => `<tr>
         <td><b>${esc(r.name)}</b><small class="table-subline">${esc(r.sub)}</small></td>
-        <td>${esc(r.position)}</td>
-        <td><span class="status-pill blue">${esc(r.leadStatus)}</span></td>
-        <td><span class="status-pill ${r.formStatus === 'Selesai' ? 'green' : 'gray'}">${esc(r.formStatus)}</span></td>
-        <td><span class="status-pill ${r.discStatus === 'Selesai' ? 'green' : 'gray'}">${esc(r.discStatus)}</span></td>
-        <td>${trackingStageBadge(r.byStage['HR 1'])}</td>
-        <td>${trackingStageBadge(r.byStage['HR 2'])}</td>
-        <td>${trackingStageBadge(r.byStage['User 1'])}</td>
-        <td>${trackingStageBadge(r.byStage['User 2'])}</td>
-        <td>${trackingStageBadge(r.byStage['Final Interview'])}</td>
-        <td><span class="status-pill ${r.finalProgress.tone}">${esc(r.finalProgress.label)}</span></td>
+        <td><div class="tracking-stage-cell">
+          <span class="status-pill ${r.inviteStatus === 'Responded' ? 'green' : r.inviteStatus === 'Lead Register' ? 'blue' : 'gray'}">${esc(r.inviteStatus)}</span>
+          ${r.inviteDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.inviteDate))}</small>` : ''}
+        </div></td>
+        <td>${r.formSubmittedDate
+          ? `<div class="tracking-stage-cell"><span class="status-pill green">Submitted</span><small class="tracking-date-sub">${esc(formatDmyDash(r.formSubmittedDate))}</small></div>`
+          : '<span class="status-pill gray">—</span>'}</td>
+        <td>${r.hrTestDone
+          ? `<div class="tracking-stage-cell"><span class="status-pill green">Completed</span>${r.hrTestDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.hrTestDate))}</small>` : ''}</div>`
+          : '<span class="status-pill gray">Pending</span>'}</td>
+        <td>${trackingStageCellHtml(r.hr1)}</td>
+        <td>${trackingStageCellHtml(r.hr2)}</td>
+        <td>${trackingStageCellHtml(r.user1)}</td>
+        <td>${trackingStageCellHtml(r.user2)}</td>
+        <td>${trackingStageCellHtml(r.finalInt)}</td>
+        <td>
+          <span class="status-pill ${r.decisionTone}">${esc(r.decision)}</span>
+          ${r.rejectionReason ? `<small class="tracking-reason-sub">${esc(r.rejectionReason)}</small>` : ''}
+        </td>
+        <td style="white-space:nowrap">${r.decisionDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.decisionDate))}</span>` : '—'}</td>
+        <td style="white-space:nowrap">${r.joinDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.joinDate))}</span>` : '—'}</td>
       </tr>`).join('')
-    : emptyRow(11, 'Belum ada data tracking kandidat');
+    : emptyRow(12, 'No candidate tracking records yet');
 
   content.innerHTML = header('Recruitment Tracking', '', '<button class="btn btn-secondary" id="refresh-tracking">Refresh ↻</button>') +
-    `<section class="panel table-panel">${tableToolbar('Cari nama / posisi / status…', 'Progress Tracking Kandidat')}
+    `<section class="panel table-panel">${tableToolbar('Search name / position / status…', 'Recruitment Progress Tracking')}
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
           <thead><tr>
-            <th>KANDIDAT</th><th>POSISI</th><th>LEAD REGISTER</th><th>FORM TAHAP 2</th><th>DISC</th>
-            <th>HR 1</th><th>HR 2</th><th>USER 1</th><th>USER 2</th><th>FINAL</th><th>STATUS AKHIR</th>
+            <th>NAME</th><th>INVITE</th><th>FORM SUBMITTED</th><th>HR TEST</th>
+            <th>HR INTERVIEW 1</th><th>HR INTERVIEW 2</th><th>USER INTERVIEW 1</th><th>USER INTERVIEW 2</th>
+            <th>FINAL INTERVIEW</th><th>DECISION</th><th>DECISION DATE</th><th>JOIN DATE</th>
           </tr></thead>
           <tbody id="tracking-rows">${renderRows(allRows)}</tbody>
         </table>
@@ -1336,10 +1609,10 @@ function renderTrackingView() {
 }
 
 /* ============================================================================
- * EMPLOYEE DIRECTORY — Sesuai 16 Kolom Format Tabel + Upload XLSX/CSV
+ * EMPLOYEE DIRECTORY — 16 Columns + Upload XLSX/CSV
  * ============================================================================ */
 function employeeRows(rows) {
-  if (!rows.length) return emptyRow(17, 'Belum ada data karyawan');
+  if (!rows.length) return emptyRow(17, 'No employee records found');
   return rows.map(employee => {
     const applicant = applicants.find(a => a.id === employee.applicant_id);
     const formatted = formatEmployeeExportRow(employee, applicant);
@@ -1369,17 +1642,17 @@ function employeeRows(rows) {
 
 function renderEmployees() {
   const migrationWarn = employeesExtendedMissing
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Sebagian kolom baru Employee Directory belum diterapkan di database. Jalankan file migrasi <code>database/migrations/20261120_hrga_workspace_v2.sql</code> di Supabase SQL Editor.</div>`
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Extended Employee Directory columns are not migrated yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
     : '';
   content.innerHTML = header('Employee Directory', '',
-    '<button id="add-employee" class="btn btn-secondary">+ Tambah Karyawan</button>' +
+    '<button id="add-employee" class="btn btn-secondary">+ Add Employee</button>' +
     '<button id="upload-employees" class="btn btn-secondary">Upload XLSX / CSV ↑</button>' +
-    '<button id="export-employees" class="btn btn-primary">Unduh XLSX ↓</button>'
+    '<button id="export-employees" class="btn btn-primary">Download XLSX ↓</button>'
   ) + migrationWarn + `
-    <section class="panel table-panel">${tableToolbar('Cari nama / NIK / departemen / jabatan…', 'Employee Directory')}
+    <section class="panel table-panel">${tableToolbar('Search name / NIK / department / position…', 'Employee Directory')}
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
-          <thead><tr>${EMPLOYEE_TABLE_HEADERS.map(h => `<th>${esc(h.toUpperCase())}</th>`).join('')}<th>AKSI</th></tr></thead>
+          <thead><tr>${EMPLOYEE_UI_HEADERS.map(h => `<th>${esc(h.toUpperCase())}</th>`).join('')}<th>ACTIONS</th></tr></thead>
           <tbody id="employee-rows">${employeeRows(employees)}</tbody>
         </table>
       </div>
@@ -1389,7 +1662,7 @@ function renderEmployees() {
     const filtered = employees.filter(e => {
       const a = applicants.find(x => x.id === e.applicant_id);
       const row = formatEmployeeExportRow(e, a);
-      return Object.values(row).join(' ').toLocaleLowerCase('id').includes(query);
+      return Object.values(row).join(' ').toLowerCase().includes(query);
     });
     $('#employee-rows').innerHTML = employeeRows(filtered);
     bindEmployeeEdit();
@@ -1401,7 +1674,7 @@ function renderEmployees() {
       onDownloadTemplate: downloadEmployeeTemplateXlsx,
       onImport: async parsedRows => {
         if (employeesExtendedMissing) {
-          throw new Error('Jalankan file migrasi SQL v2 terlebih dahulu sebelum mengimpor 16 kolom Employee Directory.');
+          throw new Error('Please run SQL migration v2/v3 first before importing the 16-column Employee Directory.');
         }
         const chunkSize = 100;
         for (let i = 0; i < parsedRows.length; i += chunkSize) {
@@ -1413,7 +1686,7 @@ function renderEmployees() {
           if (error) throw error;
         }
         invalidateDataCache();
-        say(`${parsedRows.length} data karyawan berhasil diimpor ke Employee Directory.`);
+        say(`${parsedRows.length} employee records imported into Employee Directory.`);
         await loadView('employees', true);
       }
     });
@@ -1442,7 +1715,7 @@ function openEmployeeEditor(employee = null, applicant = null) {
         delete updatePayload.id;
         const { error } = await supabase.from('employees').update(updatePayload).eq('id', fields.id);
         if (error) throw error;
-        say('Data karyawan diperbarui.');
+        say('Employee record updated.');
       } else if (fields.applicant_id && employeesExtendedMissing) {
         const { error } = await supabase.rpc('convert_applicant_to_employee', {
           p_applicant_id: fields.applicant_id,
@@ -1454,7 +1727,7 @@ function openEmployeeEditor(employee = null, applicant = null) {
           p_notes: fields.notes
         });
         if (error) throw error;
-        say('Kandidat ditambahkan ke Employee Directory.');
+        say('Candidate added to Employee Directory.');
       } else {
         const insertPayload = { ...fields };
         delete insertPayload.id;
@@ -1464,19 +1737,12 @@ function openEmployeeEditor(employee = null, applicant = null) {
         if (fields.applicant_id) {
           await supabase.from('applicants').update({ stage: 'hired', updated_at: new Date().toISOString() }).eq('id', fields.applicant_id);
         }
-        say('Data karyawan disimpan ke Employee Directory.');
+        say('Employee record saved to Employee Directory.');
       }
       invalidateDataCache();
-      await loadView(activeView === 'employees' ? 'employees' : 'stage3', true);
+      await loadView('employees', true);
     }
   });
-}
-
-function bindHire() {
-  $$('[data-hire]').forEach(button => button.addEventListener('click', () => {
-    const applicant = applicants.find(a => a.id === button.dataset.hire);
-    if (applicant) openEmployeeEditor(null, applicant);
-  }));
 }
 
 function bindEmployeeEdit() {
@@ -1510,18 +1776,18 @@ async function downloadEmployeeTemplateXlsx() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(sample, { header: EMPLOYEE_TABLE_HEADERS });
     ws['!cols'] = EMPLOYEE_TABLE_HEADERS.map(key => ({ wch: Math.max(15, key.length + 4) }));
-    XLSX.utils.book_append_sheet(wb, ws, 'Template Karyawan');
+    XLSX.utils.book_append_sheet(wb, ws, 'Employee Template');
     XLSX.writeFile(wb, 'Template_Employee_Directory.xlsx');
-    say('Template XLSX diunduh.');
+    say('XLSX template downloaded.');
   } catch (err) {
-    say(err.message || 'Gagal menyiapkan template XLSX.');
+    say(err.message || 'Failed to prepare XLSX template.');
   }
 }
 
 async function exportEmployees() {
   const button = $('#export-employees');
   button.disabled = true;
-  button.textContent = 'Menyiapkan XLSX…';
+  button.textContent = 'Preparing XLSX…';
   try {
     const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
     const rowsData = employees.map(employee => {
@@ -1533,17 +1799,17 @@ async function exportEmployees() {
     sheet['!cols'] = EMPLOYEE_TABLE_HEADERS.map(key => ({ wch: Math.min(34, Math.max(14, key.length + 4)) }));
     XLSX.utils.book_append_sheet(workbook, sheet, 'Employee Directory');
     XLSX.writeFile(workbook, `Employee_Directory_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    say(`${employees.length} data karyawan diekspor ke XLSX.`);
+    say(`${employees.length} employee records exported to XLSX.`);
   } catch (error) {
-    say(error.message || 'File XLSX gagal dibuat.');
+    say(error.message || 'Failed to export XLSX file.');
   } finally {
     button.disabled = false;
-    button.textContent = 'Unduh XLSX ↓';
+    button.textContent = 'Download XLSX ↓';
   }
 }
 
 /* ============================================================================
- * MANAJEMEN USER (NIK, Nama Karyawan, Role Superadmin, PIN + Eye 8karakterH!)
+ * USER MANAGEMENT (NIK, Employee Name, Role Superadmin, PIN + Eye 8karakterH!)
  * ============================================================================ */
 async function renderUserManagement() {
   const canManageUsers = isRootAdminAccount(currentAdminProfile);
@@ -1574,11 +1840,11 @@ async function renderUserManagement() {
   portalUsers = rows;
 
   const migrationNotice = migrationMissing
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">RPC Manajemen User belum aktif di Supabase. Jalankan file migrasi <code>database/migrations/20261120_hrga_workspace_v2.sql</code> di Supabase SQL Editor untuk mengaktifkan Tambah User &amp; Intip PIN.</div>`
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">User Management RPCs are not active in Supabase yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
     : '';
 
   const accessNotice = !canManageUsers
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Akses hanya-baca: Hanya akun <b>Admin</b> utama yang dapat menambahkan, mengedit, menghapus, atau membuka PIN user.</div>`
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Read-only access: Only the root <b>Admin</b> account can add, edit, delete, or reveal user PINs.</div>`
     : '';
 
   const renderRowsHtml = list => list.length
@@ -1589,7 +1855,7 @@ async function renderUserManagement() {
         <td>
           <div class="pin-cell-wrap">
             <span data-pin-mask="${esc(u.username)}">${esc(maskPin())}</span>
-            ${canManageUsers ? `<button type="button" class="pin-eye-btn" data-pin-reveal="${esc(u.username)}" data-pin-label="${esc(u.employee_nik || u.username)}" aria-label="Intip PIN ${esc(u.display_name || u.username)}" title="Intip PIN">
+            ${canManageUsers ? `<button type="button" class="pin-eye-btn" data-pin-reveal="${esc(u.username)}" data-pin-label="${esc(u.employee_nik || u.username)}" aria-label="Reveal PIN for ${esc(u.display_name || u.username)}" title="Reveal PIN">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>` : ''}
           </div>
@@ -1600,20 +1866,20 @@ async function renderUserManagement() {
               <button type="button" class="icon-btn" data-user-edit="${esc(u.username)}">Edit</button>
               ${String(u.username || '').toLowerCase() === 'admin' ? '' : `<button type="button" class="icon-btn danger" data-user-delete="${esc(u.username)}">Delete</button>`}
             </div>`
-          : '<span class="subtle">Hanya Admin</span>'}</td>
+          : '<span class="subtle">Admin Only</span>'}</td>
       </tr>`).join('')
-    : emptyRow(6, 'Belum ada data user');
+    : emptyRow(6, 'No user accounts found');
 
   const addButtonHtml = canManageUsers
-    ? '<button id="add-portal-user" class="btn btn-primary">+ Tambah User</button>'
+    ? '<button id="add-portal-user" class="btn btn-primary">+ Add User</button>'
     : '';
 
-  content.innerHTML = header('Manajemen User', '', addButtonHtml) +
+  content.innerHTML = header('User Management', '', addButtonHtml) +
     migrationNotice +
     accessNotice +
-    `<section class="panel table-panel">${tableToolbar('Cari NIK / nama karyawan…', 'Daftar User Workspace')}
+    `<section class="panel table-panel">${tableToolbar('Search NIK / employee name…', 'Workspace Users')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>NIK</th><th>NAMA KARYAWAN</th><th>ROLE</th><th>PIN</th><th>LOGIN TERAKHIR</th><th>AKSI</th></tr></thead>
+        <thead><tr><th>NIK</th><th>EMPLOYEE NAME</th><th>ROLE</th><th>PIN</th><th>LAST LOGIN</th><th>ACTIONS</th></tr></thead>
         <tbody id="user-rows">${renderRowsHtml(rows)}</tbody>
       </table></div></section>`;
 
@@ -1639,7 +1905,7 @@ async function renderUserManagement() {
             maskEl.textContent = revealedPin || '—';
             maskEl.dataset.revealed = 'true';
           }
-          say('PIN berhasil ditampilkan.');
+          say('PIN revealed.');
         }
       });
     }));
@@ -1658,7 +1924,7 @@ async function renderUserManagement() {
             p_pin: fields.pin || null
           });
           if (error) throw error;
-          say(`Data user ${fields.full_name} diperbarui.`);
+          say(`Updated user ${fields.full_name}.`);
           await loadView('userManagement');
         }
       });
@@ -1667,14 +1933,14 @@ async function renderUserManagement() {
     $$('[data-user-delete]').forEach(btn => btn.addEventListener('click', async () => {
       const username = btn.dataset.userDelete;
       const user = portalUsers.find(item => item.username === username);
-      if (!window.confirm(`Hapus akses user ${user?.display_name || username}?`)) return;
+      if (!window.confirm(`Remove user access for ${user?.display_name || username}?`)) return;
       try {
         const { error } = await supabase.rpc('delete_portal_user', { p_username: username });
         if (error) throw error;
-        say('User berhasil dihapus.');
+        say('User removed.');
         await loadView('userManagement');
       } catch (err) {
-        say(err.message || 'Gagal menghapus user.');
+        say(err.message || 'Failed to remove user.');
       }
     }));
   };
@@ -1686,7 +1952,7 @@ async function renderUserManagement() {
         employees,
         onSave: async fields => {
           if (migrationMissing) {
-            throw new Error('Jalankan file migrasi SQL v2 di Supabase SQL Editor terlebih dahulu.');
+            throw new Error('Run SQL migration v2/v3 in Supabase SQL Editor first.');
           }
           const { error } = await supabase.rpc('upsert_portal_user', {
             p_nik: fields.nik,
@@ -1695,7 +1961,7 @@ async function renderUserManagement() {
             p_pin: fields.pin
           });
           if (error) throw error;
-          say(`User ${fields.full_name} berhasil ditambahkan.`);
+          say(`Added user ${fields.full_name}.`);
           await loadView('userManagement');
         }
       });
@@ -1703,7 +1969,7 @@ async function renderUserManagement() {
   }
 
   bindSearch('#table-search', query => {
-    const filtered = rows.filter(u => `${u.employee_nik} ${u.username} ${u.display_name} ${u.role}`.toLocaleLowerCase('id').includes(query));
+    const filtered = rows.filter(u => `${u.employee_nik} ${u.username} ${u.display_name} ${u.role}`.toLowerCase().includes(query));
     $('#user-rows').innerHTML = renderRowsHtml(filtered);
     bindUserActions();
   });
@@ -1711,22 +1977,22 @@ async function renderUserManagement() {
 }
 
 /* ============================================================================
- * APPLICATION PRINT & TEMPLATES
+ * APPLICATION PRINT & TEMPLATES (No DISC column in Application Print)
  * ============================================================================ */
 function renderPrintRows(rows) {
-  if (!rows.length) return emptyRow(5);
+  if (!rows.length) return emptyRow(4);
   return rows.map(applicant => {
-    const disc = getDiscForApplicant(applicant);
+    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id), getEmployeeForApplicant(applicant));
     return `<tr><td><b>${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
-      <td>${esc(applicant.position || '—')}</td><td>${statusPill(applicant.stage)}</td>
-      <td>${disc ? '<span class="status-pill green">Lengkap</span>' : '<span class="status-pill gray">Belum ada</span>'}</td>
-      <td><button class="icon-btn" data-print="${esc(applicant.id)}">Cetak Lamaran · CV · DISC</button></td></tr>`;
+      <td>${esc(applicant.position || '—')}</td>
+      <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
+      <td><button class="icon-btn" data-print="${esc(applicant.id)}">Print Application · CV · DISC</button></td></tr>`;
   }).join('');
 }
 
 async function loadPrintTemplates() {
   await syncDefaultPrintMaster().catch(error => {
-    console.warn('Sinkronisasi otomatis master bawaan dilewati:', error);
+    console.warn('Automatic default template sync skipped:', error);
   });
   const { data, error } = await supabase.from('print_templates')
     .select('id,source_filename,schema_version,is_active,created_at')
@@ -1738,48 +2004,48 @@ async function loadPrintTemplates() {
 
 function templateManagerHtml(migrationError = null) {
   const active = printTemplates.find(t => t.is_active);
-  const currentName = active?.source_filename || 'Master bawaan repository';
-  const isRepoDefault = !active || active.source_filename === 'Master bawaan repository';
+  const currentName = active?.source_filename || 'Built-in repository master';
+  const isRepoDefault = !active || active.source_filename === 'Master bawaan repository' || active.source_filename === 'Built-in repository master';
   const currentMeta = isRepoDefault
-    ? 'Master bawaan Mitra & ReHolz siap dipilih saat mencetak'
-    : `Diperbarui ${idDate(active.created_at)}`;
+    ? 'Default Mitra & ReHolz print masters ready'
+    : `Updated ${idDate(active.created_at)}`;
   const history = printTemplates.length ? printTemplates.map(template => `<tr>
     <td><b>${esc(template.source_filename)}</b><small class="table-subline">${esc(template.schema_version || '—')}</small></td>
     <td data-sort-value="${esc(template.created_at || '')}">${idDate(template.created_at)}</td>
-    <td>${template.is_active ? '<span class="status-pill green">Aktif</span>' : '<span class="status-pill gray">Arsip</span>'}</td>
-    <td>${template.is_active ? '' : `<button class="icon-btn" data-template-activate="${esc(template.id)}">Jadikan aktif</button>`}</td>
-  </tr>`).join('') : emptyRow(4, 'Belum ada versi master tambahan.');
+    <td>${template.is_active ? '<span class="status-pill green">Active</span>' : '<span class="status-pill gray">Archived</span>'}</td>
+    <td>${template.is_active ? '' : `<button class="icon-btn" data-template-activate="${esc(template.id)}">Activate</button>`}</td>
+  </tr>`).join('') : emptyRow(4, 'No custom template versions yet.');
   const controls = migrationError
-    ? `<div class="form-error template-error">Riwayat master belum tersedia.</div>`
-    : `<div class="template-current"><div><small>MASTER AKTIF</small><b>${esc(currentName)}</b><span>${esc(currentMeta)}</span></div>
-        <button class="btn btn-secondary" id="restore-template">Pulihkan master bawaan</button></div>
+    ? `<div class="form-error template-error">Template version history is unavailable.</div>`
+    : `<div class="template-current"><div><small>ACTIVE MASTER</small><b>${esc(currentName)}</b><span>${esc(currentMeta)}</span></div>
+        <button class="btn btn-secondary" id="restore-template">Restore Default Master</button></div>
       <form id="template-upload-form" class="template-upload">
-        <div class="template-upload-copy"><b>Ganti desain master</b><span>Unggah HTML baru. Field <code>name</code> wajib dipertahankan.</span></div>
+        <div class="template-upload-copy"><b>Upload custom master</b><span>Upload HTML file. Existing form field <code>name</code> attributes must remain intact.</span></div>
         <input id="template-file" class="input" type="file" accept=".html,text/html" required>
-        <button class="btn btn-primary" type="submit">Simpan &amp; aktifkan</button>
+        <button class="btn btn-primary" type="submit">Save &amp; Activate</button>
       </form>
-      <div class="template-history"><div class="template-history-title">Riwayat versi tersimpan</div><div class="table-wrap"><table class="data-table"><thead><tr><th>MASTER FILE</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${history}</tbody></table></div></div>`;
+      <div class="template-history"><div class="template-history-title">Saved template history</div><div class="table-wrap"><table class="data-table"><thead><tr><th>MASTER FILE</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${history}</tbody></table></div></div>`;
   return `<section class="panel template-manager">
-    <div class="panel-head"><div><h3>Master HTML lamaran</h3><p>Desain dapat diganti tanpa mengubah struktur data formulir</p></div><span class="status-pill ${active ? 'green' : 'blue'}">${isRepoDefault ? 'Master bawaan · Aktif' : 'Versi tersimpan'}</span></div>
+    <div class="panel-head"><div><h3>Application Master HTML</h3><p>Customize print layout without altering candidate field structure</p></div><span class="status-pill ${active ? 'green' : 'blue'}">${isRepoDefault ? 'Built-in Master · Active' : 'Saved Version'}</span></div>
     <div class="template-manager-body">${controls}</div>
   </section>`;
 }
 
 function renderPrint() {
   content.innerHTML = header('Application Print', '') + `
-    <section class="panel table-panel">${tableToolbar('Cari kandidat…', 'Application Print')}<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>APPLICANT</th><th>POSITION</th><th>STAGE</th><th>DISC</th><th>DOCUMENTS</th></tr></thead>
+    <section class="panel table-panel">${tableToolbar('Search candidates…', 'Application Print')}<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>APPLICANT</th><th>POSITION</th><th>STAGE</th><th>DOCUMENTS</th></tr></thead>
       <tbody id="candidate-rows">${renderPrintRows(applicants)}</tbody>
     </table></div></section>`;
   bindSearch('#table-search', query => {
-    $('#candidate-rows').innerHTML = renderPrintRows(applicants.filter(a => `${a.full_name} ${a.nik} ${a.position}`.toLocaleLowerCase('id').includes(query)));
+    $('#candidate-rows').innerHTML = renderPrintRows(applicants.filter(a => `${a.full_name} ${a.nik} ${a.position}`.toLowerCase().includes(query)));
     bindPrint();
   });
   bindPrint();
 }
 
 function renderPlaceholder(title) {
-  content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div><h2>${esc(title || 'Modul Dalam Pengembangan')}</h2><p>Modul ini disiapkan untuk pengelolaan operasional terintegrasi.</p></div></section>`;
+  content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div><h2>${esc(title || 'Module In Development')}</h2><p>This module is prepared for integrated HR&amp;GA operations.</p></div></section>`;
 }
 
 function printBrandModal() {
@@ -1790,18 +2056,18 @@ function printBrandModal() {
   modal.className = 'modal-backdrop hidden';
   modal.innerHTML = `<section class="print-brand-modal-card" role="dialog" aria-modal="true" aria-labelledby="print-brand-modal-title">
     <div class="employee-modal-head">
-      <div><small>FORMAT CETAK DOKUMEN</small><h2 id="print-brand-modal-title">Pilih versi perusahaan untuk cetak</h2></div>
-      <button type="button" class="modal-close" id="print-brand-close" aria-label="Tutup">×</button>
+      <div><small>DOCUMENT PRINT EDITION</small><h2 id="print-brand-modal-title">Select company template for printing</h2></div>
+      <button type="button" class="modal-close" id="print-brand-close" aria-label="Close">×</button>
     </div>
     <div class="print-brand-candidate" id="print-brand-candidate"></div>
     <div class="print-brand-grid">
       <button type="button" class="print-brand-option" data-print-brand="mitra">
         <div class="print-brand-option-banner"><img src="./assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur"><span class="print-brand-option-tag">Executive Navy</span></div>
-        <div class="print-brand-option-body"><b>PT. Mitra Binamandiri Makmur</b><small>Formulir lamaran kerja resmi Mitra, lampiran CV, dan Laporan Hasil Tes D.I.S.C. edisi Mitra.</small><span class="print-brand-cta">Cetak versi Mitra ↗</span></div>
+        <div class="print-brand-option-body"><b>PT. Mitra Binamandiri Makmur</b><small>Official Mitra application form, attached CV, and D.I.S.C. Assessment Report.</small><span class="print-brand-cta">Print Mitra Edition ↗</span></div>
       </button>
       <button type="button" class="print-brand-option" data-print-brand="reholz">
         <div class="print-brand-option-banner"><img src="./assets/img/logo-reholz-light.png" alt="ReHolz · PT Radin Mitra Lestari"><span class="print-brand-option-tag">Forest &amp; Amber</span></div>
-        <div class="print-brand-option-body"><b>PT Radin Mitra Lestari (ReHolz)</b><small>Formulir lamaran kerja ReHolz, lampiran CV, dan Laporan Hasil Tes D.I.S.C. edisi ReHolz.</small><span class="print-brand-cta">Cetak versi ReHolz ↗</span></div>
+        <div class="print-brand-option-body"><b>PT Radin Mitra Lestari (ReHolz)</b><small>Official ReHolz application form, attached CV, and D.I.S.C. Assessment Report.</small><span class="print-brand-cta">Print ReHolz Edition ↗</span></div>
       </button>
     </div>
   </section>`;
@@ -1819,9 +2085,9 @@ function printBrandModal() {
       pendingPrintRecord = null;
       pendingPrintSourceButton = null;
       const originalText = sourceBtn?.textContent || '';
-      if (sourceBtn) { sourceBtn.disabled = true; sourceBtn.textContent = 'Menyiapkan…'; }
+      if (sourceBtn) { sourceBtn.disabled = true; sourceBtn.textContent = 'Preparing…'; }
       Promise.resolve().then(() => printApplication(record, { brand }))
-        .catch(error => say(error.message || 'Dokumen tidak dapat disiapkan.'))
+        .catch(error => say(error.message || 'Unable to prepare document.'))
         .finally(() => { if (sourceBtn) { sourceBtn.disabled = false; sourceBtn.textContent = originalText; } });
     });
   });
@@ -1834,7 +2100,7 @@ function openPrintBrandModal(record, sourceButton = null) {
   pendingPrintSourceButton = sourceButton;
   const candidateEl = $('#print-brand-candidate', modal);
   if (candidateEl) {
-    candidateEl.innerHTML = `<div><b>${esc(record.full_name || '—')}</b><span>${esc(record.position || 'Posisi belum diisi')}</span></div><span class="print-brand-nik">${esc(record.nik || '—')}</span>`;
+    candidateEl.innerHTML = `<div><b>${esc(record.full_name || '—')}</b><span>${esc(record.position || 'Position unspecified')}</span></div><span class="print-brand-nik">${esc(record.nik || '—')}</span>`;
   }
   modal.classList.remove('hidden');
   $('[data-print-brand="mitra"]', modal)?.focus();
@@ -1855,12 +2121,12 @@ function sanitizeAndValidateTemplate(html, baselineHtml) {
   const candidateDoc = parser.parseFromString(html, 'text/html');
   const baselineDoc = parser.parseFromString(baselineHtml, 'text/html');
   const form = candidateDoc.querySelector('#applicationForm');
-  if (!form) throw new Error('Master HTML wajib memiliki form dengan id="applicationForm".');
+  if (!form) throw new Error('Master HTML must contain a form element with id="applicationForm".');
   const baselineNames = new Set([...baselineDoc.querySelectorAll('#applicationForm [name]')].map(el => el.getAttribute('name')).filter(Boolean));
   const newNames = new Set([...form.querySelectorAll('[name]')].map(el => el.getAttribute('name')).filter(Boolean));
   const missing = [...baselineNames].filter(name => !newNames.has(name));
   if (missing.length) {
-    throw new Error(`Master baru menghilangkan ${missing.length} field lama. Semua atribut name harus dipertahankan.`);
+    throw new Error(`Uploaded master removes ${missing.length} required field(s). All name attributes must be preserved.`);
   }
   candidateDoc.querySelectorAll('script,iframe,object,embed,base,meta[http-equiv=refresh]').forEach(el => el.remove());
   candidateDoc.querySelectorAll('*').forEach(el => {
@@ -1909,7 +2175,7 @@ async function syncDefaultPrintMaster() {
 
 async function storeAndActivateTemplate(html, filename) {
   const baselineResponse = await fetch(versionedTemplateUrl(), { cache: 'no-store' });
-  if (!baselineResponse.ok) throw new Error('Master bawaan tidak dapat dimuat untuk validasi field.');
+  if (!baselineResponse.ok) throw new Error('Unable to load default master for field validation.');
   const validated = sanitizeAndValidateTemplate(html, await baselineResponse.text());
   const { data, error } = await supabase.from('print_templates').insert({
     source_filename: filename,
@@ -1931,30 +2197,30 @@ function bindTemplateManager(migrationMissing) {
     const button = event.currentTarget.querySelector('button[type="submit"]');
     if (!file) return;
     button.disabled = true;
-    button.textContent = 'Memvalidasi…';
+    button.textContent = 'Validating…';
     try {
       await storeAndActivateTemplate(await file.text(), file.name);
       await markDefaultMasterSynced();
       await invalidateMasterHtmlCache();
-      say('Master HTML baru berhasil diaktifkan.');
+      say('New Master HTML activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Master HTML gagal disimpan.'); }
-    finally { button.disabled = false; button.textContent = 'Simpan & aktifkan'; }
+    } catch (error) { say(error.message || 'Failed to save Master HTML.'); }
+    finally { button.disabled = false; button.textContent = 'Save & Activate'; }
   });
   $('#restore-template')?.addEventListener('click', async () => {
     const button = $('#restore-template');
     button.disabled = true;
-    button.textContent = 'Memulihkan…';
+    button.textContent = 'Restoring…';
     try {
       const response = await fetch(versionedTemplateUrl(), { cache: 'no-store' });
-      if (!response.ok) throw new Error('Master bawaan tidak ditemukan.');
+      if (!response.ok) throw new Error('Default master file not found.');
       await storeAndActivateTemplate(await response.text(), 'Master bawaan repository');
       await markDefaultMasterSynced();
       await invalidateMasterHtmlCache();
-      say('Master bawaan berhasil diaktifkan.');
+      say('Default master restored and activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Master bawaan gagal diaktifkan.'); }
-    finally { button.disabled = false; button.textContent = 'Pulihkan master bawaan'; }
+    } catch (error) { say(error.message || 'Failed to restore default master.'); }
+    finally { button.disabled = false; button.textContent = 'Restore Default Master'; }
   });
   $$('[data-template-activate]').forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
@@ -1963,9 +2229,9 @@ function bindTemplateManager(migrationMissing) {
       if (error) throw error;
       await markDefaultMasterSynced();
       await invalidateMasterHtmlCache();
-      say('Versi master berhasil diaktifkan.');
+      say('Selected master version activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Versi master gagal diaktifkan.'); button.disabled = false; }
+    } catch (error) { say(error.message || 'Failed to activate template version.'); button.disabled = false; }
   }));
 }
 
@@ -2014,7 +2280,7 @@ async function loadView(view, forceRefresh = false) {
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#page-title').textContent = TITLES[view] || 'Dashboard';
 
-  const dataViews = new Set(['dashboard', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
+  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
     let hasCached = false;
     if (!forceRefresh) {
@@ -2024,13 +2290,14 @@ async function loadView(view, forceRefresh = false) {
       }
     }
     if (!hasCached) {
-      content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Memuat data</h2></div></section>';
+      content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Loading data…</h2></div></section>';
     }
   }
 
   try {
     if (dataViews.has(view)) await refreshData(forceRefresh);
     if (view === 'dashboard') renderDashboard();
+    else if (view === 'invited') renderInvitedView();
     else if (view === 'stage1') renderStage1();
     else if (view === 'stage2') renderStage2();
     else if (view === 'stage3') renderStage3();
@@ -2043,7 +2310,7 @@ async function loadView(view, forceRefresh = false) {
     else if (TITLES[view]) renderPlaceholder(TITLES[view]);
     else renderPlaceholder('Page not found');
   } catch (error) {
-    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h2>Data tidak dapat dimuat</h2><p>${esc(error.message || 'Periksa koneksi Supabase.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Coba lagi</button></div></section>`;
+    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h2>Unable to load data</h2><p>${esc(error.message || 'Check your Supabase connection.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Retry</button></div></section>`;
     $('#retry-load')?.addEventListener('click', () => loadView(view, true));
   }
 }
@@ -2069,7 +2336,7 @@ function applyAdminProfileUi(profile) {
   const nameEl = $('#admin-name');
   if (nameEl) nameEl.textContent = adminDisplayName;
   const roleEl = $('#admin-role-label');
-  if (roleEl) roleEl.textContent = profile.isRootAdmin ? 'Admin Utama' : (profile.role || 'Superadmin');
+  if (roleEl) roleEl.textContent = profile.isRootAdmin ? 'Root Admin' : (profile.role || 'Superadmin');
 }
 
 async function resolveAdminProfileFromServer(session) {
@@ -2122,7 +2389,7 @@ function verifyAdminAccessInBackground(session) {
       localStorage.removeItem(SESSION_PROFILE_KEY);
       shell.classList.add('hidden');
       loginView.classList.remove('hidden');
-      $('#login-error').textContent = 'Sesi admin berakhir atau hak akses belum aktif. Silakan masuk kembali.';
+      $('#login-error').textContent = 'Admin session expired or access is inactive. Please sign in again.';
       return;
     }
     writeCachedSessionProfile(freshProfile);
@@ -2151,11 +2418,11 @@ async function openAdmin(session, { fromSessionRestore = false } = {}) {
   ]);
   if (error) {
     await supabase.auth.signOut();
-    throw new Error('Login berhasil, tetapi pemeriksaan akses admin gagal.');
+    throw new Error('Signed in, but admin access verification failed.');
   }
   if (!isAdmin) {
     await supabase.auth.signOut();
-    throw new Error('Akun berhasil login, tetapi hak akses HR belum aktif.');
+    throw new Error('Signed in, but HR workspace privileges are not active for this account.');
   }
   writeCachedSessionProfile(profile);
   applyAdminProfileUi(profile);
@@ -2171,7 +2438,7 @@ $('#toggle-pin-visibility')?.addEventListener('click', () => {
   const visible = input.type === 'text';
   input.type = visible ? 'password' : 'text';
   btn.setAttribute('aria-pressed', String(!visible));
-  btn.setAttribute('aria-label', visible ? 'Tampilkan PIN' : 'Sembunyikan PIN');
+  btn.setAttribute('aria-label', visible ? 'Show PIN' : 'Hide PIN');
   btn.innerHTML = visible
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
@@ -2185,19 +2452,19 @@ $('#login-form').addEventListener('submit', async event => {
   const button = event.currentTarget.querySelector('button[type="submit"]');
   errorBox.textContent = '';
 
-  if (!isConfigured) { errorBox.textContent = 'Konfigurasi Supabase belum diisi.'; return; }
+  if (!isConfigured) { errorBox.textContent = 'Supabase configuration is missing.'; return; }
   if (!validateLoginIdentifier(rawUser)) {
-    errorBox.textContent = 'Masukkan NIK Karyawan yang valid (minimal 3 karakter).';
+    errorBox.textContent = 'Please enter a valid Employee NIK (at least 3 characters).';
     return;
   }
   if (!validatePin(pin)) {
-    errorBox.textContent = 'PIN harus terdiri dari 4–12 angka.';
+    errorBox.textContent = 'PIN must be 4–12 numeric digits.';
     return;
   }
 
   const normalizedUser = normalizeLoginIdentifier(rawUser);
   button.disabled = true;
-  button.textContent = 'Memeriksa…';
+  button.textContent = 'Checking…';
   try {
     const response = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/admin-login`, {
       method: 'POST',
@@ -2209,7 +2476,7 @@ $('#login-form').addEventListener('submit', async event => {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.session?.access_token || !result.session?.refresh_token) {
-      throw new Error(result.error || 'NIK Karyawan atau PIN tidak sesuai.');
+      throw new Error(result.error || 'Invalid Employee NIK or PIN.');
     }
 
     const { data, error } = await supabase.auth.setSession({
@@ -2221,7 +2488,7 @@ $('#login-form').addEventListener('submit', async event => {
     $('#login-pin').value = '';
   } catch (error) {
     console.error('NIK/PIN login failed:', error);
-    errorBox.textContent = error.message || 'Sign-in gagal. Periksa NIK Karyawan dan PIN Anda.';
+    errorBox.textContent = error.message || 'Sign in failed. Please check your Employee NIK and PIN.';
   } finally {
     button.disabled = false;
     button.textContent = 'Sign In ↗';
@@ -2242,6 +2509,8 @@ $('#logout-btn').addEventListener('click', () => {
   stage1Leads = [];
   employees = [];
   interviews = [];
+  invitedCandidates = [];
+  cvScreenings = [];
   portalUsers = [];
   activeView = 'dashboard';
   shell.classList.add('hidden');
@@ -2256,7 +2525,7 @@ $('#logout-btn').addEventListener('click', () => {
 async function init() {
   initSidebarAccordions();
   if (!isConfigured) {
-    $('#login-error').textContent = 'Isi Project URL dan Publishable key di assets/js/config.js.';
+    $('#login-error').textContent = 'Set Project URL and Publishable key in assets/js/config.js.';
     return;
   }
   const { data: { session } } = await supabase.auth.getSession();
@@ -2266,4 +2535,6 @@ async function init() {
   }
 }
 
-init();
+init().finally(() => {
+  document.documentElement.dataset.adminReady = 'true';
+});

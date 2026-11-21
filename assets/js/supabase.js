@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js?v=20261120-hrga-workspace-11';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js?v=20261121-hrga-workspace-12';
 
 const configured = SUPABASE_URL.startsWith('https://') &&
   !SUPABASE_URL.includes('YOUR-PROJECT') &&
@@ -14,6 +14,6 @@ export const supabase = configured
 export const isConfigured = configured;
 
 export function requireSupabase() {
-  if (!supabase) throw new Error('Konfigurasi Supabase belum diisi.');
+  if (!supabase) throw new Error('Supabase configuration is missing.');
   return supabase;
 }

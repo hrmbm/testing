@@ -1,4 +1,4 @@
-import { $, $$, esc } from './common.js?v=20261120-hrga-workspace-11';
+import { $, esc } from './common.js?v=20261121-hrga-workspace-12';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -6,13 +6,16 @@ import {
   FINAL_REJECTION_REASONS,
   CONTRACT_DURATION_OPTIONS,
   EMPLOYEE_TABLE_HEADERS,
+  INVITE_SOURCES,
+  INVITE_STATUSES,
   calculateContractDates,
   findDefaultInterviewer,
   parseEmployeeSpreadsheetRows,
   buildEmployeeUserOptionLabel,
+  normalizeInterviewDecision,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261120-hrga-workspace-11';
+} from './workspace-logic.js?v=20261121-hrga-workspace-12';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -40,7 +43,7 @@ export function bindSafeModalClose(modal, onClose, { closeOnBackdrop = false } =
   return keyHandler;
 }
 
-function formatRupiahDigits(raw = '') {
+function formatCurrencyDigits(raw = '') {
   const digits = String(raw ?? '').replace(/\D/g, '');
   return digits ? new Intl.NumberFormat('id-ID').format(Number(digits)) : '';
 }
@@ -54,23 +57,24 @@ export function openDuplicateCandidateModal({ applicant, positions = [], onSave 
     modal.innerHTML = `<section class="employee-modal-card" role="dialog" aria-modal="true" aria-labelledby="dup-modal-title">
       <div class="employee-modal-head">
         <div>
-          <small>CANDIDATE LIST · DUPLIKASI POSISI</small>
-          <h2 id="dup-modal-title">Duplikasi Kandidat ke Posisi Lain</h2>
+          <small>CANDIDATE LIST · DUPLICATE POSITION</small>
+          <h2 id="dup-modal-title">Duplicate Candidate to Another Position</h2>
         </div>
-        <button type="button" class="modal-close" id="dup-modal-close" aria-label="Tutup">×</button>
+        <button type="button" class="modal-close" id="dup-modal-close" aria-label="Close">×</button>
       </div>
       <form id="dup-modal-form">
         <div class="employee-form-grid">
-          <label>Nama Kandidat<input class="input" name="full_name" readonly></label>
+          <label>Candidate Name<input class="input" name="full_name" readonly></label>
           <label>NIK<input class="input" name="nik" readonly></label>
-          <label>Posisi Saat Ini<input class="input" name="current_position" readonly></label>
-          <label>Posisi Baru (Tujuan)<select class="select" name="new_position" required></select></label>
-          <label class="employee-notes">Atau Ketik Posisi Baru (Opsional jika tidak ada di daftar)<input class="input" name="custom_position" maxlength="100" placeholder="Biarkan kosong jika memilih dari dropdown"></label>
+          <label>Current Position<input class="input" name="current_position" readonly></label>
+          <label>New Target Position<select class="select" name="new_position" required></select></label>
+          <label class="employee-notes">Or Enter Custom Position (Optional if not listed)<input class="input" name="custom_position" maxlength="100" placeholder="Leave blank when choosing from dropdown"></label>
         </div>
+        <p class="subtle" style="margin:10px 0 0;font-size:12.5px">All existing progress (DISC assessment, interview records, and invitation link) will be carried over to the duplicated position.</p>
         <div id="dup-modal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
-          <button type="button" class="btn btn-secondary" id="dup-modal-cancel">Batal</button>
-          <button type="submit" class="btn btn-primary" id="dup-modal-save">Duplikasi &amp; Simpan</button>
+          <button type="button" class="btn btn-secondary" id="dup-modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="dup-modal-save">Duplicate &amp; Save</button>
         </div>
       </form>
     </section>`;
@@ -86,10 +90,10 @@ export function openDuplicateCandidateModal({ applicant, positions = [], onSave 
   const select = form.elements.new_position;
   const currentPos = String(applicant.position || applicant.application_data?.posisi || '').trim();
   const options = [...new Set([...positions, currentPos].filter(Boolean))];
-  select.innerHTML = `<option value="">Pilih posisi baru…</option>` +
+  select.innerHTML = `<option value="">Select new position…</option>` +
     options.map(pos => {
-      const same = pos.toLocaleLowerCase('id') === currentPos.toLocaleLowerCase('id');
-      return `<option value="${esc(pos)}" ${same ? 'disabled' : ''}>${esc(pos)}${same ? ' (posisi saat ini)' : ''}</option>`;
+      const same = pos.toLowerCase() === currentPos.toLowerCase();
+      return `<option value="${esc(pos)}" ${same ? 'disabled' : ''}>${esc(pos)}${same ? ' (current position)' : ''}</option>`;
     }).join('');
 
   form.elements.full_name.value = applicant.full_name || '';
@@ -104,23 +108,23 @@ export function openDuplicateCandidateModal({ applicant, positions = [], onSave 
     const chosen = form.elements.custom_position.value.trim() || form.elements.new_position.value.trim();
     errorBox.textContent = '';
     if (!chosen) {
-      errorBox.textContent = 'Pilih atau isi posisi baru terlebih dahulu.';
+      errorBox.textContent = 'Please select or enter a new target position.';
       return;
     }
-    if (chosen.toLocaleLowerCase('id') === currentPos.toLocaleLowerCase('id')) {
-      errorBox.textContent = 'Posisi baru harus berbeda dari posisi saat ini.';
+    if (chosen.toLowerCase() === currentPos.toLowerCase()) {
+      errorBox.textContent = 'New position must be different from the current candidate position.';
       return;
     }
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Menyimpan…';
+    saveBtn.textContent = 'Saving…';
     try {
       await onSave(chosen);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Duplikasi kandidat gagal disimpan.';
+      errorBox.textContent = err.message || 'Failed to duplicate candidate.';
     } finally {
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Duplikasi & Simpan';
+      saveBtn.textContent = 'Duplicate & Save';
     }
   };
 
@@ -144,69 +148,72 @@ export function openInterviewModal({
       <div class="employee-modal-head">
         <div>
           <small id="int-modal-kicker">INTERVIEW PIPELINE</small>
-          <h2 id="int-modal-title">Tambah Kandidat Interview</h2>
+          <h2 id="int-modal-title">Add Interview Candidate</h2>
         </div>
-        <button type="button" class="modal-close" id="int-modal-close" aria-label="Tutup">×</button>
+        <button type="button" class="modal-close" id="int-modal-close" aria-label="Close">×</button>
       </div>
       <form id="int-modal-form">
         <div class="employee-form-grid">
-          <label class="employee-notes">Pilih Kandidat (Candidate List &amp; Lead Register)
+          <label class="employee-notes">Select Candidate (Candidate List &amp; Lead Register)
             <select class="select" name="candidate_key" required></select>
           </label>
-          <label class="employee-notes">PIC Interviewer (Employee Directory)
+          <label>Interview Date
+            <input class="input" type="date" name="interview_date" required>
+          </label>
+          <label>PIC Interviewer (Employee Directory)
             <select class="select" name="pic_value" required></select>
           </label>
-          <label class="employee-notes" id="int-decision-wrap">Keputusan
+          <label class="employee-notes" id="int-decision-wrap">Decision
             <select class="select" name="decision" required></select>
           </label>
-          <label class="employee-notes" id="int-notes-wrap">Keterangan Interviewer
-            <textarea class="textarea" name="notes" rows="3" maxlength="2000" placeholder="Catatan hasil interview…"></textarea>
+          <label class="employee-notes" id="int-notes-wrap">Interviewer Notes
+            <textarea class="textarea" name="notes" rows="3" maxlength="2000" placeholder="Interview assessment notes…"></textarea>
           </label>
 
           <div id="int-final-reject-group" class="employee-notes hidden">
             <div class="employee-form-grid" style="padding-top:0">
-              <label class="employee-notes">Alasan Penolakan
+              <label class="employee-notes">Rejection Reason
                 <select class="select" name="rejection_reason_category">
-                  <option value="">Pilih alasan…</option>
+                  <option value="">Select reason…</option>
                   ${FINAL_REJECTION_REASONS.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}
                 </select>
               </label>
-              <label id="int-reject-detail-wrap" class="employee-notes hidden">Penjelasan Alasan (Opsional)
-                <textarea class="textarea" name="rejection_reason_detail" rows="2" maxlength="1000" placeholder="Jelaskan alasan penolakan jika perlu…"></textarea>
+              <label id="int-reject-detail-wrap" class="employee-notes hidden">Reason Details (Optional)
+                <textarea class="textarea" name="rejection_reason_detail" rows="2" maxlength="1000" placeholder="Provide additional rejection context if needed…"></textarea>
               </label>
             </div>
           </div>
 
           <div id="int-final-accept-group" class="employee-notes hidden">
             <div class="employee-form-grid" style="padding-top:0">
-              <label>Mulai Bekerja
+              <label>Join / Start Date
                 <input class="input" type="date" name="work_start_date">
               </label>
-              <label>Gaji (Rp)
-                <input class="input" type="text" inputmode="numeric" name="salary" placeholder="Contoh: 4.500.000">
+              <label>Salary (IDR)
+                <input class="input" type="text" inputmode="numeric" name="salary" placeholder="e.g., 4.500.000">
               </label>
-              <label>Durasi Kontrak
+              <label>Contract Duration
                 <select class="select" name="contract_duration_months">
-                  <option value="">Pilih durasi kontrak…</option>
+                  <option value="">Select contract duration…</option>
                   ${CONTRACT_DURATION_OPTIONS.map(o => `<option value="${o.months}">${esc(o.label)}</option>`).join('')}
                 </select>
               </label>
-              <label>Periode Kontrak (Otomatis)
-                <input class="input contract-range-preview" type="text" name="contract_range_display" readonly placeholder="Pilih mulai bekerja &amp; durasi">
+              <label>Contract Period (Auto)
+                <input class="input contract-range-preview" type="text" name="contract_range_display" readonly placeholder="Select join date &amp; duration">
               </label>
-              <label>Nama Jabatan Resmi
-                <input class="input" type="text" name="official_position" maxlength="120" placeholder="Sesuai posisi dilamar">
+              <label>Official Position Title
+                <input class="input" type="text" name="official_position" maxlength="120" placeholder="Matches applied position">
               </label>
-              <label>NIK Karyawan
-                <input class="input" type="text" name="assigned_nik" maxlength="40" placeholder="Contoh: ST 260706">
+              <label>Employee NIK
+                <input class="input" type="text" name="assigned_nik" maxlength="40" placeholder="e.g., ST 260706">
               </label>
             </div>
           </div>
         </div>
         <div id="int-modal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
-          <button type="button" class="btn btn-secondary" id="int-modal-cancel">Batal</button>
-          <button type="submit" class="btn btn-primary" id="int-modal-save">Simpan</button>
+          <button type="button" class="btn btn-secondary" id="int-modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="int-modal-save">Save</button>
         </div>
       </form>
     </section>`;
@@ -221,15 +228,14 @@ export function openInterviewModal({
   const form = $('#int-modal-form', modal);
   const errorBox = $('#int-modal-error', modal);
   $('#int-modal-kicker', modal).textContent = 'INTERVIEW PIPELINE';
-  $('#int-modal-title', modal).textContent = `${existing ? 'Edit' : 'Tambah'} · ${INTERVIEW_STAGE_LABELS[stage] || stage}`;
+  $('#int-modal-title', modal).textContent = `${existing ? 'Edit' : 'Add Candidate'} · ${INTERVIEW_STAGE_LABELS[stage] || stage}`;
   errorBox.textContent = '';
 
-  // Populate Candidate dropdown
   const candSelect = form.elements.candidate_key;
-  candSelect.innerHTML = `<option value="">Pilih kandidat…</option>` +
+  candSelect.innerHTML = `<option value="">Select candidate…</option>` +
     candidates.map(c => {
       const sourceBadge = c.source_type === 'stage1' ? 'Lead Register' : 'Candidate List';
-      return `<option value="${esc(c.key)}">[${sourceBadge}] ${esc(c.candidate_name)} — ${esc(c.applied_position || 'Tanpa Posisi')}${c.candidate_nik ? ` (${esc(c.candidate_nik)})` : ''}</option>`;
+      return `<option value="${esc(c.key)}">[${sourceBadge}] ${esc(c.candidate_name)} — ${esc(c.applied_position || 'Unspecified')}${c.candidate_nik ? ` (${esc(c.candidate_nik)})` : ''}</option>`;
     }).join('');
 
   if (existing) {
@@ -243,7 +249,9 @@ export function openInterviewModal({
     candSelect.value = existingKey;
   }
 
-  // Populate PIC dropdown strictly from Employee Directory
+  form.elements.interview_date.value = existing?.interview_date ||
+    (existing?.created_at ? String(existing.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10));
+
   const picSelect = form.elements.pic_value;
   const defaultPic = findDefaultInterviewer(stage, employees);
   const picOptions = (employees || []).map(emp => ({
@@ -253,7 +261,7 @@ export function openInterviewModal({
     nik: emp.employee_no || '',
     name: emp.full_name || emp.employee_no || ''
   }));
-  picSelect.innerHTML = `<option value="">${picOptions.length ? 'Pilih PIC Interviewer (Employee Directory)…' : 'Employee Directory masih kosong…'}</option>` +
+  picSelect.innerHTML = `<option value="">${picOptions.length ? 'Select PIC Interviewer (Employee Directory)…' : 'Employee Directory is empty…'}</option>` +
     picOptions.map(o => `<option value="${esc(o.value)}" data-emp-id="${esc(o.empId)}" data-nik="${esc(o.nik)}" data-name="${esc(o.name)}">${esc(o.label)}</option>`).join('');
 
   if (existing?.pic_employee_id && [...picSelect.options].some(o => o.value === `emp:${existing.pic_employee_id}`)) {
@@ -277,18 +285,18 @@ export function openInterviewModal({
     picSelect.value = '';
   }
 
-  // Populate Decision dropdown
   const decisionSelect = form.elements.decision;
   const decisions = isFinal ? FINAL_INTERVIEW_DECISIONS : INTERVIEW_DECISIONS;
-  decisionSelect.innerHTML = `<option value="">Pilih keputusan…</option>` +
+  decisionSelect.innerHTML = `<option value="">Select decision…</option>` +
     decisions.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
-  decisionSelect.value = existing?.decision || '';
+  const normalizedExistingDecision = existing?.decision ? normalizeInterviewDecision(existing.decision) : '';
+  decisionSelect.value = decisions.includes(normalizedExistingDecision) ? normalizedExistingDecision : '';
 
   form.elements.notes.value = existing?.notes || '';
   form.elements.rejection_reason_category.value = existing?.rejection_reason_category || '';
   form.elements.rejection_reason_detail.value = existing?.rejection_reason_detail || '';
   form.elements.work_start_date.value = existing?.work_start_date || new Date().toISOString().slice(0, 10);
-  form.elements.salary.value = existing?.salary ? formatRupiahDigits(existing.salary) : '';
+  form.elements.salary.value = existing?.salary ? formatCurrencyDigits(existing.salary) : '';
   form.elements.contract_duration_months.value = existing?.contract_duration_months ? String(existing.contract_duration_months) : '12';
   form.elements.official_position.value = existing?.official_position || '';
   form.elements.assigned_nik.value = existing?.assigned_nik || '';
@@ -303,16 +311,16 @@ export function openInterviewModal({
   };
 
   const syncConditionalFields = () => {
-    const dec = decisionSelect.value;
+    const dec = normalizeInterviewDecision(decisionSelect.value);
     if (!isFinal) {
       rejectGroup.classList.add('hidden');
       acceptGroup.classList.add('hidden');
       return;
     }
-    rejectGroup.classList.toggle('hidden', dec !== 'Ditolak');
-    acceptGroup.classList.toggle('hidden', dec !== 'Diterima');
+    rejectGroup.classList.toggle('hidden', dec !== 'Rejected');
+    acceptGroup.classList.toggle('hidden', dec !== 'Accepted');
     rejectDetailWrap.classList.toggle('hidden', !form.elements.rejection_reason_category.value);
-    if (dec === 'Diterima') {
+    if (dec === 'Accepted') {
       if (!form.elements.official_position.value.trim()) {
         const selectedCand = candidates.find(c => c.key === candSelect.value);
         if (selectedCand?.applied_position) {
@@ -334,7 +342,7 @@ export function openInterviewModal({
   form.elements.work_start_date.onchange = syncContractRange;
   form.elements.contract_duration_months.onchange = syncContractRange;
   form.elements.salary.oninput = () => {
-    form.elements.salary.value = formatRupiahDigits(form.elements.salary.value);
+    form.elements.salary.value = formatCurrencyDigits(form.elements.salary.value);
   };
   syncConditionalFields();
 
@@ -351,11 +359,13 @@ export function openInterviewModal({
       candidate_whatsapp: existing.candidate_whatsapp,
       applied_position: existing.applied_position
     } : null);
-    if (!cand) { errorBox.textContent = 'Pilih kandidat terlebih dahulu.'; return; }
+    if (!cand) { errorBox.textContent = 'Please select a candidate.'; return; }
+    const interviewDate = form.elements.interview_date.value;
+    if (!interviewDate) { errorBox.textContent = 'Please select an interview date.'; return; }
     const picOpt = picSelect.selectedOptions[0];
-    if (!picOpt || !picOpt.value) { errorBox.textContent = 'Pilih PIC Interviewer.'; return; }
-    const dec = decisionSelect.value;
-    if (!dec) { errorBox.textContent = 'Pilih keputusan interview.'; return; }
+    if (!picOpt || !picOpt.value) { errorBox.textContent = 'Please select a PIC Interviewer.'; return; }
+    const dec = normalizeInterviewDecision(decisionSelect.value);
+    if (!dec) { errorBox.textContent = 'Please select an interview decision.'; return; }
 
     let extra = {
       rejection_reason_category: '',
@@ -369,23 +379,23 @@ export function openInterviewModal({
       assigned_nik: ''
     };
 
-    if (isFinal && dec === 'Ditolak') {
+    if (isFinal && dec === 'Rejected') {
       const cat = form.elements.rejection_reason_category.value;
-      if (!cat) { errorBox.textContent = 'Pilih alasan penolakan (Technical, Salary, atau Other).'; return; }
+      if (!cat) { errorBox.textContent = 'Please choose a rejection reason (Technical, Salary, or Other).'; return; }
       extra.rejection_reason_category = cat;
       extra.rejection_reason_detail = form.elements.rejection_reason_detail.value.trim();
     }
 
-    if (isFinal && dec === 'Diterima') {
+    if (isFinal && dec === 'Accepted') {
       const workStart = form.elements.work_start_date.value;
       const dur = Number(form.elements.contract_duration_months.value);
       const calc = calculateContractDates(workStart, dur);
       const salaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
       const officialPos = form.elements.official_position.value.trim();
       const nik = form.elements.assigned_nik.value.trim().toUpperCase();
-      if (!calc) { errorBox.textContent = 'Lengkapi Tanggal Mulai Bekerja dan Durasi Kontrak.'; return; }
-      if (!officialPos) { errorBox.textContent = 'Nama Jabatan Resmi wajib diisi.'; return; }
-      if (!nik) { errorBox.textContent = 'NIK Karyawan wajib diisi sebelum menyimpan.'; return; }
+      if (!calc) { errorBox.textContent = 'Please complete Join Date and Contract Duration.'; return; }
+      if (!officialPos) { errorBox.textContent = 'Official Position Title is required.'; return; }
+      if (!nik) { errorBox.textContent = 'Employee NIK is required before saving.'; return; }
       extra = {
         ...extra,
         work_start_date: workStart,
@@ -399,7 +409,7 @@ export function openInterviewModal({
     }
 
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Menyimpan…';
+    saveBtn.textContent = 'Saving…';
     try {
       await onSave({
         id: existing?.id || null,
@@ -411,6 +421,7 @@ export function openInterviewModal({
         candidate_whatsapp: cand.candidate_whatsapp || '',
         applied_position: cand.applied_position || '',
         interview_stage: stage,
+        interview_date: interviewDate,
         pic_employee_id: picOpt.dataset.empId || null,
         pic_nik: picOpt.dataset.nik || '',
         pic_name: picOpt.dataset.name || picOpt.textContent,
@@ -420,15 +431,266 @@ export function openInterviewModal({
       }, cand);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Data interview gagal disimpan.';
+      errorBox.textContent = err.message || 'Failed to save interview record.';
     } finally {
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Simpan';
+      saveBtn.textContent = 'Save';
     }
   };
 
   modal.classList.remove('hidden');
   candSelect.focus();
+}
+
+export function openInvitedCandidateModal({
+  existing = null,
+  positions = [],
+  applicants = [],
+  linkedApplicantIds = new Set(),
+  onSave
+}) {
+  let modal = $('#invited-candidate-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'invited-candidate-modal';
+    modal.className = 'modal-backdrop hidden';
+    modal.innerHTML = `<section class="employee-modal-card" role="dialog" aria-modal="true" aria-labelledby="inv-modal-title">
+      <div class="employee-modal-head">
+        <div>
+          <small>RECRUITMENT · INVITED CANDIDATES</small>
+          <h2 id="inv-modal-title">Add Invited Candidate</h2>
+        </div>
+        <button type="button" class="modal-close" id="inv-modal-close" aria-label="Close">×</button>
+      </div>
+      <form id="inv-modal-form">
+        <div class="employee-form-grid">
+          <label>Date
+            <input class="input" type="date" name="invite_date" required>
+          </label>
+          <label>Source
+            <select class="select" name="source" required></select>
+          </label>
+          <label>Candidate Name
+            <input class="input" type="text" name="candidate_name" required maxlength="120" placeholder="Enter candidate full name">
+          </label>
+          <label>Applied Position (Settings)
+            <select class="select" name="applied_position" required></select>
+          </label>
+          <label class="employee-notes">Status
+            <select class="select" name="status" required></select>
+          </label>
+          <label id="inv-link-wrap" class="employee-notes hidden">Link to Candidate List Record (Zero Duplicate)
+            <select class="select" name="linked_applicant_id"></select>
+            <small class="subtle" style="display:block;margin-top:4px;font-size:12px">When changed to Responded, link the corresponding candidate from Candidate List so they appear once.</small>
+          </label>
+          <label class="employee-notes">Notes (Optional)
+            <input class="input" type="text" name="notes" maxlength="300" placeholder="Optional invitation note…">
+          </label>
+        </div>
+        <div id="inv-modal-error" class="form-error" role="alert"></div>
+        <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary" id="inv-modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="inv-modal-save">Save</button>
+        </div>
+      </form>
+    </section>`;
+    document.body.append(modal);
+    const close = () => modal.classList.add('hidden');
+    $('#inv-modal-close', modal).addEventListener('click', close);
+    $('#inv-modal-cancel', modal).addEventListener('click', close);
+    bindSafeModalClose(modal, close, { closeOnBackdrop: false });
+  }
+
+  const form = $('#inv-modal-form', modal);
+  const errorBox = $('#inv-modal-error', modal);
+  const posSelect = form.elements.applied_position;
+  const sourceSelect = form.elements.source;
+  const statusSelect = form.elements.status;
+  const linkWrap = $('#inv-link-wrap', modal);
+  const linkSelect = form.elements.linked_applicant_id;
+
+  form.reset();
+  errorBox.textContent = '';
+
+  const isLinkingAuto = Boolean(existing?.isAutoOnly);
+  $('#inv-modal-title', modal).textContent = existing
+    ? (isLinkingAuto ? 'Update Candidate Source & Invite Record' : 'Edit Invited Candidate')
+    : 'Add Invited Candidate';
+
+  const currentPos = String(existing?.appliedPosition || '').trim();
+  const posOptions = [...new Set([...(positions || []), currentPos].filter(pos => pos && pos !== '—'))];
+  posSelect.innerHTML = `<option value="">Select position…</option>` +
+    posOptions.map(pos => `<option value="${esc(pos)}">${esc(pos)}</option>`).join('');
+
+  sourceSelect.innerHTML = INVITE_SOURCES.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
+  statusSelect.innerHTML = INVITE_STATUSES.map(st => `<option value="${esc(st)}">${esc(st)}</option>`).join('');
+
+  const availableApplicants = (applicants || []).filter(a => a.stage !== 'stage1_pending');
+  linkSelect.innerHTML = `<option value="">Select candidate from Candidate List…</option>` +
+    availableApplicants.map(a => {
+      const alreadyLinkedElsewhere = linkedApplicantIds.has(a.id) && a.id !== existing?.linkedApplicantId;
+      const suffix = alreadyLinkedElsewhere ? ' [Already Linked]' : '';
+      return `<option value="${esc(a.id)}" ${alreadyLinkedElsewhere ? 'disabled' : ''}>${esc(a.full_name)} — ${esc(a.position || '—')}${a.nik ? ` (${esc(a.nik)})` : ''}${suffix}</option>`;
+    }).join('');
+
+  form.elements.invite_date.value = existing?.inviteDate || new Date().toISOString().slice(0, 10);
+  form.elements.candidate_name.value = existing?.candidateName && existing.candidateName !== '—' ? existing.candidateName : '';
+  posSelect.value = currentPos && currentPos !== '—' ? currentPos : '';
+  sourceSelect.value = INVITE_SOURCES.includes(existing?.source) ? existing.source : 'Jobstreet';
+  statusSelect.value = existing?.status === 'Responded' ? 'Responded' : 'No Response';
+  linkSelect.value = existing?.linkedApplicantId || '';
+  form.elements.notes.value = existing?.notes || '';
+
+  const syncLinkVisibility = () => {
+    const isResponded = statusSelect.value === 'Responded';
+    linkWrap.classList.toggle('hidden', !isResponded);
+    linkSelect.required = isResponded;
+  };
+  statusSelect.onchange = syncLinkVisibility;
+
+  linkSelect.onchange = () => {
+    const matched = availableApplicants.find(a => a.id === linkSelect.value);
+    if (matched) {
+      form.elements.candidate_name.value = matched.full_name || form.elements.candidate_name.value;
+      if (matched.position && [...posSelect.options].some(o => o.value === matched.position)) {
+        posSelect.value = matched.position;
+      }
+    }
+  };
+  syncLinkVisibility();
+
+  form.onsubmit = async event => {
+    event.preventDefault();
+    errorBox.textContent = '';
+    const saveBtn = $('#inv-modal-save', modal);
+    const inviteDate = form.elements.invite_date.value;
+    const candidateName = form.elements.candidate_name.value.trim();
+    const appliedPosition = posSelect.value.trim();
+    const source = sourceSelect.value;
+    const status = statusSelect.value;
+    const linkedApplicantId = status === 'Responded' ? (linkSelect.value || null) : null;
+
+    if (!inviteDate) { errorBox.textContent = 'Please select an invitation date.'; return; }
+    if (!candidateName) { errorBox.textContent = 'Candidate name is required.'; return; }
+    if (!appliedPosition) { errorBox.textContent = 'Please select the applied position.'; return; }
+    if (status === 'Responded' && !linkedApplicantId) {
+      errorBox.textContent = 'Please connect this Responded entry to a candidate in Candidate List to avoid duplicates.';
+      linkSelect.focus();
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      await onSave({
+        id: existing?.manualId || null,
+        invite_date: inviteDate,
+        candidate_name: candidateName,
+        applied_position: appliedPosition,
+        source,
+        status,
+        linked_applicant_id: linkedApplicantId,
+        notes: form.elements.notes.value.trim()
+      });
+      modal.classList.add('hidden');
+    } catch (err) {
+      errorBox.textContent = err.message || 'Failed to save invited candidate.';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  };
+
+  modal.classList.remove('hidden');
+  form.elements.candidate_name.focus();
+}
+
+export function openCvScreeningModal({ existing = null, onSave }) {
+  let modal = $('#cv-screening-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cv-screening-modal';
+    modal.className = 'modal-backdrop hidden';
+    modal.innerHTML = `<section class="employee-modal-card" style="width:min(480px,100%)" role="dialog" aria-modal="true" aria-labelledby="cv-scr-title">
+      <div class="employee-modal-head">
+        <div>
+          <small>RECRUITMENT · CV SCREENING</small>
+          <h2 id="cv-scr-title">Update CV Screening Count</h2>
+        </div>
+        <button type="button" class="modal-close" id="cv-scr-close" aria-label="Close">×</button>
+      </div>
+      <form id="cv-scr-form">
+        <div class="employee-form-grid">
+          <label class="employee-notes">Source
+            <select class="select" name="source" required></select>
+          </label>
+          <label class="employee-notes">Screening Count
+            <input class="input" type="number" name="screening_count" min="0" step="1" required placeholder="0">
+          </label>
+          <label class="employee-notes">Notes (Optional)
+            <input class="input" type="text" name="notes" maxlength="250" placeholder="Optional note…">
+          </label>
+        </div>
+        <div id="cv-scr-error" class="form-error" role="alert"></div>
+        <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary" id="cv-scr-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="cv-scr-save">Save Count</button>
+        </div>
+      </form>
+    </section>`;
+    document.body.append(modal);
+    const close = () => modal.classList.add('hidden');
+    $('#cv-scr-close', modal).addEventListener('click', close);
+    $('#cv-scr-cancel', modal).addEventListener('click', close);
+    bindSafeModalClose(modal, close, { closeOnBackdrop: false });
+  }
+
+  const form = $('#cv-scr-form', modal);
+  const errorBox = $('#cv-scr-error', modal);
+  form.reset();
+  errorBox.textContent = '';
+
+  const sourceSelect = form.elements.source;
+  const sourceList = [...new Set([...INVITE_SOURCES, ...(existing?.source ? [existing.source] : [])])];
+  sourceSelect.innerHTML = sourceList.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
+  sourceSelect.value = existing?.source || 'Jobstreet';
+  sourceSelect.disabled = Boolean(existing?.id);
+  form.elements.screening_count.value = existing ? String(existing.screeningCount ?? existing.screening_count ?? 0) : '';
+  form.elements.notes.value = existing?.notes || '';
+  $('#cv-scr-title', modal).textContent = existing ? `Edit Screening · ${existing.source}` : 'Add CV Screening Count';
+
+  form.onsubmit = async event => {
+    event.preventDefault();
+    errorBox.textContent = '';
+    const saveBtn = $('#cv-scr-save', modal);
+    const source = existing?.source || sourceSelect.value;
+    const count = Number.parseInt(form.elements.screening_count.value, 10);
+    if (!source) { errorBox.textContent = 'Please select a source.'; return; }
+    if (!Number.isInteger(count) || count < 0) {
+      errorBox.textContent = 'Screening count must be 0 or higher.';
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      await onSave({
+        id: existing?.id || null,
+        source,
+        screening_count: count,
+        notes: form.elements.notes.value.trim()
+      });
+      modal.classList.add('hidden');
+    } catch (err) {
+      errorBox.textContent = err.message || 'Failed to save CV screening record.';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Count';
+    }
+  };
+
+  modal.classList.remove('hidden');
+  (existing ? form.elements.screening_count : sourceSelect).focus();
 }
 
 export function openFullEmployeeModal({ employee = null, applicant = null, onSave }) {
@@ -439,43 +701,43 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
     modal.className = 'modal-backdrop hidden';
     modal.innerHTML = `<section class="employee-modal-card" style="width:min(760px,100%)" role="dialog" aria-modal="true" aria-labelledby="employee-modal-title">
       <div class="employee-modal-head">
-        <div><small>EMPLOYEE DIRECTORY</small><h2 id="employee-modal-title">Data Karyawan</h2></div>
-        <button type="button" class="modal-close" id="employee-modal-close" aria-label="Tutup">×</button>
+        <div><small>EMPLOYEE DIRECTORY</small><h2 id="employee-modal-title">Employee Record</h2></div>
+        <button type="button" class="modal-close" id="employee-modal-close" aria-label="Close">×</button>
       </div>
       <form id="employee-form">
         <div class="employee-form-grid">
-          <label>Nama<input class="input" name="full_name" required maxlength="120"></label>
-          <label>Nik<input class="input" name="employee_no" required maxlength="40" placeholder="Contoh: ST 130116"></label>
-          <label>Departement<input class="input" name="department" maxlength="120"></label>
-          <label>Jabatan<input class="input" name="position" maxlength="120"></label>
-          <label>Tgl Masuk<input class="input" type="date" name="join_date"></label>
+          <label>Name<input class="input" name="full_name" required maxlength="120"></label>
+          <label>Employee NIK<input class="input" name="employee_no" required maxlength="40" placeholder="e.g., ST 130116"></label>
+          <label>Department<input class="input" name="department" maxlength="120"></label>
+          <label>Position<input class="input" name="position" maxlength="120"></label>
+          <label>Join Date<input class="input" type="date" name="join_date"></label>
           <label>Status<select class="select" name="employment_status">
-            <option value="TETAP">TETAP</option>
-            <option value="KONTRAK">KONTRAK</option>
-            <option value="HARIAN">HARIAN</option>
+            <option value="TETAP">TETAP (Permanent)</option>
+            <option value="KONTRAK">KONTRAK (Contract)</option>
+            <option value="HARIAN">HARIAN (Daily)</option>
             <option value="Probation">Probation</option>
-            <option value="Nonaktif">Nonaktif</option>
+            <option value="Nonaktif">Inactive</option>
           </select></label>
-          <label>Mulai Kontrak<input class="input" type="date" name="contract_start_date"></label>
-          <label>Kontrak Berakhir<input class="input" type="date" name="contract_end_date"></label>
-          <label class="employee-notes">Alamat<input class="input" name="address" maxlength="300"></label>
-          <label>Nik2 (KTP 16 Digit)<input class="input" name="ktp_nik" maxlength="20" inputmode="numeric"></label>
-          <label>No. Telp<input class="input" name="phone" maxlength="30"></label>
-          <label>Tempat Lahir<input class="input" name="birth_place" maxlength="100"></label>
-          <label>Tanggal Lahir<input class="input" type="date" name="birth_date"></label>
-          <label>Pendidikan<input class="input" name="education" maxlength="60" placeholder="SMA / SMK / S1 / SMP"></label>
-          <label>Jenis Kelamin<select class="select" name="gender">
-            <option value="">Pilih…</option>
-            <option value="Laki-laki">Laki-laki</option>
-            <option value="Perempuan">Perempuan</option>
+          <label>Contract Start<input class="input" type="date" name="contract_start_date"></label>
+          <label>Contract End<input class="input" type="date" name="contract_end_date"></label>
+          <label class="employee-notes">Address<input class="input" name="address" maxlength="300"></label>
+          <label>ID Card NIK (16 Digits)<input class="input" name="ktp_nik" maxlength="20" inputmode="numeric"></label>
+          <label>Phone No.<input class="input" name="phone" maxlength="30"></label>
+          <label>Birth Place<input class="input" name="birth_place" maxlength="100"></label>
+          <label>Birth Date<input class="input" type="date" name="birth_date"></label>
+          <label>Education<input class="input" name="education" maxlength="60" placeholder="SMA / SMK / S1 / SMP"></label>
+          <label>Gender<select class="select" name="gender">
+            <option value="">Select…</option>
+            <option value="Laki-laki">Male (Laki-laki)</option>
+            <option value="Perempuan">Female (Perempuan)</option>
           </select></label>
-          <label>Agama<input class="input" name="religion" maxlength="40" placeholder="Islam / Kristen / dll"></label>
-          <label>Catatan<input class="input" name="notes" maxlength="500"></label>
+          <label>Religion<input class="input" name="religion" maxlength="40" placeholder="Islam / Christian / etc."></label>
+          <label>Notes<input class="input" name="notes" maxlength="500"></label>
         </div>
         <div id="employee-form-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
-          <button type="button" class="btn btn-secondary" id="employee-cancel">Batal</button>
-          <button type="submit" class="btn btn-primary" id="employee-save">Simpan data</button>
+          <button type="button" class="btn btn-secondary" id="employee-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="employee-save">Save Record</button>
         </div>
       </form>
     </section>`;
@@ -521,7 +783,7 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
   form.elements.religion.value = employee?.religion || appData.agama || '';
   form.elements.notes.value = employee?.notes || '';
 
-  $('#employee-modal-title', modal).textContent = employee ? `Edit Karyawan · ${form.elements.full_name.value}` : 'Tambah Karyawan';
+  $('#employee-modal-title', modal).textContent = employee ? `Edit Employee · ${form.elements.full_name.value}` : 'Add Employee';
 
   form.onsubmit = async event => {
     event.preventDefault();
@@ -529,11 +791,11 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
     errorBox.textContent = '';
     const fd = Object.fromEntries(new FormData(form).entries());
     if (!fd.full_name.trim() || !fd.employee_no.trim()) {
-      errorBox.textContent = 'Nama dan Nik wajib diisi.';
+      errorBox.textContent = 'Name and Employee NIK are required.';
       return;
     }
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Menyimpan…';
+    saveBtn.textContent = 'Saving…';
     try {
       await onSave({
         id: employee?.id || null,
@@ -558,10 +820,10 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
       });
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Data karyawan gagal disimpan.';
+      errorBox.textContent = err.message || 'Failed to save employee record.';
     } finally {
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Simpan data';
+      saveBtn.textContent = 'Save Record';
     }
   };
 
@@ -577,25 +839,25 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
     modal.className = 'modal-backdrop hidden';
     modal.innerHTML = `<section class="employee-modal-card" style="width:min(720px,100%)" role="dialog" aria-modal="true" aria-labelledby="emp-upload-title">
       <div class="employee-modal-head">
-        <div><small>EMPLOYEE DIRECTORY · IMPOR DATA</small><h2 id="emp-upload-title">Upload Data Karyawan (XLSX / CSV)</h2></div>
-        <button type="button" class="modal-close" id="emp-upload-close" aria-label="Tutup">×</button>
+        <div><small>EMPLOYEE DIRECTORY · IMPORT DATA</small><h2 id="emp-upload-title">Upload Employee Data (XLSX / CSV)</h2></div>
+        <button type="button" class="modal-close" id="emp-upload-close" aria-label="Close">×</button>
       </div>
       <div class="upload-preview-box">
-        <b>Format Kolom Wajib (16 Kolom):</b>
+        <b>Required Spreadsheet Format (16 Columns):</b>
         <div style="margin-top:6px;color:var(--muted);line-height:1.5">${esc(EMPLOYEE_TABLE_HEADERS.join(' · '))}</div>
         <div style="margin-top:10px">
-          <button type="button" class="btn btn-secondary btn-xs" id="emp-download-template">Unduh Template Format XLSX ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="emp-download-template">Download XLSX Template ↓</button>
         </div>
       </div>
       <div style="margin-top:14px">
-        <label class="field-label" for="emp-upload-file" style="margin-top:0">Pilih File (.xlsx, .xls, .csv)</label>
+        <label class="field-label" for="emp-upload-file" style="margin-top:0">Select File (.xlsx, .xls, .csv)</label>
         <input id="emp-upload-file" class="input" type="file" accept=".xlsx,.xls,.csv">
       </div>
       <div id="emp-upload-preview" class="upload-preview-box hidden"></div>
       <div id="emp-upload-error" class="form-error" role="alert"></div>
       <div class="employee-modal-actions">
-        <button type="button" class="btn btn-secondary" id="emp-upload-cancel">Batal</button>
-        <button type="button" class="btn btn-primary" id="emp-upload-confirm" disabled>Impor ke Employee Directory</button>
+        <button type="button" class="btn btn-secondary" id="emp-upload-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="emp-upload-confirm" disabled>Import to Employee Directory</button>
       </div>
     </section>`;
     document.body.append(modal);
@@ -631,38 +893,38 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
       const sheetName = wb.SheetNames[0];
-      if (!sheetName) throw new Error('Sheet tidak ditemukan dalam file.');
+      if (!sheetName) throw new Error('No worksheet found in the selected file.');
       const jsonRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
       const { rows, errors } = parseEmployeeSpreadsheetRows(jsonRows);
       if (errors.length) {
         errorBox.textContent = errors.slice(0, 3).join(' ');
       }
       if (!rows.length) {
-        if (!errorBox.textContent) errorBox.textContent = 'Tidak ada baris data karyawan yang valid.';
+        if (!errorBox.textContent) errorBox.textContent = 'No valid employee rows found.';
         return;
       }
       parsedRows = rows;
       confirmBtn.disabled = false;
       previewBox.classList.remove('hidden');
-      previewBox.innerHTML = `<b>${rows.length} baris siap diimpor</b> (berdasarkan NIK unik):<div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.employee_no)}</b> — ${esc(r.full_name)} (${esc(r.department || '—')} · ${esc(r.position || '—')})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} baris lainnya.</div>` : ''}</div>`;
+      previewBox.innerHTML = `<b>${rows.length} rows ready to import</b> (matched by unique NIK):<div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.employee_no)}</b> — ${esc(r.full_name)} (${esc(r.department || '—')} · ${esc(r.position || '—')})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more rows.</div>` : ''}</div>`;
     } catch (err) {
-      errorBox.textContent = err.message || 'File gagal dibaca.';
+      errorBox.textContent = err.message || 'Failed to read spreadsheet file.';
     }
   };
 
   confirmBtn.onclick = async () => {
     if (!parsedRows.length) return;
     confirmBtn.disabled = true;
-    confirmBtn.textContent = 'Mengimpor…';
+    confirmBtn.textContent = 'Importing…';
     errorBox.textContent = '';
     try {
       await onImport(parsedRows);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Gagal mengimpor data karyawan.';
+      errorBox.textContent = err.message || 'Failed to import employee records.';
     } finally {
       confirmBtn.disabled = false;
-      confirmBtn.textContent = 'Impor ke Employee Directory';
+      confirmBtn.textContent = 'Import to Employee Directory';
     }
   };
 
@@ -677,21 +939,21 @@ export function openUserModal({ existing = null, employees = [], onSave }) {
     modal.className = 'modal-backdrop hidden';
     modal.innerHTML = `<section class="employee-modal-card" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
       <div class="employee-modal-head">
-        <div><small>MANAJEMEN USER</small><h2 id="user-modal-title">Tambah User</h2></div>
-        <button type="button" class="modal-close" id="user-modal-close" aria-label="Tutup">×</button>
+        <div><small>USER MANAGEMENT</small><h2 id="user-modal-title">Add User</h2></div>
+        <button type="button" class="modal-close" id="user-modal-close" aria-label="Close">×</button>
       </div>
       <form id="user-modal-form">
         <div class="employee-form-grid">
-          <label class="employee-notes" id="user-emp-select-wrap">Pilih Karyawan (Employee Directory)
+          <label class="employee-notes" id="user-emp-select-wrap">Select Employee (Employee Directory)
             <select class="select" name="employee_id"></select>
           </label>
-          <label>NIK Karyawan<input class="input" name="nik" required maxlength="32" placeholder="Otomatis dari Employee Directory"></label>
-          <label>Nama Karyawan<input class="input" name="full_name" required maxlength="100" placeholder="Otomatis dari Employee Directory"></label>
+          <label>Employee NIK<input class="input" name="nik" required maxlength="32" placeholder="Auto-filled from Employee Directory"></label>
+          <label>Employee Name<input class="input" name="full_name" required maxlength="100" placeholder="Auto-filled from Employee Directory"></label>
           <label>Role<select class="select" name="role"><option value="Superadmin">Superadmin</option></select></label>
-          <label>PIN (4–12 Angka)
+          <label>PIN (4–12 Digits)
             <div class="pin-input-wrap" style="margin-top:6px">
-              <input class="input" name="pin" type="password" inputmode="numeric" maxlength="12" style="margin-top:0" placeholder="Masukkan PIN angka">
-              <button type="button" id="user-pin-eye" class="pin-toggle-btn" aria-label="Intip PIN">
+              <input class="input" name="pin" type="password" inputmode="numeric" maxlength="12" style="margin-top:0" placeholder="Enter numeric PIN">
+              <button type="button" id="user-pin-eye" class="pin-toggle-btn" aria-label="Reveal PIN">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               </button>
             </div>
@@ -699,8 +961,8 @@ export function openUserModal({ existing = null, employees = [], onSave }) {
         </div>
         <div id="user-modal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
-          <button type="button" class="btn btn-secondary" id="user-modal-cancel">Batal</button>
-          <button type="submit" class="btn btn-primary" id="user-modal-save">Simpan User</button>
+          <button type="button" class="btn btn-secondary" id="user-modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="user-modal-save">Save User</button>
         </div>
       </form>
     </section>`;
@@ -721,18 +983,18 @@ export function openUserModal({ existing = null, employees = [], onSave }) {
 
   const eligibleEmployees = [...(employees || [])]
     .filter(emp => String(emp.employee_no || '').trim().length >= 3)
-    .sort((a, b) => String(a.full_name || a.employee_no || '').localeCompare(String(b.full_name || b.employee_no || ''), 'id'));
+    .sort((a, b) => String(a.full_name || a.employee_no || '').localeCompare(String(b.full_name || b.employee_no || ''), 'en'));
 
   if (!existing) {
     empSelectWrap.classList.remove('hidden');
     empSelect.required = true;
-    empSelect.innerHTML = `<option value="">${eligibleEmployees.length ? 'Pilih karyawan dari Employee Directory…' : 'Employee Directory masih kosong…'}</option>` +
+    empSelect.innerHTML = `<option value="">${eligibleEmployees.length ? 'Select employee from Employee Directory…' : 'Employee Directory is empty…'}</option>` +
       eligibleEmployees.map(emp => `<option value="${esc(emp.id)}" data-nik="${esc(emp.employee_no || '')}" data-name="${esc(emp.full_name || '')}">${esc(buildEmployeeUserOptionLabel(emp))}</option>`).join('');
     empSelect.value = '';
     form.elements.nik.readOnly = true;
     form.elements.full_name.readOnly = true;
     if (!eligibleEmployees.length) {
-      errorBox.textContent = 'Data Employee Directory belum tersedia. Tambahkan karyawan di Employee Directory terlebih dahulu.';
+      errorBox.textContent = 'Employee Directory is empty. Add employees in Employee Directory first.';
     }
     empSelect.onchange = () => {
       const opt = empSelect.selectedOptions[0];
@@ -751,11 +1013,11 @@ export function openUserModal({ existing = null, employees = [], onSave }) {
     form.elements.full_name.readOnly = true;
   }
 
-  $('#user-modal-title', modal).textContent = existing ? `Edit User · ${existing.employee_nik}` : 'Tambah User (Employee Directory)';
+  $('#user-modal-title', modal).textContent = existing ? `Edit User · ${existing.employee_nik}` : 'Add User (Employee Directory)';
   form.elements.role.value = 'Superadmin';
   form.elements.pin.type = 'password';
   form.elements.pin.required = !existing;
-  form.elements.pin.placeholder = existing ? 'Kosongkan jika PIN tidak diubah' : 'Masukkan 4–12 angka PIN';
+  form.elements.pin.placeholder = existing ? 'Leave blank to keep current PIN' : 'Enter 4–12 numeric digits';
 
   eyeBtn.onclick = () => {
     if (form.elements.pin.type === 'text') {
@@ -775,29 +1037,29 @@ export function openUserModal({ existing = null, employees = [], onSave }) {
     const saveBtn = $('#user-modal-save', modal);
     errorBox.textContent = '';
     if (!existing && !empSelect.value) {
-      errorBox.textContent = 'Pilih karyawan dari Employee Directory terlebih dahulu.';
+      errorBox.textContent = 'Please select an employee from Employee Directory first.';
       empSelect.focus();
       return;
     }
     const nik = form.elements.nik.value.trim();
     const fullName = form.elements.full_name.value.trim();
     const pin = form.elements.pin.value.trim();
-    if (nik.length < 3) { errorBox.textContent = 'NIK Karyawan minimal 3 karakter.'; return; }
-    if (fullName.length < 2) { errorBox.textContent = 'Nama Karyawan wajib diisi.'; return; }
+    if (nik.length < 3) { errorBox.textContent = 'Employee NIK must be at least 3 characters.'; return; }
+    if (fullName.length < 2) { errorBox.textContent = 'Employee Name is required.'; return; }
     if ((!existing || pin) && !/^\d{4,12}$/.test(pin)) {
-      errorBox.textContent = 'PIN harus terdiri dari 4–12 digit angka.';
+      errorBox.textContent = 'PIN must be 4–12 numeric digits.';
       return;
     }
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Menyimpan…';
+    saveBtn.textContent = 'Saving…';
     try {
       await onSave({ nik, full_name: fullName, role: 'Superadmin', pin });
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'User gagal disimpan.';
+      errorBox.textContent = err.message || 'Failed to save user.';
     } finally {
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Simpan User';
+      saveBtn.textContent = 'Save User';
     }
   };
 
@@ -813,17 +1075,17 @@ export function openPinRevealPrompt({ label = '', onUnlocked }) {
     modal.className = 'modal-backdrop hidden';
     modal.innerHTML = `<section class="employee-modal-card" style="width:min(420px,100%)" role="dialog" aria-modal="true" aria-labelledby="pin-reveal-title">
       <div class="employee-modal-head">
-        <div><small>VERIFIKASI KEAMANAN PIN</small><h2 id="pin-reveal-title">Buka PIN User</h2></div>
-        <button type="button" class="modal-close" id="pin-reveal-close" aria-label="Tutup">×</button>
+        <div><small>PIN SECURITY VERIFICATION</small><h2 id="pin-reveal-title">Unlock User PIN</h2></div>
+        <button type="button" class="modal-close" id="pin-reveal-close" aria-label="Close">×</button>
       </div>
       <form id="pin-reveal-form">
         <p class="subtle" id="pin-reveal-desc" style="margin:0 0 12px"></p>
-        <label class="field-label" for="pin-reveal-password" style="margin-top:0">Password Pembuka PIN</label>
-        <input id="pin-reveal-password" class="input" type="password" required placeholder="Masukkan password otorisasi">
+        <label class="field-label" for="pin-reveal-password" style="margin-top:0">Authorization Password</label>
+        <input id="pin-reveal-password" class="input" type="password" required placeholder="Enter unlock password">
         <div id="pin-reveal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
-          <button type="button" class="btn btn-secondary" id="pin-reveal-cancel">Batal</button>
-          <button type="submit" class="btn btn-primary" id="pin-reveal-submit">Buka PIN</button>
+          <button type="button" class="btn btn-secondary" id="pin-reveal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="pin-reveal-submit">Unlock PIN</button>
         </div>
       </form>
     </section>`;
@@ -837,7 +1099,7 @@ export function openPinRevealPrompt({ label = '', onUnlocked }) {
   const form = $('#pin-reveal-form', modal);
   const pwdInput = $('#pin-reveal-password', modal);
   const errorBox = $('#pin-reveal-error', modal);
-  $('#pin-reveal-desc', modal).textContent = `Masukkan password untuk membuka PIN ${label ? `(${label})` : ''}.`;
+  $('#pin-reveal-desc', modal).textContent = `Enter password to reveal PIN ${label ? `(${label})` : ''}.`;
   pwdInput.value = '';
   errorBox.textContent = '';
 
@@ -845,21 +1107,21 @@ export function openPinRevealPrompt({ label = '', onUnlocked }) {
     event.preventDefault();
     const pwd = pwdInput.value;
     if (!verifyPinRevealPassword(pwd)) {
-      errorBox.textContent = 'Password tidak sesuai.';
+      errorBox.textContent = 'Incorrect unlock password.';
       pwdInput.focus();
       return;
     }
     const btn = $('#pin-reveal-submit', modal);
     btn.disabled = true;
-    btn.textContent = 'Membuka…';
+    btn.textContent = 'Unlocking…';
     try {
       await onUnlocked(pwd);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'PIN tidak dapat dibuka.';
+      errorBox.textContent = err.message || 'Unable to reveal PIN.';
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Buka PIN';
+      btn.textContent = 'Unlock PIN';
     }
   };
 

@@ -4,11 +4,11 @@ import {
   REHOLZ_TEMPLATE_URL,
   REHOLZ_MASTER_REVISION,
   CV_BUCKET
-} from './config.js?v=20261120-hrga-workspace-11';
-import { supabase } from './supabase.js?v=20261120-hrga-workspace-11';
-import { computeDisc } from './disc-engine.js?v=20261120-hrga-workspace-11';
-import { esc } from './common.js?v=20261120-hrga-workspace-11';
-import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261120-hrga-workspace-11';
+} from './config.js?v=20261121-hrga-workspace-12';
+import { supabase } from './supabase.js?v=20261121-hrga-workspace-12';
+import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-12';
+import { esc } from './common.js?v=20261121-hrga-workspace-12';
+import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261121-hrga-workspace-12';
 
 const MASTER_HTML_MEMORY = new Map();
 let pdfjsLoaderPromise = null;
@@ -229,7 +229,7 @@ async function getActiveMasterHtml(brand = 'mitra') {
   if (brandKey === 'reholz') {
     const sep = REHOLZ_TEMPLATE_URL.includes('?') ? '&' : '?';
     const response = await fetch(`${REHOLZ_TEMPLATE_URL}${sep}v=${encodeURIComponent(REHOLZ_MASTER_REVISION)}`, { cache: 'force-cache' });
-    if (!response.ok) throw new Error('Master HTML ReHolz tidak ditemukan.');
+    if (!response.ok) throw new Error('ReHolz HTML template was not found.');
     html = await response.text();
   } else {
     if (supabase) {
@@ -247,7 +247,7 @@ async function getActiveMasterHtml(brand = 'mitra') {
     if (!html) {
       const sep = TEMPLATE_URL.includes('?') ? '&' : '?';
       const response = await fetch(`${TEMPLATE_URL}${sep}v=${encodeURIComponent(DEFAULT_MASTER_REVISION)}`, { cache: 'force-cache' });
-      if (!response.ok) throw new Error('Master HTML lamaran Mitra tidak ditemukan.');
+      if (!response.ok) throw new Error('Mitra application HTML template was not found.');
       html = await response.text();
     }
   }
@@ -329,10 +329,10 @@ export function discReportHtml(record, result, brand = 'mitra') {
   const axes = ['D', 'I', 'S', 'C'];
   const gridTone = brandKey === 'reholz' ? '#DCE7DE' : '#e2e8f0';
   const detail = result.detail || {};
-  const kecenderungan = (detail.kecenderungan || []).slice(0, 7);
-  const pengembangan = (detail.pengembangan || []).slice(0, 7);
+  const kecenderungan = (detail.kecenderungan || []).slice(0, 6);
+  const pengembangan = (detail.pengembangan || []).slice(0, 6);
   const natural = result.pola[2] || {};
-  const professions = trimSentences(natural.professions || '', 245);
+  const professions = trimSentences(natural.professions || '', 215);
 
   return `<section class="aux-sheet disc-sheet disc-brand-${brandKey}" data-brand="${brandKey}">
     <header class="disc-hero">
@@ -385,7 +385,7 @@ export function discReportHtml(record, result, brand = 'mitra') {
         <article class="disc-pattern-card disc-pattern-card-${p.key}">
           <div class="disc-card-kicker">${esc(p.tag)}</div>
           <b>${esc(p.pattern.nama)} · ${esc(p.pattern.title)}</b>
-          <p>${esc(trimSentences(p.pattern.description, 235))}</p>
+          <p>${esc(trimSentences(p.pattern.description, 200))}</p>
           <div class="disc-chips">${(p.pattern.traits || []).slice(0, 6).map(t => `<span>${esc(t)}</span>`).join('')}</div>
         </article>`).join('')}
       </div>
@@ -397,7 +397,7 @@ export function discReportHtml(record, result, brand = 'mitra') {
         <span>${esc(detail.judul || '')}</span>
       </div>
       <div class="disc-detail">
-        <p class="disc-detail-summary">${esc(trimSentences(detail.deskripsi || '', 390))}</p>
+        <p class="disc-detail-summary">${esc(trimSentences(detail.deskripsi || '', 310))}</p>
         <div class="disc-detail-cols">
           <div class="disc-detail-box">
             <b>Kecenderungan Perilaku</b>
@@ -495,17 +495,17 @@ const DISC_SHARED_AND_BRAND_CSS = `
     .aux-sheet:last-child{page-break-after:auto!important;break-after:auto!important}
     .cv-page-sheet{padding:4mm!important}
     .cv-page-sheet img{max-width:100%!important;max-height:calc(99.6vh - 12mm)!important}
-    .disc-sheet{padding:6.5mm 8.5mm 5.5mm!important;gap:3.2mm!important}
+    .disc-sheet{padding:6.5mm 9mm 5.5mm!important;gap:2.6mm!important}
   }
   .aux-sheet{width:210mm;height:297mm;min-height:297mm;max-height:297mm;margin:15px auto;box-sizing:border-box;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.10);overflow:hidden}
   .sheets-canvas .aux-sheet{margin:0 auto;box-shadow:0 24px 60px -12px rgba(4,9,20,.55),0 0 0 1px rgba(255,255,255,.08);border-radius:2px}
   .cv-page-sheet{position:relative;display:flex;align-items:center;justify-content:center;padding:5mm;color:#111}
   .cv-page-sheet img{display:block;max-width:200mm;max-height:287mm;width:auto;height:auto;object-fit:contain}
-  .cv-page-sheet>span{position:absolute;right:8mm;bottom:5mm;color:#9aa3af;font:7px 'Plus Jakarta Sans',Arial,sans-serif}
+  .cv-page-sheet>span{position:absolute;right:8mm;bottom:5mm;color:#9aa3af;font:8px 'Plus Jakarta Sans',Arial,sans-serif}
   .cv-missing{font-family:'Plus Jakarta Sans',Arial,sans-serif;text-align:center}
-  .cv-missing h1{font-size:18px}.cv-missing p{font-size:11px;color:#64748b}
+  .cv-missing h1{font-size:16px}.cv-missing p{font-size:10px;color:#64748b}
 
-  /* Shared Single-Page DISC Aesthetic Architecture */
+  /* Shared Single-Page DISC Aesthetic Architecture — Proportional to Application Form (9.4px base, 16px title, 9.4px headings) */
   .disc-sheet{
     --d-hero-bg:linear-gradient(118deg,#0b1526 0%,#0f1e36 56%,#1a3052 100%);
     --d-hero-border:#b08d57;
@@ -528,10 +528,10 @@ const DISC_SHARED_AND_BRAND_CSS = `
     --d-change:#0d5c6b;
     display:flex;
     flex-direction:column;
-    gap:4.5mm;
-    padding:9mm 9.5mm 7.5mm;
+    gap:2.9mm;
+    padding:6.5mm 9mm 5.5mm;
     color:var(--d-ink);
-    font:8.5px/1.4 'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    font:9.3px/1.32 'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
   }
@@ -563,24 +563,24 @@ const DISC_SHARED_AND_BRAND_CSS = `
     display:flex;
     align-items:stretch;
     justify-content:space-between;
-    gap:5.5mm;
-    padding:5.2mm 6mm;
+    gap:4.5mm;
+    padding:4mm 5.2mm;
     background:var(--d-hero-bg);
     color:#fff;
     border-radius:6px;
     border-bottom:2.5px solid var(--d-hero-border);
   }
   .disc-hero-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center}
-  .disc-hero-brand{display:flex;align-items:center;gap:2.8mm;margin-bottom:1.4mm}
+  .disc-hero-brand{display:flex;align-items:center;gap:2.6mm;margin-bottom:1.1mm}
   .disc-hero-logo{height:4.2mm;width:auto;display:block;object-fit:contain;flex-shrink:0}
-  .disc-brand-reholz .disc-hero-logo{height:5.4mm}
+  .disc-brand-reholz .disc-hero-logo{height:5.2mm}
   .disc-hero-sep{width:1px;height:3.6mm;background:rgba(255,255,255,.28);flex-shrink:0}
-  .disc-eyebrow{font-size:6.8px;font-weight:700;letter-spacing:1.1px;color:var(--d-eyebrow);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .disc-hero h1{margin:0 0 2.5mm;font-family:'Playfair Display',Georgia,serif;font-size:17px;font-weight:700;letter-spacing:.01em;line-height:1.12;color:#fff}
-  .disc-brand-reholz .disc-hero h1{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:16.2px;letter-spacing:.01em}
-  .disc-meta{display:grid;grid-template-columns:1.15fr 1fr;column-gap:4.5mm;row-gap:1mm;font-size:8px;line-height:1.32}
-  .disc-meta div{display:flex;gap:2.2mm;min-width:0}
-  .disc-meta span{flex:0 0 20mm;color:rgba(248,250,252,.72);font-weight:500}
+  .disc-eyebrow{font-size:7.6px;font-weight:700;letter-spacing:.95px;color:var(--d-eyebrow);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .disc-hero h1{margin:0 0 2mm;font-family:'Playfair Display',Georgia,serif;font-size:16px;font-weight:700;letter-spacing:.02em;line-height:1.15;color:#fff}
+  .disc-brand-reholz .disc-hero h1{font-family:'Playfair Display',Georgia,serif;font-weight:700;font-size:16px;letter-spacing:.02em}
+  .disc-meta{display:grid;grid-template-columns:1.15fr 1fr;column-gap:4mm;row-gap:.8mm;font-size:8.9px;line-height:1.28}
+  .disc-meta div{display:flex;gap:2mm;min-width:0}
+  .disc-meta span{flex:0 0 21mm;color:rgba(248,250,252,.76);font-weight:500}
   .disc-meta b{color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   .disc-badge{
@@ -588,94 +588,94 @@ const DISC_SHARED_AND_BRAND_CSS = `
     display:flex;
     flex-direction:column;
     justify-content:center;
-    padding:3mm 3.8mm;
+    padding:2.6mm 3.4mm;
     border-radius:5px;
     border:1px solid var(--d-badge-border);
     background:var(--d-badge-bg);
     text-align:left;
   }
-  .disc-badge-kicker{font-size:6.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--d-eyebrow)}
-  .disc-badge-factor{margin-top:.8mm;font-size:18.5px;font-weight:800;line-height:1;color:#fff;letter-spacing:.4px}
-  .disc-badge-name{margin-top:1.1mm;font-size:9px;font-weight:700;color:#fff}
-  .disc-badge-title{font-size:7.4px;font-weight:500;color:rgba(248,250,252,.84)}
+  .disc-badge-kicker{font-size:7px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--d-eyebrow)}
+  .disc-badge-factor{margin-top:.6mm;font-size:17px;font-weight:800;line-height:1;color:#fff;letter-spacing:.4px}
+  .disc-badge-name{margin-top:.9mm;font-size:9.3px;font-weight:700;color:#fff}
+  .disc-badge-title{font-size:8px;font-weight:500;color:rgba(248,250,252,.86)}
 
-  .disc-section{display:flex;flex-direction:column;gap:2.5mm}
-  .disc-sec-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:1.2mm;border-bottom:1.2px solid var(--d-rule)}
-  .disc-sec-head h2{position:relative;margin:0;padding-left:2.6mm;font-size:9.2px;font-weight:800;letter-spacing:.55px;text-transform:uppercase;color:var(--d-heading)}
+  .disc-section{display:flex;flex-direction:column;gap:2mm}
+  .disc-sec-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:1mm;border-bottom:1.2px solid var(--d-rule)}
+  .disc-sec-head h2{position:relative;margin:0;padding-left:2.6mm;font-size:9.4px;font-weight:800;letter-spacing:.45px;text-transform:uppercase;color:var(--d-heading)}
   .disc-sec-head h2::before{content:"";position:absolute;left:0;top:1px;bottom:1px;width:2px;background:var(--d-hero-border);border-radius:1px}
-  .disc-sec-head span{font-size:7.4px;font-weight:600;color:var(--d-muted)}
+  .disc-sec-head span{font-size:8.2px;font-weight:600;color:var(--d-muted)}
 
-  .disc-graphs{display:grid;grid-template-columns:repeat(3,1fr);gap:3.2mm}
-  .disc-chart{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-top:2.5px solid var(--d-change);border-radius:5px;padding:2.6mm 2.8mm 2.2mm;background:#fff}
+  .disc-graphs{display:grid;grid-template-columns:repeat(3,1fr);gap:2.8mm}
+  .disc-chart{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-top:2.5px solid var(--d-change);border-radius:5px;padding:2.1mm 2.5mm 1.9mm;background:#fff}
   .disc-chart-most{border-top-color:var(--d-most)}
   .disc-chart-least{border-top-color:var(--d-least)}
   .disc-chart-change{border-top-color:var(--d-change)}
-  .disc-chart-head{margin-bottom:1mm}
-  .disc-chart-head b{display:block;font-size:8px;font-weight:800;color:var(--d-heading);letter-spacing:.25px}
-  .disc-chart-head small{display:block;font-size:6.9px;color:var(--d-muted)}
-  .disc-chart svg{width:100%;height:auto;display:block}
+  .disc-chart-head{margin-bottom:.7mm}
+  .disc-chart-head b{display:block;font-size:8.8px;font-weight:800;color:var(--d-heading);letter-spacing:.2px}
+  .disc-chart-head small{display:block;font-size:7.6px;color:var(--d-muted)}
+  .disc-chart svg{width:100%;height:auto;max-height:24.5mm;display:block}
   .disc-score-strip{
     display:grid;
     grid-template-columns:repeat(4,1fr);
-    gap:1.2mm;
-    margin-top:1mm;
-    padding:1mm 1.2mm;
+    gap:1mm;
+    margin-top:.8mm;
+    padding:.8mm 1mm;
     border-radius:3px;
     background:var(--d-card-soft);
     border:1px solid var(--d-rule);
     font-family:'JetBrains Mono',ui-monospace,monospace;
-    font-size:6.8px;
+    font-size:7.6px;
     font-variant-numeric:tabular-nums;
     text-align:center;
     color:var(--d-muted);
   }
   .disc-score-strip b{color:var(--d-ink);font-weight:700}
-  .disc-pattern{margin-top:1.2mm;padding-top:1.1mm;border-top:1px solid var(--d-rule);font-size:7.1px;color:var(--d-ink-2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .disc-pattern{margin-top:.9mm;padding-top:.8mm;border-top:1px solid var(--d-rule);font-size:7.9px;color:var(--d-ink-2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .disc-pattern b{color:var(--d-heading)}
 
-  .disc-pattern-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3.2mm}
-  .disc-pattern-card{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-radius:5px;padding:3.2mm 3.3mm;background:var(--d-card-soft)}
+  .disc-pattern-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.8mm}
+  .disc-pattern-card{display:flex;flex-direction:column;border:1px solid var(--d-card-border);border-radius:5px;padding:2.4mm 2.8mm;background:var(--d-card-soft)}
   .disc-pattern-card-change{background:var(--d-change-bg);border-color:var(--d-change-border);box-shadow:inset 0 2px 0 var(--d-change)}
-  .disc-card-kicker{font-size:6.5px;font-weight:800;letter-spacing:.7px;color:var(--d-most);margin-bottom:.7mm}
+  .disc-card-kicker{font-size:7.1px;font-weight:800;letter-spacing:.55px;color:var(--d-most);margin-bottom:.5mm}
   .disc-pattern-card-least .disc-card-kicker{color:var(--d-least)}
   .disc-pattern-card-change .disc-card-kicker{color:var(--d-change)}
-  .disc-pattern-card>b{display:block;font-size:8.4px;font-weight:700;color:var(--d-heading);margin-bottom:1.2mm}
-  .disc-pattern-card p{margin:0 0 2.3mm;font-size:7.7px;line-height:1.42;color:var(--d-ink-2);text-align:left}
-  .disc-chips{margin-top:auto;display:flex;flex-wrap:wrap;gap:1mm}
-  .disc-chips span{display:inline-block;padding:.65mm 1.6mm;border-radius:3px;border:1px solid var(--d-card-border);background:#fff;color:var(--d-ink-2);font-size:6.6px;font-weight:600;line-height:1.2}
+  .disc-pattern-card>b{display:block;font-size:9px;font-weight:700;color:var(--d-heading);margin-bottom:.9mm}
+  .disc-pattern-card p{margin:0 0 1.8mm;font-size:8.4px;line-height:1.34;color:var(--d-ink-2);text-align:left}
+  .disc-chips{margin-top:auto;display:flex;flex-wrap:wrap;gap:.9mm}
+  .disc-chips span{display:inline-block;padding:.55mm 1.5mm;border-radius:3px;border:1px solid var(--d-card-border);background:#fff;color:var(--d-ink-2);font-size:7.3px;font-weight:600;line-height:1.18}
   .disc-pattern-card-change .disc-chips span{border-color:var(--d-change-chip-border);color:var(--d-change-chip-ink)}
 
-  .disc-detail{display:flex;flex-direction:column;gap:2.8mm;border:1px solid var(--d-card-border);border-radius:5px;padding:3.5mm 3.8mm;background:#fff}
-  .disc-detail-summary{margin:0;font-size:8px;line-height:1.46;color:var(--d-ink-2)}
-  .disc-detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:3.4mm;align-items:stretch}
-  .disc-detail-box{border:1px solid var(--d-rule);border-radius:4px;padding:2.9mm 3.2mm;background:var(--d-card-soft)}
-  .disc-detail-box b{display:flex;align-items:center;gap:1.5mm;font-size:7.9px;font-weight:800;color:var(--d-change);margin-bottom:1.4mm;text-transform:uppercase;letter-spacing:.35px}
+  .disc-detail{display:flex;flex-direction:column;gap:2.1mm;border:1px solid var(--d-card-border);border-radius:5px;padding:2.6mm 3.2mm;background:#fff}
+  .disc-detail-summary{margin:0;font-size:8.8px;line-height:1.36;color:var(--d-ink-2)}
+  .disc-detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:2.8mm;align-items:stretch}
+  .disc-detail-box{border:1px solid var(--d-rule);border-radius:4px;padding:2.2mm 2.7mm;background:var(--d-card-soft)}
+  .disc-detail-box b{display:flex;align-items:center;gap:1.5mm;font-size:8.5px;font-weight:800;color:var(--d-change);margin-bottom:1.1mm;text-transform:uppercase;letter-spacing:.3px}
   .disc-detail-box b::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--d-change);display:inline-block}
   .disc-detail-box-dev b{color:var(--d-least)}
   .disc-detail-box-dev b::before{background:var(--d-least)}
-  .disc-detail-box ul{margin:0;padding-left:3.6mm;font-size:7.6px;line-height:1.44;color:var(--d-ink-2)}
-  .disc-detail-box li{margin-bottom:.85mm}
-  .disc-professions{padding-top:2.2mm;border-top:1px solid var(--d-rule);display:grid;grid-template-columns:36mm 1fr;gap:3mm;align-items:baseline}
-  .disc-professions span{font-size:7.1px;font-weight:800;text-transform:uppercase;letter-spacing:.45px;color:var(--d-heading)}
-  .disc-professions p{margin:0;font-size:7.6px;line-height:1.42;color:var(--d-ink-2)}
+  .disc-detail-box ul{margin:0;padding-left:3.6mm;font-size:8.3px;line-height:1.35;color:var(--d-ink-2)}
+  .disc-detail-box li{margin-bottom:.65mm}
+  .disc-professions{padding-top:1.7mm;border-top:1px solid var(--d-rule);display:grid;grid-template-columns:38mm 1fr;gap:2.8mm;align-items:baseline}
+  .disc-professions span{font-size:7.9px;font-weight:800;text-transform:uppercase;letter-spacing:.35px;color:var(--d-heading)}
+  .disc-professions p{margin:0;font-size:8.3px;line-height:1.35;color:var(--d-ink-2)}
 
-  .disc-footer{margin-top:auto;padding-top:1.8mm;border-top:1px solid var(--d-rule);display:flex;justify-content:space-between;align-items:center;color:var(--d-muted);font-size:7px;font-weight:600}
+  .disc-footer{margin-top:auto;padding-top:1.4mm;border-top:1px solid var(--d-rule);display:flex;justify-content:space-between;align-items:center;color:var(--d-muted);font-size:8px;font-weight:600}
   .disc-empty{margin:auto;text-align:center;color:var(--d-ink-2)}
   .disc-empty h1{font-size:16px;margin:0 0 6px}
 `;
 
 export async function printApplication(record, options = {}) {
-  if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
+  if (!supabase) throw new Error('Supabase is not configured yet.');
   const brandKey = resolvePrintBrand(options.brand);
   const tab = window.open('', '_blank');
-  if (!tab) throw new Error('Izinkan pop-up untuk mencetak dokumen.');
+  if (!tab) throw new Error('Please allow pop-ups in your browser to print documents.');
   const cfg = BRAND_CONFIGS[brandKey];
-  tab.document.write(`<!doctype html><title>Menyiapkan dokumen ${esc(cfg.companyName)}…</title><p style="font:14px Arial;padding:30px">Menyiapkan Lamaran, CV, dan DISC (${esc(cfg.companyName)})…</p>`);
+  tab.document.write(`<!doctype html><title>Preparing ${esc(cfg.companyName)} document…</title><p style="font:14px 'Plus Jakarta Sans',Arial,sans-serif;padding:30px">Preparing Application Form, CV, and DISC Report (${esc(cfg.companyName)})…</p>`);
   try {
     const masterText = await getActiveMasterHtml(brandKey);
     const parser = new DOMParser();
     const doc = parser.parseFromString(masterText, 'text/html');
-    if (!doc.querySelector('#applicationForm')) throw new Error('Master aktif tidak memiliki #applicationForm.');
+    if (!doc.querySelector('#applicationForm')) throw new Error('Active print template does not contain #applicationForm.');
     sanitizePrintDocument(doc);
     fillMaster(doc, record.application_data || {}, record, brandKey);
     doc.body.classList.add('combined-print');
@@ -687,8 +687,8 @@ export async function printApplication(record, options = {}) {
       cvPages = await renderPdfPages(signed.signedUrl);
     }
     const cvSection = cvPages.length
-      ? cvPages.map((src, index) => `<section class="aux-sheet cv-page-sheet"><img src="${src}" alt="CV halaman ${index + 1}"><span>CV · ${index + 1} / ${cvPages.length}</span></section>`).join('')
-      : '<section class="aux-sheet cv-page-sheet cv-missing"><div><h1>CURRICULUM VITAE</h1><p>CV belum tersedia.</p></div></section>';
+      ? cvPages.map((src, index) => `<section class="aux-sheet cv-page-sheet"><img src="${src}" alt="CV page ${index + 1}"><span>CV · ${index + 1} / ${cvPages.length}</span></section>`).join('')
+      : '<section class="aux-sheet cv-page-sheet cv-missing"><div><h1>CURRICULUM VITAE</h1><p>CV is not available yet.</p></div></section>';
 
     let discSection = discEmptyHtml(brandKey);
     const answerRows = getDiscSubmission(record)?.answers;

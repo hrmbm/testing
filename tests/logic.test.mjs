@@ -93,7 +93,14 @@ test('Mitra and ReHolz masters isolate mobile query to screen and support robust
 import {
   calculateContractDates,
   buildDuplicateCandidatePayload,
+  buildDuplicatedDiscPayload,
+  buildDuplicatedInterviewPayloads,
+  buildDuplicatedInvitePayload,
   deriveCandidateProgress,
+  resolveLeadUnifiedStatus,
+  buildInvitedCandidatesViewRows,
+  aggregateCvScreeningBySource,
+  buildUnifiedTrackingRows,
   parseEmployeeSpreadsheetRows,
   formatEmployeeExportRow,
   verifyPinRevealPassword,
@@ -106,13 +113,13 @@ import {
   EMPLOYEE_TABLE_HEADERS
 } from '../assets/js/workspace-logic.js';
 
-test('calculateContractDates computes exact inclusive end date matching 17 Maret 2026 - 16 Maret 2027', () => {
+test('calculateContractDates computes exact inclusive end date matching 17 March 2026 - 16 March 2027', () => {
   const oneYear = calculateContractDates('2026-03-17', 12);
   assert.deepEqual(oneYear, {
     startIso: '2026-03-17',
     endIso: '2027-03-16',
     months: 12,
-    displayRange: '17 Maret 2026 - 16 Maret 2027'
+    displayRange: '17 March 2026 - 16 March 2027'
   });
   const sixMonths = calculateContractDates('2026-07-13', 6);
   assert.equal(sixMonths.endIso, '2027-01-12');
@@ -132,44 +139,166 @@ test('NIK login normalization and PIN reveal password check enforce rules', () =
   assert.equal(verifyPinRevealPassword('wrong'), false);
 });
 
-test('buildDuplicateCandidatePayload enforces position change and strips heavy KTP base64', () => {
+test('buildDuplicateCandidatePayload preserves progress, clones DISC/interviews/invites, and enforces position change', () => {
+  const answers = Array.from({ length: 24 }, (_, idx) => ({ most: idx % 4, least: (idx + 1) % 4 }));
   const source = {
     id: 'app-1',
     full_name: 'Budi Santoso',
     nik: '3514122006840004',
     position: 'CNC',
+    stage: 'disc_completed',
     cv_path: 'candidate-cv/uuid/cv.pdf',
     ktp_path: 'candidate-identity/uuid/ktp.jpg',
+    disc_submissions: [{ id: 'd1', answers, completed_at: '2026-03-01T10:00:00Z' }],
     application_data: { nama: 'Budi Santoso', posisi: 'CNC', ktp_foto: 'data:image/jpeg;base64,HUGE' }
   };
-  assert.throws(() => buildDuplicateCandidatePayload(source, 'CNC'), /berbeda/);
+  assert.throws(() => buildDuplicateCandidatePayload(source, 'CNC'), /different/);
   const dup = buildDuplicateCandidatePayload(source, 'Maintenance');
   assert.equal(dup.position, 'Maintenance');
   assert.equal(dup.application_data.posisi, 'Maintenance');
   assert.equal(dup.application_data.ktp_foto, undefined);
   assert.equal(dup.duplicated_from, 'app-1');
-  assert.equal(dup.stage, 'application_submitted');
+  assert.equal(dup.stage, 'disc_completed');
+
+  const hiredSource = { ...source, stage: 'hired' };
+  assert.equal(buildDuplicateCandidatePayload(hiredSource, 'Supervisor').stage, 'stage4_pending');
+
+  const discClone = buildDuplicatedDiscPayload(source.disc_submissions[0], 'app-2');
+  assert.equal(discClone.applicant_id, 'app-2');
+  assert.equal(discClone.answers.length, 24);
+
+  const intClone = buildDuplicatedInterviewPayloads([
+    {
+      interview_stage: 'HR 1',
+      interview_date: '2026-03-02',
+      pic_name: 'Samsul Hariyadi',
+      decision: 'Direkomendasikan',
+      notes: 'Good attitude'
+    }
+  ], { id: 'app-2', full_name: 'Budi Santoso', nik: source.nik, position: 'Maintenance' }, 'user-admin');
+  assert.equal(intClone.length, 1);
+  assert.equal(intClone[0].applicant_id, 'app-2');
+  assert.equal(intClone[0].applied_position, 'Maintenance');
+  assert.equal(intClone[0].interview_date, '2026-03-02');
+  assert.equal(intClone[0].decision, 'Recommended');
+
+  const invClone = buildDuplicatedInvitePayload(
+    { invite_date: '2026-02-28', source: 'Jobstreet', notes: 'Initial invite' },
+    { id: 'app-2', full_name: 'Budi Santoso', position: 'Maintenance' },
+    'user-admin'
+  );
+  assert.equal(invClone.linked_applicant_id, 'app-2');
+  assert.equal(invClone.applied_position, 'Maintenance');
+  assert.equal(invClone.status, 'Responded');
 });
 
-test('deriveCandidateProgress follows interview and employee progression', () => {
+test('deriveCandidateProgress and resolveLeadUnifiedStatus keep Candidate List and Lead Register continuously synced', () => {
   const base = { id: 'a1', stage: 'application_submitted', disc_submissions: [] };
-  assert.equal(deriveCandidateProgress(base, [], null).label, 'Formulir Masuk');
+  assert.equal(deriveCandidateProgress(base, [], null).label, 'Form Submitted');
   assert.equal(
     deriveCandidateProgress({ ...base, stage: 'disc_completed' }, [{ interview_stage: 'HR 1', decision: 'Direkomendasikan', created_at: '2026-03-01T00:00:00Z' }], null).label,
-    'Interview HR 1 · Direkomendasikan'
+    'HR 1 Interview · Recommended'
   );
   assert.equal(
     deriveCandidateProgress(base, [{ interview_stage: 'Final Interview', decision: 'Kirim Ke OS', created_at: '2026-03-05T00:00:00Z' }], null).label,
-    'Final Interview · Kirim Ke OS'
+    'Final Interview · Sent to OS'
   );
   assert.equal(
     deriveCandidateProgress(base, [{ interview_stage: 'Final Interview', decision: 'Ditolak', created_at: '2026-03-05T00:00:00Z' }], null).label,
-    'Final Interview · Ditolak'
+    'Final Interview · Rejected'
   );
   assert.equal(
     deriveCandidateProgress(base, [], { id: 'emp-1' }).label,
-    'Diterima · Karyawan'
+    'Hired · Employee'
   );
+
+  const lead = { id: 'l1', full_name: 'Rina', whatsapp: '081234567890', position: 'Staff Admin', recommendation: 'Recommended' };
+  const app = { id: 'a9', full_name: 'Rina', position: 'Staff Admin', stage: 'disc_completed', application_data: { telepon: '+62 812-3456-7890' } };
+  const resolved = resolveLeadUnifiedStatus(lead, { applicants: [app], interviews: [], employees: [], invitedCandidates: [] });
+  assert.equal(resolved.label, 'DISC Completed');
+  assert.equal(resolved.linkedApplicant?.id, 'a9');
+
+  const unlinked = resolveLeadUnifiedStatus({ id: 'l2', full_name: 'Andi', recommendation: 'Direkomendasikan' }, {});
+  assert.equal(unlinked.label, 'Lead Register · Recommended');
+});
+
+test('buildInvitedCandidatesViewRows prevents duplicates on link and reflects candidate duplication twice', () => {
+  const applicants = [
+    { id: 'app-1', full_name: 'Dewi Lestari', position: 'CNC', stage: 'application_submitted', created_at: '2026-03-10T08:00:00Z' },
+    { id: 'app-2', full_name: 'Dewi Lestari', position: 'QA', stage: 'disc_completed', duplicated_from: 'app-1', created_at: '2026-03-11T08:00:00Z' },
+    { id: 'app-3', full_name: 'Auto Only Applicant', position: 'Sales', stage: 'application_submitted', created_at: '2026-03-12T08:00:00Z' }
+  ];
+  const manualInvites = [
+    { id: 'inv-1', invite_date: '2026-03-09', candidate_name: 'No Resp Person', applied_position: 'Operator', source: 'Glints', status: 'No Response', linked_applicant_id: null },
+    { id: 'inv-2', invite_date: '2026-03-10', candidate_name: 'Dewi Lestari', applied_position: 'CNC', source: 'Jobstreet', status: 'Responded', linked_applicant_id: 'app-1' },
+    { id: 'inv-3', invite_date: '2026-03-10', candidate_name: 'Dewi Lestari', applied_position: 'QA', source: 'Jobstreet', status: 'Responded', linked_applicant_id: 'app-2' }
+  ];
+  const viewRows = buildInvitedCandidatesViewRows({ manualInvites, applicants });
+  // Zero duplicate for app-1 (merged into inv-2), app-2 preserved for duplicated candidate, app-3 auto-included, inv-1 kept No Response
+  assert.equal(viewRows.length, 4);
+  assert.equal(viewRows.filter(r => r.linkedApplicantId === 'app-1').length, 1);
+  assert.equal(viewRows.filter(r => r.candidateName === 'Dewi Lestari').length, 2);
+  assert.equal(viewRows.find(r => r.manualId === 'inv-1')?.status, 'No Response');
+  assert.equal(viewRows.find(r => r.linkedApplicantId === 'app-3')?.status, 'Responded');
+});
+
+test('aggregateCvScreeningBySource aggregates screening counts cleanly', () => {
+  const agg = aggregateCvScreeningBySource([
+    { id: '1', source: 'Jobstreet', screening_count: 14 },
+    { id: '2', source: 'Glints', screening_count: 9 },
+    { id: '3', source: 'Jobstreet', screening_count: 6 }
+  ]);
+  assert.equal(agg.totalCount, 29);
+  assert.equal(agg.items.length, 2);
+  assert.equal(agg.items[0].source, 'Jobstreet');
+  assert.equal(agg.items[0].screeningCount, 20);
+});
+
+test('buildUnifiedTrackingRows produces full 12-column tracking structure', () => {
+  const tracking = buildUnifiedTrackingRows({
+    applicants: [
+      {
+        id: 'app-1',
+        full_name: 'Bima Pratama',
+        nik: '3515000000000001',
+        position: 'Production Lead',
+        stage: 'rejected',
+        created_at: '2026-03-02T00:00:00Z',
+        disc_submissions: [{ completed_at: '2026-03-03T00:00:00Z' }]
+      }
+    ],
+    interviews: [
+      {
+        applicant_id: 'app-1',
+        interview_stage: 'HR 1',
+        interview_date: '2026-03-04',
+        decision: 'Direkomendasikan',
+        pic_name: 'Samsul Hariyadi'
+      },
+      {
+        applicant_id: 'app-1',
+        interview_stage: 'Final Interview',
+        interview_date: '2026-03-06',
+        decision: 'Rejected',
+        rejection_reason_category: 'Salary',
+        rejection_reason_detail: 'Above budget',
+        work_start_date: null
+      }
+    ],
+    invitedCandidates: [
+      { invite_date: '2026-03-01', linked_applicant_id: 'app-1', source: 'LinkedIn', status: 'Responded' }
+    ]
+  });
+  assert.equal(tracking.length, 1);
+  assert.equal(tracking[0].inviteDate, '2026-03-01');
+  assert.equal(tracking[0].formSubmittedDate, '2026-03-02');
+  assert.equal(tracking[0].hrTestDate, '2026-03-03');
+  assert.equal(tracking[0].hr1.decision, 'Recommended');
+  assert.equal(tracking[0].hr1.date, '2026-03-04');
+  assert.equal(tracking[0].finalInt.decision, 'Rejected');
+  assert.equal(tracking[0].decision, 'Rejected');
+  assert.equal(tracking[0].rejectionReason, 'Salary · Above budget');
+  assert.equal(tracking[0].decisionDate, '2026-03-06');
 });
 
 test('Employee Directory spreadsheet parser and formatter align with 16-column format', () => {
@@ -227,5 +356,3 @@ test('isRootAdminAccount and buildEmployeeUserOptionLabel identify root Admin an
     'ST 130116 — ABD. KHAMID (MMD)'
   );
 });
-
-

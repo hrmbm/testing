@@ -21,6 +21,43 @@ export const EMPLOYEE_TABLE_HEADERS = [
   'Agama'
 ];
 
+export const EMPLOYEE_UI_HEADERS = [
+  'Name',
+  'Employee NIK',
+  'Department',
+  'Join Date',
+  'Position',
+  'Contract Start',
+  'Contract End',
+  'Address',
+  'ID Card NIK',
+  'Birth Place',
+  'Birth Date',
+  'Phone No.',
+  'Status',
+  'Education',
+  'Gender',
+  'Religion'
+];
+
+export const INVITE_SOURCES = [
+  'Jobstreet',
+  'Glints',
+  'LinkedIn',
+  'Pintarnya',
+  'Threads',
+  'Instagram',
+  'Facebook',
+  'WhatsApp Channel',
+  'Other',
+  'Walk In'
+];
+
+export const INVITE_STATUSES = [
+  'Responded',
+  'No Response'
+];
+
 export const INTERVIEW_STAGES = [
   'HR 1',
   'HR 2',
@@ -30,23 +67,23 @@ export const INTERVIEW_STAGES = [
 ];
 
 export const INTERVIEW_STAGE_LABELS = {
-  'HR 1': 'Interview HR 1',
-  'HR 2': 'Interview HR 2',
-  'User 1': 'Interview User 1',
-  'User 2': 'Interview User 2',
+  'HR 1': 'HR Interview 1',
+  'HR 2': 'HR Interview 2',
+  'User 1': 'User Interview 1',
+  'User 2': 'User Interview 2',
   'Final Interview': 'Final Interview'
 };
 
 export const INTERVIEW_DECISIONS = [
-  'Direkomendasikan',
-  'Dipertimbangkan',
-  'Tidak Direkomendasikan'
+  'Recommended',
+  'Considered',
+  'Not Recommended'
 ];
 
 export const FINAL_INTERVIEW_DECISIONS = [
-  'Diterima',
-  'Ditolak',
-  'Kirim Ke OS'
+  'Accepted',
+  'Rejected',
+  'Sent to OS'
 ];
 
 export const FINAL_REJECTION_REASONS = [
@@ -56,16 +93,16 @@ export const FINAL_REJECTION_REASONS = [
 ];
 
 export const CONTRACT_DURATION_OPTIONS = [
-  { months: 3, label: '3 Bulan' },
-  { months: 4, label: '4 Bulan' },
-  { months: 5, label: '5 Bulan' },
-  { months: 6, label: '6 Bulan' },
-  { months: 7, label: '7 Bulan' },
-  { months: 8, label: '8 Bulan' },
-  { months: 9, label: '9 Bulan' },
-  { months: 10, label: '10 Bulan' },
-  { months: 11, label: '11 Bulan' },
-  { months: 12, label: '1 Tahun (12 Bulan)' }
+  { months: 3, label: '3 Months' },
+  { months: 4, label: '4 Months' },
+  { months: 5, label: '5 Months' },
+  { months: 6, label: '6 Months' },
+  { months: 7, label: '7 Months' },
+  { months: 8, label: '8 Months' },
+  { months: 9, label: '9 Months' },
+  { months: 10, label: '10 Months' },
+  { months: 11, label: '11 Months' },
+  { months: 12, label: '1 Year (12 Months)' }
 ];
 
 export const DEFAULT_INTERVIEW_PICS = {
@@ -74,15 +111,37 @@ export const DEFAULT_INTERVIEW_PICS = {
 };
 
 export const LEAD_RECOMMENDATION_OPTIONS = [
-  'Belum Ditentukan',
-  'Direkomendasikan',
-  'Tidak Direkomendasikan'
+  'Pending',
+  'Recommended',
+  'Not Recommended'
 ];
 
-const ID_MONTHS_LONG = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+const EN_MONTHS_LONG = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
 ];
+
+export function normalizeInterviewDecision(value = '') {
+  const raw = String(value ?? '').trim();
+  const key = raw.toLowerCase();
+  if (!key) return '';
+  if (key === 'direkomendasikan' || key === 'recommended') return 'Recommended';
+  if (key === 'dipertimbangkan' || key === 'considered') return 'Considered';
+  if (key === 'tidak direkomendasikan' || key === 'not recommended') return 'Not Recommended';
+  if (key === 'diterima' || key === 'accepted') return 'Accepted';
+  if (key === 'ditolak' || key === 'rejected') return 'Rejected';
+  if (key === 'kirim ke os' || key === 'sent to os') return 'Sent to OS';
+  return raw;
+}
+
+export function normalizeLeadRecommendation(value = '') {
+  const raw = String(value ?? '').trim();
+  const key = raw.toLowerCase();
+  if (!key || key === 'belum ditentukan' || key === 'pending') return 'Pending';
+  if (key === 'direkomendasikan' || key === 'recommended') return 'Recommended';
+  if (key === 'tidak direkomendasikan' || key === 'not recommended') return 'Not Recommended';
+  return raw;
+}
 
 export function normalizeLoginIdentifier(value = '') {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, '');
@@ -122,18 +181,22 @@ export function buildEmployeeUserOptionLabel(emp = {}) {
   const nik = String(emp.employee_no || '').trim();
   const name = String(emp.full_name || '').trim();
   const roleMeta = String(emp.position || emp.department || '').trim();
-  const base = nik && name ? `${nik} — ${name}` : name || nik || 'Karyawan';
+  const base = nik && name ? `${nik} — ${name}` : name || nik || 'Employee';
   return roleMeta ? `${base} (${roleMeta})` : base;
 }
 
-export function formatIndonesianDateLong(isoDate = '') {
+export function formatEnglishDateLong(isoDate = '') {
   const match = String(isoDate ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return '';
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return '';
-  return `${day} ${ID_MONTHS_LONG[month - 1]} ${year}`;
+  return `${day} ${EN_MONTHS_LONG[month - 1]} ${year}`;
+}
+
+export function formatIndonesianDateLong(isoDate = '') {
+  return formatEnglishDateLong(isoDate);
 }
 
 export function formatDmyDash(isoDate = '') {
@@ -173,8 +236,8 @@ export function calculateContractDates(startDateIso = '', durationMonths = 12) {
   endUtc.setUTCDate(endUtc.getUTCDate() - 1);
 
   const endIso = `${endUtc.getUTCFullYear()}-${String(endUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(endUtc.getUTCDate()).padStart(2, '0')}`;
-  const startLabel = formatIndonesianDateLong(startDateIso);
-  const endLabel = formatIndonesianDateLong(endIso);
+  const startLabel = formatEnglishDateLong(startDateIso);
+  const endLabel = formatEnglishDateLong(endIso);
   return {
     startIso: startDateIso,
     endIso,
@@ -185,15 +248,15 @@ export function calculateContractDates(startDateIso = '', durationMonths = 12) {
 
 export function buildDuplicateCandidatePayload(applicant, newPosition) {
   if (!applicant || !applicant.id) {
-    throw new Error('Data kandidat sumber tidak valid.');
+    throw new Error('Invalid source candidate record.');
   }
   const nextPosition = String(newPosition ?? '').trim();
   const currentPosition = String(applicant.position || applicant.application_data?.posisi || '').trim();
   if (!nextPosition) {
-    throw new Error('Pilih posisi baru untuk duplikasi kandidat.');
+    throw new Error('Please select a new target position for duplication.');
   }
-  if (nextPosition.toLocaleLowerCase('id') === currentPosition.toLocaleLowerCase('id')) {
-    throw new Error('Posisi duplikasi harus berbeda dari posisi kandidat sebelumnya.');
+  if (nextPosition.toLowerCase() === currentPosition.toLowerCase()) {
+    throw new Error('New position must be different from the current candidate position.');
   }
   const sourceData = { ...(applicant.application_data || {}) };
   delete sourceData.ktp_foto;
@@ -203,17 +266,88 @@ export function buildDuplicateCandidatePayload(applicant, newPosition) {
   sourceData.__duplicated_from_id = applicant.id;
   sourceData.__duplicated_from_position = currentPosition;
 
+  const hasDisc = Boolean(
+    (Array.isArray(applicant.disc_submissions) ? applicant.disc_submissions[0] : applicant.disc_submissions)?.answers
+  );
+  const rawStage = applicant.stage || 'application_submitted';
+  let preservedStage = rawStage;
+  if (rawStage === 'hired') {
+    preservedStage = 'stage4_pending';
+  } else if (hasDisc && rawStage === 'application_submitted') {
+    preservedStage = 'disc_completed';
+  }
+
   return {
     full_name: String(applicant.full_name || sourceData.nama || '').trim(),
     nik: String(applicant.nik || sourceData.nik || '').trim(),
     position: nextPosition,
-    stage: 'application_submitted',
+    stage: preservedStage,
     application_data: sourceData,
     cv_path: applicant.cv_path || null,
     ktp_path: applicant.ktp_path || null,
-    background_check_status: 'pending',
-    disc_invited: false,
+    background_check_status: applicant.background_check_status || 'pending',
+    disc_invited: Boolean(applicant.disc_invited || hasDisc),
     duplicated_from: applicant.id
+  };
+}
+
+export function buildDuplicatedDiscPayload(sourceDisc, targetApplicantId) {
+  if (!targetApplicantId || !sourceDisc || !Array.isArray(sourceDisc.answers) || sourceDisc.answers.length !== 24) {
+    return null;
+  }
+  return {
+    applicant_id: targetApplicantId,
+    answers: sourceDisc.answers.map(a => ({ ...a })),
+    completed_at: sourceDisc.completed_at || new Date().toISOString()
+  };
+}
+
+export function buildDuplicatedInterviewPayloads(sourceInterviews = [], targetApplicant, createdBy = null) {
+  if (!targetApplicant?.id || !Array.isArray(sourceInterviews) || !sourceInterviews.length) {
+    return [];
+  }
+  return sourceInterviews.map(row => ({
+    source_type: 'applicant',
+    applicant_id: targetApplicant.id,
+    stage1_id: null,
+    candidate_name: targetApplicant.full_name || row.candidate_name || '',
+    candidate_nik: targetApplicant.nik || row.candidate_nik || '',
+    candidate_whatsapp: targetApplicant.application_data?.telepon || row.candidate_whatsapp || '',
+    applied_position: targetApplicant.position || row.applied_position || '',
+    interview_stage: row.interview_stage,
+    interview_date: row.interview_date || (row.created_at ? String(row.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10)),
+    pic_employee_id: row.pic_employee_id || null,
+    pic_nik: row.pic_nik || '',
+    pic_name: row.pic_name || '',
+    notes: row.notes || '',
+    decision: normalizeInterviewDecision(row.decision),
+    rejection_reason_category: row.rejection_reason_category || '',
+    rejection_reason_detail: row.rejection_reason_detail || '',
+    work_start_date: row.work_start_date || null,
+    salary: row.salary ?? null,
+    contract_duration_months: row.contract_duration_months ?? null,
+    contract_start_date: row.contract_start_date || null,
+    contract_end_date: row.contract_end_date || null,
+    official_position: row.official_position || '',
+    assigned_nik: row.assigned_nik || '',
+    created_by: createdBy || row.created_by || null,
+    updated_at: new Date().toISOString()
+  }));
+}
+
+export function buildDuplicatedInvitePayload(sourceInvite, targetApplicant, createdBy = null) {
+  if (!sourceInvite || !targetApplicant?.id) return null;
+  return {
+    invite_date: sourceInvite.invite_date || new Date().toISOString().slice(0, 10),
+    candidate_name: targetApplicant.full_name || sourceInvite.candidate_name || '',
+    applied_position: targetApplicant.position || sourceInvite.applied_position || '',
+    source: sourceInvite.source || 'Other',
+    status: 'Responded',
+    linked_applicant_id: targetApplicant.id,
+    linked_stage1_id: sourceInvite.linked_stage1_id || null,
+    notes: sourceInvite.notes || '',
+    created_by: createdBy || null,
+    updated_at: new Date().toISOString()
   };
 }
 
@@ -223,43 +357,48 @@ export function getLatestInterviewsByStage(interviews = []) {
     byStage[stage] = null;
   }
   const sorted = [...(interviews || [])].sort((a, b) => {
-    const timeA = Date.parse(a.updated_at || a.created_at || '') || 0;
-    const timeB = Date.parse(b.updated_at || b.created_at || '') || 0;
+    const timeA = Date.parse(a.updated_at || a.interview_date || a.created_at || '') || 0;
+    const timeB = Date.parse(b.updated_at || b.interview_date || b.created_at || '') || 0;
     return timeB - timeA;
   });
   for (const row of sorted) {
     if (byStage[row.interview_stage] === null) {
-      byStage[row.interview_stage] = row;
+      byStage[row.interview_stage] = {
+        ...row,
+        decision: normalizeInterviewDecision(row.decision)
+      };
     }
   }
   return byStage;
 }
 
-export function deriveCandidateProgress(applicant, candidateInterviews = [], employeeRecord = null) {
+export function deriveCandidateProgress(applicant, candidateInterviews = [], employeeRecord = null, stage1Lead = null) {
   if (employeeRecord || applicant?.stage === 'hired') {
-    return { label: 'Diterima · Karyawan', tone: 'green', stageKey: 'hired' };
+    return { label: 'Hired · Employee', tone: 'green', stageKey: 'hired' };
   }
   const byStage = getLatestInterviewsByStage(candidateInterviews);
   const finalInt = byStage['Final Interview'];
   if (finalInt) {
-    if (finalInt.decision === 'Diterima') return { label: 'Diterima · Karyawan', tone: 'green', stageKey: 'hired' };
-    if (finalInt.decision === 'Ditolak') return { label: 'Final Interview · Ditolak', tone: 'gray', stageKey: 'rejected' };
-    if (finalInt.decision === 'Kirim Ke OS') return { label: 'Final Interview · Kirim Ke OS', tone: 'gold', stageKey: 'os' };
+    const dec = normalizeInterviewDecision(finalInt.decision);
+    if (dec === 'Accepted') return { label: 'Hired · Employee', tone: 'green', stageKey: 'hired' };
+    if (dec === 'Rejected') return { label: 'Final Interview · Rejected', tone: 'gray', stageKey: 'rejected' };
+    if (dec === 'Sent to OS') return { label: 'Final Interview · Sent to OS', tone: 'gold', stageKey: 'os' };
   }
   if (applicant?.stage === 'rejected') {
-    return { label: 'Tidak Dilanjutkan', tone: 'gray', stageKey: 'rejected' };
+    return { label: 'Not Proceeding', tone: 'gray', stageKey: 'rejected' };
   }
   const activeStageOrder = ['User 2', 'User 1', 'HR 2', 'HR 1'];
   for (const stageName of activeStageOrder) {
     const item = byStage[stageName];
     if (item) {
-      const tone = item.decision === 'Direkomendasikan'
+      const dec = normalizeInterviewDecision(item.decision);
+      const tone = dec === 'Recommended'
         ? 'green'
-        : item.decision === 'Tidak Direkomendasikan'
+        : dec === 'Not Recommended'
           ? 'gray'
           : 'gold';
       return {
-        label: `Interview ${stageName} · ${item.decision || 'Proses'}`,
+        label: `${stageName} Interview · ${dec || 'In Progress'}`,
         tone,
         stageKey: stageName
       };
@@ -270,15 +409,326 @@ export function deriveCandidateProgress(applicant, candidateInterviews = [], emp
     applicant?.stage === 'disc_completed'
   );
   if (hasDisc) {
-    return { label: 'DISC Selesai', tone: 'green', stageKey: 'disc_completed' };
+    return { label: 'DISC Completed', tone: 'green', stageKey: 'disc_completed' };
   }
   if (applicant?.stage === 'stage4_pending') {
-    return { label: 'Proses Interview', tone: 'gold', stageKey: 'stage4_pending' };
+    return { label: 'Interview In Progress', tone: 'gold', stageKey: 'stage4_pending' };
   }
   if (applicant?.stage === 'application_submitted') {
-    return { label: 'Formulir Masuk', tone: 'blue', stageKey: 'application_submitted' };
+    return { label: 'Form Submitted', tone: 'blue', stageKey: 'application_submitted' };
+  }
+  if (stage1Lead) {
+    const rec = normalizeLeadRecommendation(stage1Lead.recommendation);
+    if (rec === 'Recommended') {
+      return { label: 'Lead Register · Recommended', tone: 'blue', stageKey: 'stage1_pending' };
+    }
+    if (rec === 'Not Recommended') {
+      return { label: 'Lead Register · Not Recommended', tone: 'gray', stageKey: 'stage1_pending' };
+    }
+    return { label: 'Lead Register · Pending', tone: 'gray', stageKey: 'stage1_pending' };
   }
   return { label: 'Lead Register', tone: 'gray', stageKey: 'stage1_pending' };
+}
+
+function normalizePhoneDigits(phone = '') {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  return digits.length >= 7 ? digits.slice(-9) : '';
+}
+
+function normalizePersonName(name = '') {
+  return String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function findMatchingApplicantForLead(lead, { applicants = [], interviews = [], invitedCandidates = [] } = {}) {
+  if (!lead) return null;
+  const invMatch = (invitedCandidates || []).find(inv => inv.linked_stage1_id === lead.id && inv.linked_applicant_id);
+  if (invMatch) {
+    const app = applicants.find(a => a.id === invMatch.linked_applicant_id);
+    if (app) return app;
+  }
+  const intMatch = (interviews || []).find(i => i.stage1_id === lead.id && i.applicant_id);
+  if (intMatch) {
+    const app = applicants.find(a => a.id === intMatch.applicant_id);
+    if (app) return app;
+  }
+  const leadPhone = normalizePhoneDigits(lead.whatsapp);
+  const leadName = normalizePersonName(lead.full_name);
+  const leadPos = String(lead.position || '').trim().toLowerCase();
+
+  const matches = (applicants || []).filter(a => {
+    if (a.stage === 'stage1_pending') return false;
+    const appPhone = normalizePhoneDigits(a.application_data?.telepon);
+    const appName = normalizePersonName(a.full_name || a.application_data?.nama);
+    if (leadPhone && appPhone && leadPhone === appPhone) return true;
+    return Boolean(leadName && appName && leadName === appName);
+  });
+  if (!matches.length) return null;
+  const exactPos = matches.find(a => String(a.position || '').trim().toLowerCase() === leadPos);
+  return exactPos || matches[0];
+}
+
+export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [], employees = [], invitedCandidates = [] } = {}) {
+  const linkedApplicant = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates });
+  const stage1Ints = (interviews || []).filter(i => i.stage1_id === lead?.id);
+  const appInts = linkedApplicant ? (interviews || []).filter(i => i.applicant_id === linkedApplicant.id) : [];
+  const mergedMap = new Map();
+  [...stage1Ints, ...appInts].forEach(i => {
+    mergedMap.set(i.id || `${i.interview_stage}:${i.updated_at || i.created_at}`, i);
+  });
+  const emp = linkedApplicant
+    ? ((Array.isArray(linkedApplicant.employees) ? linkedApplicant.employees[0] : linkedApplicant.employees) ||
+        (employees || []).find(e => e.applicant_id === linkedApplicant.id) || null)
+    : null;
+  const progress = deriveCandidateProgress(
+    linkedApplicant || { stage: 'stage1_pending' },
+    [...mergedMap.values()],
+    emp,
+    lead
+  );
+  return { ...progress, linkedApplicant };
+}
+
+export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [] } = {}) {
+  const linkedIds = new Set();
+  (manualInvites || []).forEach(inv => {
+    if (inv.linked_applicant_id) linkedIds.add(inv.linked_applicant_id);
+  });
+
+  const rows = [];
+
+  for (const inv of (manualInvites || [])) {
+    const linkedApp = inv.linked_applicant_id
+      ? (applicants || []).find(a => a.id === inv.linked_applicant_id) || null
+      : null;
+    const resolvedStatus = linkedApp ? 'Responded' : (inv.status === 'Responded' ? 'Responded' : 'No Response');
+    rows.push({
+      rowKey: `manual:${inv.id}`,
+      manualId: inv.id,
+      linkedApplicantId: inv.linked_applicant_id || null,
+      isManual: true,
+      isAutoOnly: false,
+      inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
+      candidateName: linkedApp?.full_name || inv.candidate_name || '—',
+      appliedPosition: inv.applied_position || linkedApp?.position || '—',
+      source: inv.source || 'Other',
+      status: resolvedStatus,
+      notes: inv.notes || '',
+      isDuplicated: Boolean(linkedApp?.duplicated_from),
+      applicantRef: linkedApp
+    });
+  }
+
+  for (const app of (applicants || [])) {
+    if (app.stage === 'stage1_pending') continue;
+    if (linkedIds.has(app.id)) continue;
+    rows.push({
+      rowKey: `app:${app.id}`,
+      manualId: null,
+      linkedApplicantId: app.id,
+      isManual: false,
+      isAutoOnly: true,
+      inviteDate: String(app.created_at || '').slice(0, 10),
+      candidateName: app.full_name || app.application_data?.nama || '—',
+      appliedPosition: app.position || app.application_data?.posisi || '—',
+      source: app.duplicated_from ? 'Duplicated Position' : 'Application Form',
+      status: 'Responded',
+      notes: '',
+      isDuplicated: Boolean(app.duplicated_from),
+      applicantRef: app
+    });
+  }
+
+  return rows.sort((a, b) => {
+    const dateDiff = String(b.inviteDate || '').localeCompare(String(a.inviteDate || ''));
+    if (dateDiff !== 0) return dateDiff;
+    return String(a.candidateName || '').localeCompare(String(b.candidateName || ''), 'en');
+  });
+}
+
+export function aggregateCvScreeningBySource(screenings = []) {
+  const bySource = new Map();
+  for (const row of (screenings || [])) {
+    const source = String(row.source || '').trim();
+    if (!source) continue;
+    const count = Math.max(0, Number.parseInt(row.screening_count, 10) || 0);
+    const prev = bySource.get(source);
+    if (prev) {
+      prev.screeningCount += count;
+      if (row.notes && !prev.notes) prev.notes = row.notes;
+    } else {
+      bySource.set(source, {
+        id: row.id || null,
+        source,
+        screeningCount: count,
+        notes: row.notes || '',
+        updatedAt: row.updated_at || row.created_at || ''
+      });
+    }
+  }
+  const items = [...bySource.values()].sort((a, b) => {
+    const idxA = INVITE_SOURCES.indexOf(a.source);
+    const idxB = INVITE_SOURCES.indexOf(b.source);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.source.localeCompare(b.source, 'en');
+  });
+  const totalCount = items.reduce((sum, item) => sum + item.screeningCount, 0);
+  return { items, totalCount };
+}
+
+export function buildUnifiedTrackingRows({
+  applicants = [],
+  stage1Leads = [],
+  interviews = [],
+  employees = [],
+  invitedCandidates = []
+} = {}) {
+  const rows = [];
+  const inviteByApplicantId = new Map();
+  (invitedCandidates || []).forEach(inv => {
+    if (inv.linked_applicant_id && !inviteByApplicantId.has(inv.linked_applicant_id)) {
+      inviteByApplicantId.set(inv.linked_applicant_id, inv);
+    }
+  });
+
+  const getDisc = a => (Array.isArray(a.disc_submissions) ? a.disc_submissions[0] : a.disc_submissions) || null;
+  const getEmp = a => (Array.isArray(a.employees) ? a.employees[0] : a.employees) ||
+    (employees || []).find(e => e.applicant_id === a.id) || null;
+
+  const formatInterviewStageCell = item => {
+    if (!item) return null;
+    const dec = normalizeInterviewDecision(item.decision);
+    return {
+      date: item.interview_date || String(item.created_at || '').slice(0, 10),
+      decision: dec,
+      picName: item.pic_name || '',
+      notes: item.notes || ''
+    };
+  };
+
+  for (const a of (applicants || [])) {
+    if (a.stage === 'stage1_pending') continue;
+    const ints = (interviews || []).filter(i => i.applicant_id === a.id);
+    const byStage = getLatestInterviewsByStage(ints);
+    const emp = getEmp(a);
+    const disc = getDisc(a);
+    const linkedInv = inviteByApplicantId.get(a.id) || null;
+    const finalInt = byStage['Final Interview'];
+    const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
+
+    let decisionLabel = 'In Progress';
+    let decisionTone = 'gold';
+    let rejectionReason = '';
+    if (emp || a.stage === 'hired' || finalDec === 'Accepted') {
+      decisionLabel = 'Accepted';
+      decisionTone = 'green';
+    } else if (finalDec === 'Rejected' || a.stage === 'rejected') {
+      decisionLabel = 'Rejected';
+      decisionTone = 'gray';
+      rejectionReason = [finalInt?.rejection_reason_category, finalInt?.rejection_reason_detail]
+        .filter(Boolean).join(' · ');
+    } else if (finalDec === 'Sent to OS' || a.stage === 'os_sent') {
+      decisionLabel = 'Sent to OS';
+      decisionTone = 'gold';
+    }
+
+    const decisionDate = finalInt
+      ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
+      : '';
+    const joinDate = emp?.join_date || finalInt?.work_start_date || '';
+
+    rows.push({
+      id: `app:${a.id}`,
+      name: a.full_name || '—',
+      sub: `${a.position || '—'}${a.nik ? ` · ${a.nik}` : ''}`,
+      inviteDate: linkedInv?.invite_date || String(a.created_at || '').slice(0, 10),
+      inviteStatus: 'Responded',
+      inviteSource: linkedInv?.source || 'Application Form',
+      formSubmittedDate: String(a.created_at || '').slice(0, 10),
+      hrTestDate: disc?.completed_at ? String(disc.completed_at).slice(0, 10) : '',
+      hrTestDone: Boolean(disc || a.stage === 'disc_completed'),
+      hr1: formatInterviewStageCell(byStage['HR 1']),
+      hr2: formatInterviewStageCell(byStage['HR 2']),
+      user1: formatInterviewStageCell(byStage['User 1']),
+      user2: formatInterviewStageCell(byStage['User 2']),
+      finalInt: formatInterviewStageCell(finalInt),
+      decision: decisionLabel,
+      decisionTone,
+      rejectionReason,
+      decisionDate,
+      joinDate
+    });
+  }
+
+  for (const s of (stage1Leads || [])) {
+    const matched = findMatchingApplicantForLead(s, { applicants, interviews, invitedCandidates });
+    if (matched) continue;
+    const ints = (interviews || []).filter(i => i.stage1_id === s.id);
+    const byStage = getLatestInterviewsByStage(ints);
+    const finalInt = byStage['Final Interview'];
+    const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
+    const leadRec = normalizeLeadRecommendation(s.recommendation);
+    let decisionLabel = 'Lead Register';
+    let decisionTone = 'blue';
+    let rejectionReason = '';
+    if (finalDec === 'Accepted') { decisionLabel = 'Accepted'; decisionTone = 'green'; }
+    else if (finalDec === 'Rejected') {
+      decisionLabel = 'Rejected';
+      decisionTone = 'gray';
+      rejectionReason = [finalInt?.rejection_reason_category, finalInt?.rejection_reason_detail].filter(Boolean).join(' · ');
+    } else if (finalDec === 'Sent to OS') { decisionLabel = 'Sent to OS'; decisionTone = 'gold'; }
+    else if (leadRec === 'Not Recommended') { decisionLabel = 'Not Recommended'; decisionTone = 'gray'; }
+
+    rows.push({
+      id: `stage1:${s.id}`,
+      name: s.full_name || '—',
+      sub: `${s.position || '—'}${s.whatsapp ? ` · ${s.whatsapp}` : ''}`,
+      inviteDate: String(s.created_at || '').slice(0, 10),
+      inviteStatus: 'Lead Register',
+      inviteSource: 'Lead Register',
+      formSubmittedDate: '',
+      hrTestDate: '',
+      hrTestDone: false,
+      hr1: formatInterviewStageCell(byStage['HR 1']),
+      hr2: formatInterviewStageCell(byStage['HR 2']),
+      user1: formatInterviewStageCell(byStage['User 1']),
+      user2: formatInterviewStageCell(byStage['User 2']),
+      finalInt: formatInterviewStageCell(finalInt),
+      decision: decisionLabel,
+      decisionTone,
+      rejectionReason,
+      decisionDate: finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '',
+      joinDate: finalInt?.work_start_date || ''
+    });
+  }
+
+  for (const inv of (invitedCandidates || [])) {
+    if (inv.linked_applicant_id) continue;
+    rows.push({
+      id: `inv:${inv.id}`,
+      name: inv.candidate_name || '—',
+      sub: `${inv.applied_position || '—'} · ${inv.source || '—'}`,
+      inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
+      inviteStatus: inv.status === 'Responded' ? 'Responded' : 'No Response',
+      inviteSource: inv.source || '—',
+      formSubmittedDate: '',
+      hrTestDate: '',
+      hrTestDone: false,
+      hr1: null,
+      hr2: null,
+      user1: null,
+      user2: null,
+      finalInt: null,
+      decision: inv.status === 'Responded' ? 'In Progress' : 'No Response',
+      decisionTone: 'gray',
+      rejectionReason: '',
+      decisionDate: '',
+      joinDate: ''
+    });
+  }
+
+  return rows;
 }
 
 export function findDefaultInterviewer(stage, employees = []) {
@@ -333,34 +783,52 @@ function normalizeHeaderKey(key = '') {
 
 const EMPLOYEE_HEADER_MAP = {
   nama: 'full_name',
+  name: 'full_name',
+  fullname: 'full_name',
   namalengkap: 'full_name',
   nik: 'employee_no',
+  employeenik: 'employee_no',
+  employeeno: 'employee_no',
   nokaryawan: 'employee_no',
   nomorkaryawan: 'employee_no',
   departement: 'department',
   departemen: 'department',
+  department: 'department',
   tglmasuk: 'join_date',
   tanggalmasuk: 'join_date',
+  joindate: 'join_date',
   jabatan: 'position',
   posisi: 'position',
+  position: 'position',
   mulaikontrak: 'contract_start_date',
+  contractstart: 'contract_start_date',
   kontrakberakhir: 'contract_end_date',
+  contractend: 'contract_end_date',
   alamat: 'address',
+  address: 'address',
   nik2: 'ktp_nik',
+  idcardnik: 'ktp_nik',
   nikktp: 'ktp_nik',
   noktp: 'ktp_nik',
   tempatlahir: 'birth_place',
+  birthplace: 'birth_place',
   tanggallahir: 'birth_date',
   tgllahir: 'birth_date',
+  birthdate: 'birth_date',
   notelp: 'phone',
+  phoneno: 'phone',
+  phone: 'phone',
   telepon: 'phone',
   hp: 'phone',
   status: 'employment_status',
   statuskaryawan: 'employment_status',
   pendidikan: 'education',
+  education: 'education',
   jeniskelamin: 'gender',
   kelamin: 'gender',
-  agama: 'religion'
+  gender: 'gender',
+  agama: 'religion',
+  religion: 'religion'
 };
 
 export function normalizeEmploymentStatus(value = '') {
@@ -386,11 +854,11 @@ export function parseEmployeeSpreadsheetRows(rawRows = []) {
     const employeeNo = normalizeDisplayNik(mapped.employee_no ?? '');
     if (!fullName && !employeeNo) return;
     if (!employeeNo) {
-      errors.push(`Baris ${index + 2}: kolom Nik wajib diisi (${fullName || 'tanpa nama'}).`);
+      errors.push(`Row ${index + 2}: NIK column is required (${fullName || 'unnamed'}).`);
       return;
     }
     if (!fullName) {
-      errors.push(`Baris ${index + 2}: kolom Nama wajib diisi (Nik ${employeeNo}).`);
+      errors.push(`Row ${index + 2}: Name column is required (NIK ${employeeNo}).`);
       return;
     }
     const ktpNikRaw = String(mapped.ktp_nik ?? '').replace(/\D/g, '');
