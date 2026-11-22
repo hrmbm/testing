@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Perjanjian Bersama Pembayaran Upah - {{nama_karyawan}}</title>
+  <style>
+  @page {
+    size: A4 portrait;
+    margin: 15mm 18mm 16mm 18mm;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #eef2f6;
+    color: #111827;
+    font-family: "Times New Roman", "Source Serif 4", Georgia, serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .a4-page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 12px auto;
+    padding: 15mm 18mm 16mm 18mm;
+    background: #ffffff;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  @media print {
+    html, body {
+      background: #ffffff !important;
+    }
+    .a4-page {
+      width: auto;
+      min-height: auto;
+      margin: 0;
+      padding: 0;
+      box-shadow: none;
+    }
+    mark.hris-var {
+      background: transparent !important;
+      border-bottom: none !important;
+      padding: 0 !important;
+      color: inherit !important;
+    }
+  }
+
+  .letterhead {
+    text-align: center;
+    border-bottom: 2px solid #0f172a;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+
+  .letterhead-company {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+
+  .letterhead-meta {
+    font-size: 9pt;
+    color: #334155;
+    line-height: 1.35;
+  }
+
+  .doc-title {
+    text-align: center;
+    font-size: 12.5pt;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    margin: 6px 0 2px 0;
+  }
+
+  .doc-subtitle {
+    text-align: center;
+    font-size: 11pt;
+    font-weight: 700;
+    margin: 2px 0;
+  }
+
+  .doc-number {
+    text-align: center;
+    font-size: 10.5pt;
+    font-weight: 700;
+    margin: 0 0 14px 0;
+  }
+
+  .pasal-heading {
+    text-align: center;
+    font-weight: 700;
+    font-size: 11pt;
+    margin-top: 12px;
+    margin-bottom: 2px;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  .pasal-subheading {
+    text-align: center;
+    font-weight: 700;
+    font-size: 10.5pt;
+    margin-top: 0;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  p {
+    margin: 0 0 7px 0;
+    text-align: justify;
+  }
+
+  .kv-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 6px 0 8px 16px;
+  }
+
+  .kv-table td {
+    vertical-align: top;
+    padding: 1.5px 4px 1.5px 0;
+  }
+
+  .kv-label {
+    width: 105px;
+  }
+
+  .kv-sep {
+    width: 14px;
+  }
+
+  ol.legal-list, ul.legal-list {
+    margin: 4px 0 8px 0;
+    padding-left: 22px;
+  }
+
+  ol.legal-list > li {
+    margin-bottom: 4px;
+    text-align: justify;
+    padding-left: 4px;
+  }
+
+  ol.alpha-list {
+    list-style-type: lower-alpha;
+    margin: 4px 0 6px 0;
+    padding-left: 22px;
+  }
+
+  ol.alpha-list > li {
+    margin-bottom: 4px;
+    text-align: justify;
+    padding-left: 4px;
+  }
+
+  .section-label {
+    font-weight: 700;
+    margin: 8px 0 4px 0;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  .note-box {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 10.5pt;
+    text-align: justify;
+    break-inside: avoid;
+  }
+
+  .signature-section {
+    margin-top: 18px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .signature-date {
+    margin-bottom: 8px;
+  }
+
+  .signature-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: center;
+  }
+
+  .signature-table td {
+    width: 50%;
+    vertical-align: top;
+    padding: 0 12px;
+  }
+
+  .sig-space {
+    height: 62px;
+  }
+
+  .sig-name {
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .sig-title {
+    font-size: 10pt;
+  }
+
+  .doc-footer {
+    margin-top: 24px;
+    padding-top: 6px;
+    border-top: 1px solid #cbd5e1;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5pt;
+    color: #475569;
+  }
+
+  mark.hris-var {
+    background: #dbeafe;
+    color: #1e3a8a;
+    padding: 0 3px;
+    border-bottom: 1px solid #60a5fa;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="a4-page">
+    <div class="page-content">
+      <header class="letterhead">
+        <div class="letterhead-company">{{nama_perusahaan}}</div>
+        <div class="letterhead-meta">
+          {{alamat_kop_surat}}<br />
+          {{kontak_kop_surat}}
+        </div>
+      </header>
+      
+      <div class="doc-title">PERJANJIAN BERSAMA</div>
+      <div class="doc-subtitle">Tentang : Pembayaran Upah Tahun {{tahun_umk_sekarang}}</div>
+      <div class="doc-number">{{no_pb}}</div>
+
+      <p>Yang bertanda tangan di bawah ini :</p>
+      <p>
+        <strong>{{nama_perusahaan}}</strong>, berkedudukan di {{alamat_perusahaan_pb}},
+        dan dalam hal ini diwakili oleh {{nama_hrd}} selaku {{jabatan_hrd_pb}}.
+      </p>
+      <p>Selanjutnya disebut <strong>Pihak Pertama.</strong></p>
+
+      <table class="kv-table">
+        <tr><td class="kv-label">Nama</td><td class="kv-sep">:</td><td><strong>{{nama_karyawan}}</strong></td></tr>
+        {{#if nik_karyawan}}<tr><td class="kv-label">NIK</td><td class="kv-sep">:</td><td>{{nik_karyawan}}</td></tr>{{/if}}
+        <tr><td class="kv-label">Pekerjaan</td><td class="kv-sep">:</td><td>Karyawan {{nama_perusahaan_judul}}.</td></tr>
+        <tr><td class="kv-label">Jabatan</td><td class="kv-sep">:</td><td>{{jabatan}}</td></tr>
+        {{#if departemen}}<tr><td class="kv-label">Departemen</td><td class="kv-sep">:</td><td>{{departemen}}</td></tr>{{/if}}
+        <tr><td class="kv-label">Alamat</td><td class="kv-sep">:</td><td>{{alamat_karyawan}}</td></tr>
+      </table>
+
+      <p>
+        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}}
+        tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), Para Pihak telah mengadakan perundingan dengan kesepakatan
+        pembayaran Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}},
+        yang dituangkan dalam bentuk Perjanjian Bersama ( PB ) dengan kronologis permasalahan serta ketentuan – ketentuan sebagai berikut :
+      </p>
+
+      <ol class="legal-list">
+        <li>Bahwa Pihak Pertama adalah perusahaan yang bergerak dalam bidang {{bidang_usaha_pb}}, sedangkan Pihak Kedua adalah pekerja pada Pihak Pertama.</li>
+        <li>Bahwa hubungan kerja antara Pihak Pertama dengan Pihak Kedua telah berjalan secara harmonis dalam kemitraan kerja.</li>
+        <li>
+          Bahwa pada perkembangan selanjutnya, setelah Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}}
+          sebesar Rp {{umk_lalu}},- ( Terbilang : {{umk_lalu_terbilang}} ) menjadi Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan
+          tahun {{tahun_umk_sekarang}} sebesar Rp. {{umk_sekarang}},- ( Terbilang : {{umk_sekarang_terbilang}} ),
+          maka Pihak Pertama menyatakan dirinya tidak mampu untuk melaksanakan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}} tersebut.
+        </li>
+        <li>
+          Bahwa meskipun Pihak Pertama merasa tidak mampu melaksanakan ketentuan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}},
+          akan tetapi Pihak Pertama tetap membayar Upah kepada Pihak Kedua sesuai dengan Keputusan Gubernur Jawa Timur, Nomor : {{no_sk_gubernur}}
+          tentang Upah Minimum Kabupaten / Kota di Jawa Timur Tahun {{tahun_umk_sekarang}}, namun agar Pihak Pertama tetap bisa eksis menjalankan usahanya
+          dan Para Karyawan juga tetap mendapatkan pekerjaan, maka Para Pihak sepakat untuk melaksanakan pembayaran upah tersebut dengan cara :
+          <ol class="alpha-list">
+            <li>Secara tunai sebesar <strong>Rp {{gaji_tunai}},- ( Terbilang : {{gaji_tunai_terbilang}} )</strong> dalam setiap bulannya, dan</li>
+            <li>Kekurangannya sebesar <strong>Rp {{selisih_hutang}},- ( Terbilang : {{selisih_hutang_terbilang}} )</strong> disepakati menjadi hutang Pihak Pertama kepada Pihak Kedua.</li>
+          </ol>
+        </li>
+        <li>
+          Bahwa begitupun terhadap karyawan yang penggajiannya dengan sistem borongan, dan ternyata hasil borongan dalam 1 ( satu ) bulan,
+          tidak mencapai UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, maka Pihak Pertama akan memberikan tambahan upah sesuai dengan ketentuan
+          UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, akan tetapi tambahan upah tersebut juga merupakan hutang Pihak Pertama kepada Pihak Kedua.
+        </li>
+        <li>
+          Bahwa terhadap hutang Pihak Pertama kepada Pihak Kedua sebagaimana disebutkan pada angka ke – 4 dan / atau ke – 5 diatas,
+          Pihak Pertama dan Pihak Kedua sepakat menyelesaikan secara musyawarah dan penyelesaian dimaksud dituangkan dalam Perjanjian Bersama ( PB ) berikutnya.
+        </li>
+      </ol>
+
+      {{#if catatan_tambahan}}
+      <div class="note-box">
+        <strong>Catatan Tambahan:</strong> {{catatan_tambahan}}
+      </div>
+      {{/if}}
+
+      <p>
+        Demikian Perjanjian Bersama ( PB ) ini dibuat rangkap 2 ( dua ) dan ditandatangani oleh Para Pihak diatas kertas bermaterai cukup, yang masing – masing mempunyai kekuatan hukum sama.
+      </p>
+
+      <div class="signature-section">
+        <div class="signature-date">Kab. {{kota_ttd}}, {{tgl_mulai}}</div>
+        <table class="signature-table">
+          <tr>
+            <td>
+              <div><strong>PIHAK KEDUA,</strong></div>
+              <div><strong>KARYAWAN</strong></div>
+              <div class="sig-space"></div>
+              <div class="sig-name">{{nama_karyawan}}</div>
+            </td>
+            <td>
+              <div><strong>PIHAK PERTAMA,</strong></div>
+              <div><strong>{{nama_perusahaan}}</strong></div>
+              <div class="sig-space"></div>
+              <div class="sig-name">{{nama_hrd}}</div>
+              <div class="sig-title">{{jabatan_ttd_hrd}}</div>
+            </td>
+          </tr>
+        </table>
+      </div>
+    
+    </div>
+    <footer class="doc-footer">
+      <span>Perjanjian Bersama Pembayaran Upah · {{no_pb}}</span>
+      <span>Paraf _______</span>
+    </footer>
+  </div>
+</body>
+</html>
