@@ -153,6 +153,7 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
     bidang_usaha_pkwt: merged.companyIndustryPkwt || 'industri mebel',
     bidang_usaha_pb: merged.companyIndustryPb || 'industri furniture',
     nama_hrd: merged.hrName || 'Diana Anita Sari',
+    nama_hrd_ttd: String(merged.hrName || 'Diana Anita Sari').trim().toUpperCase(),
     jabatan_hrd_pkwt: merged.hrRolePkwt || 'Manager HRD & GA',
     jabatan_hrd_pb: merged.hrRolePb || 'HRD',
     jabatan_ttd_hrd: merged.hrSignatureTitle || 'Manager HR GA',

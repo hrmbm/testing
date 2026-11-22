@@ -449,8 +449,8 @@ textarea:focus-visible {
 .table-wrap, .recruitment-data-scroll, .ocr-map-table-wrap {
   position: relative;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
+  max-height: min(68vh, 660px);
+  overflow: auto;
   overscroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
@@ -466,7 +466,7 @@ textarea:focus-visible {
 .data-table thead th, table thead th {
   position: sticky;
   top: 0;
-  z-index: 9;
+  z-index: 12;
   padding: 12px 16px;
   text-align: left;
   background: #f5f3ee;
@@ -478,6 +478,20 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   user-select: none;
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: #ffffff;
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.data-table thead th:first-child {
+  z-index: 16;
+  background: #f5f3ee;
 }
 
 .data-table thead th::after, table thead th::after {
@@ -517,7 +531,8 @@ textarea:focus-visible {
   border-bottom: 0;
 }
 
-.data-table tbody tr:hover td {
+.data-table tbody tr:hover td,
+.data-table tbody tr:hover td:first-child {
   background: #faf8f4;
 }
 
@@ -873,39 +888,11 @@ textarea:focus-visible {
   border-radius: 0 0 var(--radius) var(--radius);
 }
 
-.stage2-candidate-panel .data-table th:nth-child(1),
-.stage2-candidate-panel .data-table td:nth-child(1) {
-  position: sticky;
-  left: 0;
+.stage2-candidate-panel .data-table th:first-child,
+.stage2-candidate-panel .data-table td:first-child {
   width: 176px;
   min-width: 176px;
   max-width: 176px;
-  background: #ffffff;
-  z-index: 10;
-  box-shadow: 1px 0 0 var(--line);
-}
-
-.stage2-candidate-panel .data-table th:nth-child(2),
-.stage2-candidate-panel .data-table td:nth-child(2) {
-  position: sticky;
-  left: 176px;
-  width: 168px;
-  min-width: 168px;
-  max-width: 168px;
-  background: #ffffff;
-  z-index: 10;
-  box-shadow: 1px 0 0 var(--line);
-}
-
-.stage2-candidate-panel .data-table thead th:nth-child(1),
-.stage2-candidate-panel .data-table thead th:nth-child(2) {
-  z-index: 14;
-  background: #f5f3ee;
-}
-
-.stage2-candidate-panel .data-table tbody tr:hover td:nth-child(1),
-.stage2-candidate-panel .data-table tbody tr:hover td:nth-child(2) {
-  background: #faf8f4;
 }
 
 .disc-assessment-table th,
@@ -2471,8 +2458,7 @@ body.candidate-page {
   .wizard-actions .btn, .candidate-actions .btn { min-height: 46px; }
   .disc-option { grid-template-columns: minmax(0, 1fr) 48px 48px; gap: 6px; }
   .disc-column-head { gap: 8px; }
-  .stage2-candidate-panel .data-table th:nth-child(1), .stage2-candidate-panel .data-table td:nth-child(1) { min-width: 152px; max-width: 152px; }
-  .stage2-candidate-panel .data-table th:nth-child(2), .stage2-candidate-panel .data-table td:nth-child(2) { left: 152px; min-width: 132px; max-width: 132px; }
+  .stage2-candidate-panel .data-table th:first-child, .stage2-candidate-panel .data-table td:first-child { min-width: 152px; max-width: 152px; }
   .modal-backdrop { padding: 12px; }
   .employee-modal-card { padding: 18px 16px; max-height: 94vh; }
   .page-actions { flex-wrap: wrap; width: 100%; justify-content: flex-start; }
@@ -2637,42 +2623,6 @@ body.candidate-page {
   gap: 18px;
 }
 
-.invited-kpis {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-@media (max-width: 720px) {
-  .invited-kpis {
-    grid-template-columns: 1fr;
-  }
-}
-
-.invited-kpi-card {
-  background: #ffffff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px 16px;
-}
-
-.invited-kpi-card small {
-  display: block;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-
-.invited-kpi-card b {
-  display: block;
-  margin-top: 4px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
 
 .cv-screening-panel .panel-head {
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);

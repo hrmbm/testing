@@ -843,5 +843,159 @@ test('buildDashboardAttentionItems routes PKWT items to contracts and non-PKWT i
   assert.ok(empPos > 0 && contractsPos > empPos, 'Contracts nav item must be placed below Employee Directory');
 });
 
+import {
+  formatContractCode,
+  computeNextDocSequence,
+  buildContractUpdateRequestPayload,
+  applyContractCancellationRollback
+} from '../assets/js/contract-logic.js';
+import {
+  LEAD_IMPORT_HEADERS,
+  LEAD_IMPORT_SAMPLE_ROW,
+  parseLeadImportRows,
+  CANDIDATE_IMPORT_HEADERS,
+  CANDIDATE_IMPORT_SAMPLE_ROW,
+  parseCandidateImportRows
+} from '../assets/js/workspace-logic.js';
 
+test('Signature block renders ALL CAPS {{nama_hrd_ttd}} only in signatures while body retains {{nama_hrd}} normal case', () => {
+  const masters = JSON.parse(fs.readFileSync('assets/contracts/company-masters.json', 'utf8'));
+  const mbmMaster = masters.find(m => m.id === 'comp-mbm');
 
+  const payload = buildAgreementPayload({
+    docSequence: '202',
+    signingDate: '2026-11-22',
+    durationMonths: 12,
+    hrName: 'Diana Anita Sari',
+    hrSignatureTitle: 'Manager HR GA',
+    employeeName: 'Budi Santoso',
+    employeePosition: 'Operator CNC',
+    employeeAddress: 'Pasuruan',
+    cashWageAmount: 4400000
+  }, mbmMaster);
+
+  for (const file of ['01-pkwt.html', '02-pb-pembayaran-upah.html', '03-pb-pembayaran-upah-lembur.html', '04-pb-penyelesaian-upah.html', '05-pb-penyelesaian-lembur.html']) {
+    const tpl = fs.readFileSync(`assets/contracts/${file}`, 'utf8');
+    assert.ok(tpl.includes('{{nama_hrd_ttd}}'), `${file} must use {{nama_hrd_ttd}} in signature block`);
+    assert.ok(tpl.includes('{{nama_hrd}}'), `${file} must keep {{nama_hrd}} in party description`);
+    const rendered = renderAgreementHtml(tpl, payload, mbmMaster);
+    assert.ok(rendered.includes('Diana Anita Sari'), `${file} must render normal-case Diana Anita Sari in party body`);
+    assert.ok(rendered.includes('DIANA ANITA SARI'), `${file} must render uppercase DIANA ANITA SARI in signature`);
+    assert.ok(rendered.includes('Manager HR GA'), `${file} must render Manager HR GA signature title`);
+  }
+});
+
+test('computeNextDocSequence auto-increments continuously across interviews, requests, history, and saved sequence', () => {
+  assert.equal(computeNextDocSequence({}), '001');
+  assert.equal(computeNextDocSequence({
+    interviews: [{ contract_number: '184/PKWT/XI/2026' }, { contract_number: '201/PKWT/XI/2026' }],
+    contractRequests: [{ docSequence: '202', status: 'pending' }],
+    contractHistory: [{ docSequence: '205', status: 'cancelled' }, { docSequence: '203', status: 'applied' }],
+    lastDocSequence: 204
+  }), '205');
+});
+
+test('buildContractUpdateRequestPayload and applyContractCancellationRollback cleanly restore previous employee & interview data', () => {
+  const emp = {
+    id: 'emp-1',
+    employee_no: 'ST 250112',
+    position: 'Operator CNC',
+    department: 'Produksi',
+    address: 'Pandaan',
+    employment_status: 'KONTRAK',
+    contract_start_date: '2025-11-28',
+    contract_end_date: '2026-11-27',
+    salary: 4400000
+  };
+  const intv = {
+    id: 'int-1',
+    contract_number: '088/PKWT/XI/2025',
+    contract_start_date: '2025-11-28',
+    contract_end_date: '2026-11-27',
+    contract_duration_months: 12,
+    salary: 4400000,
+    official_position: 'Operator CNC'
+  };
+
+  const req = buildContractUpdateRequestPayload({
+    record: { employeeId: 'emp-1', interviewId: 'int-1' },
+    config: { docSequence: '202', signingDate: '2026-11-28', durationMonths: 12, cashWageAmount: 5500000, employeeName: 'Hendra Wijaya', employeePosition: 'Senior CNC', employeeAddress: 'Gempol' },
+    payload: { docSequence: '202', signingDate: '2026-11-28', durationMonths: 12, endDate: '2027-11-27' },
+    currentEmployee: emp,
+    currentInterview: intv,
+    requestedBy: 'Diana Anita Sari'
+  });
+
+  assert.equal(req.status, 'pending');
+  assert.equal(req.contractNumber, formatContractCode('202', '2026-11-28', 'PKWT'));
+  assert.equal(req.previousSnapshot.employee.contract_end_date, '2026-11-27');
+  assert.equal(req.previousSnapshot.employee.salary, 4400000);
+
+  const modifiedEmp = { ...emp, position: 'Senior CNC', contract_start_date: '2026-11-28', contract_end_date: '2027-11-27', salary: 5500000 };
+  const modifiedIntv = { ...intv, contract_number: '202/PKWT/XI/2026', contract_end_date: '2027-11-27', salary: 5500000 };
+  const historyEntry = {
+    id: 'hist-1',
+    status: 'applied',
+    employeeId: 'emp-1',
+    interviewId: 'int-1',
+    previousSnapshot: req.previousSnapshot
+  };
+
+  const rollback = applyContractCancellationRollback(historyEntry, { employees: [modifiedEmp], interviews: [modifiedIntv] });
+  assert.equal(rollback.updatedEmployees[0].position, 'Operator CNC');
+  assert.equal(rollback.updatedEmployees[0].contract_end_date, '2026-11-27');
+  assert.equal(rollback.updatedEmployees[0].salary, 4400000);
+  assert.equal(rollback.updatedInterviews[0].contract_number, '088/PKWT/XI/2025');
+  assert.throws(() => applyContractCancellationRollback({ ...historyEntry, status: 'cancelled' }), /already been cancelled/);
+});
+
+test('parseLeadImportRows and parseCandidateImportRows validate templates and parse spreadsheet payloads accurately', () => {
+  assert.equal(LEAD_IMPORT_HEADERS.length, 5);
+  const leadParsed = parseLeadImportRows([
+    LEAD_IMPORT_SAMPLE_ROW,
+    { 'Applicant Name': '', Position: 'CNC' }
+  ]);
+  assert.equal(leadParsed.rows.length, 1);
+  assert.equal(leadParsed.errors.length, 1);
+  assert.equal(leadParsed.rows[0].full_name, 'Rizky Pratama');
+  assert.equal(leadParsed.rows[0].recommendation, 'Recommended');
+
+  assert.equal(CANDIDATE_IMPORT_HEADERS.length, 14);
+  const candParsed = parseCandidateImportRows([
+    CANDIDATE_IMPORT_SAMPLE_ROW,
+    { 'Full Name': 'Invalid NIK', 'NIK (16 Digits)': '1234', Position: 'QC' }
+  ]);
+  assert.equal(candParsed.rows.length, 1);
+  assert.equal(candParsed.errors.length, 1);
+  assert.equal(candParsed.rows[0].nik, '3514122006840004');
+  assert.equal(candParsed.rows[0].application_data.gender, 'L');
+  assert.equal(candParsed.rows[0].application_data.tanggal_lahir, '1994-06-20');
+});
+
+test('UI & CSS enforce removed KPIs/Remarks/guides, Root Admin submenus, and 1st-column-only sticky freeze', () => {
+  const indexHtml = fs.readFileSync('index.html', 'utf8');
+  const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
+  const contractModalJs = fs.readFileSync('assets/js/contract-modal.js', 'utf8');
+  const appCss = fs.readFileSync('assets/css/app.css', 'utf8');
+
+  assert.ok(indexHtml.includes('data-view="contractSettings"'), 'Contract Settings submenu must exist');
+  assert.ok(indexHtml.includes('data-view="systemImport"'), 'Data Import submenu must exist');
+
+  assert.ok(!adminJs.includes('<th>REMARKS</th>'), 'Lead Register Remarks column must be removed');
+  assert.ok(!adminJs.includes('data-stage1-rec'), 'Lead Register remarks select must be removed');
+  assert.ok(!adminJs.includes('invited-kpis'), 'Invited KPI cards must be removed');
+  assert.ok(!adminJs.includes('contracts-kpi-strip'), 'Contracts KPI cards must be removed');
+  assert.ok(!adminJs.includes('attention-head-sub'), 'Needs Attention explanatory subtitle must be removed');
+  assert.ok(!adminJs.includes('window.confirm'), 'Native window.confirm must not be used');
+
+  assert.ok(!contractModalJs.includes('pkwt-umk-banner'), 'Contract modal UMK guide banner must be removed');
+  assert.ok(!contractModalJs.includes('Wage &amp; UMK Compliance Rule'), 'Contract modal Section 3 must be removed');
+  assert.ok(!contractModalJs.includes('name="hrName"'), 'Contract modal HR Signer Name input must be removed');
+  assert.ok(!contractModalJs.includes('name="endDate"'), 'Contract modal Contract End Date input must be removed');
+  assert.ok(!contractModalJs.includes('pkwt-print-frame'), 'Hidden iframe print must be replaced by DOM print stage');
+  assert.ok(contractModalJs.includes('pkwt-print-stage'), 'In-page DOM print stage must exist');
+
+  assert.match(appCss, /\.data-table th:first-child,\s*\.data-table td:first-child/, 'Global first-column freeze rule must exist');
+  assert.doesNotMatch(appCss, /\.data-table[^\n]*nth-child\(2\)/, 'No .data-table second column must be frozen');
+  assert.doesNotMatch(appCss, /nth-child\(2\)[^{]*\{[^}]*(position\s*:\s*sticky|left\s*:)/, 'Second column must NOT have sticky/left freeze');
+});

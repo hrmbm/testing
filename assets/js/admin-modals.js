@@ -70,7 +70,6 @@ export function openDuplicateCandidateModal({ applicant, positions = [], onSave 
           <label>New Target Position<select class="select" name="new_position" required></select></label>
           <label class="employee-notes">Or Enter Custom Position (Optional if not listed)<input class="input" name="custom_position" maxlength="100" placeholder="Leave blank when choosing from dropdown"></label>
         </div>
-        <p class="subtle" style="margin:10px 0 0;font-size:12.5px">All existing progress (DISC assessment, interview records, and invitation link) will be carried over to the duplicated position.</p>
         <div id="dup-modal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
           <button type="button" class="btn btn-secondary" id="dup-modal-cancel">Cancel</button>
@@ -531,9 +530,8 @@ export function openInvitedCandidateModal({
           <label class="employee-notes">Status
             <select class="select" name="status" required></select>
           </label>
-          <label id="inv-link-wrap" class="employee-notes hidden">Link to Candidate List Record (Zero Duplicate)
+          <label id="inv-link-wrap" class="employee-notes hidden">Link to Candidate List Record
             <select class="select" name="linked_applicant_id"></select>
-            <small class="subtle" style="display:block;margin-top:4px;font-size:12px">When changed to Responded, link the corresponding candidate from Candidate List so they appear once.</small>
           </label>
           <label class="employee-notes">Notes (Optional)
             <input class="input" type="text" name="notes" maxlength="300" placeholder="Optional invitation note…">
@@ -1200,6 +1198,58 @@ export function openPinRevealPrompt({ label = '', onUnlocked }) {
 
   modal.classList.remove('hidden');
   pwdInput.focus();
+}
+
+export function openConfirmDialog({
+  title = 'Confirm Action',
+  message = 'Proceed with this action?',
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  danger = false
+} = {}) {
+  return new Promise(resolve => {
+    let modal = $('#workspace-confirm-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'workspace-confirm-modal';
+      modal.className = 'modal-backdrop hidden';
+      modal.style.zIndex = '1450';
+      modal.innerHTML = `<section class="employee-modal-card" style="width:min(440px,100%)" role="dialog" aria-modal="true" aria-labelledby="ws-confirm-title">
+        <div class="employee-modal-head">
+          <div><small>CONFIRMATION</small><h2 id="ws-confirm-title"></h2></div>
+          <button type="button" class="modal-close" id="ws-confirm-close" aria-label="Close">×</button>
+        </div>
+        <p id="ws-confirm-message" style="margin:4px 0 18px;font-size:13.5px;color:var(--ink-2);line-height:1.5"></p>
+        <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary" id="ws-confirm-cancel"></button>
+          <button type="button" class="btn btn-primary" id="ws-confirm-ok"></button>
+        </div>
+      </section>`;
+      document.body.append(modal);
+    }
+    const titleEl = $('#ws-confirm-title', modal);
+    const msgEl = $('#ws-confirm-message', modal);
+    const okBtn = $('#ws-confirm-ok', modal);
+    const cancelBtn = $('#ws-confirm-cancel', modal);
+    const closeBtn = $('#ws-confirm-close', modal);
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    cancelBtn.textContent = cancelLabel;
+    okBtn.textContent = confirmLabel;
+    okBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+
+    const finish = result => {
+      modal.classList.add('hidden');
+      resolve(result);
+    };
+    okBtn.onclick = () => finish(true);
+    cancelBtn.onclick = () => finish(false);
+    closeBtn.onclick = () => finish(false);
+
+    modal.classList.remove('hidden');
+    cancelBtn.focus();
+  });
 }
 
 export { maskPin };

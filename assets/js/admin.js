@@ -10,7 +10,6 @@ import {
   EMPLOYEE_UI_HEADERS,
   INTERVIEW_STAGES,
   INTERVIEW_STAGE_LABELS,
-  LEAD_RECOMMENDATION_OPTIONS,
   normalizeInterviewDecision,
   normalizeLeadRecommendation,
   normalizeLoginIdentifier,
@@ -31,7 +30,13 @@ import {
   formatEmployeeExportRow,
   formatDmyDash,
   isRootAdminAccount,
-  maskPin
+  maskPin,
+  LEAD_IMPORT_HEADERS,
+  LEAD_IMPORT_SAMPLE_ROW,
+  parseLeadImportRows,
+  CANDIDATE_IMPORT_HEADERS,
+  CANDIDATE_IMPORT_SAMPLE_ROW,
+  parseCandidateImportRows
 } from './workspace-logic.js?v=20261121-hrga-workspace-15';
 import {
   bindSafeModalClose,
@@ -42,16 +47,26 @@ import {
   openFullEmployeeModal,
   openEmployeeUploadModal,
   openUserModal,
-  openPinRevealPrompt
+  openPinRevealPrompt,
+  openConfirmDialog
 } from './admin-modals.js?v=20261121-hrga-workspace-15';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
   buildDashboardAttentionItems,
   determineRequiredContractDocuments,
-  parseNumericCurrency
+  parseNumericCurrency,
+  computeNextDocSequence,
+  buildContractUpdateRequestPayload,
+  applyContractCancellationRollback,
+  formatContractCode
 } from './contract-logic.js?v=20261121-hrga-workspace-15';
-import { openPkwtConfigModal } from './contract-modal.js?v=20261121-hrga-workspace-15';
+import {
+  openPkwtConfigModal,
+  openPostPrintEmployeeUpdateModal,
+  readSavedContractSettings,
+  writeSavedContractSettings
+} from './contract-modal.js?v=20261121-hrga-workspace-15';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -66,6 +81,10 @@ let interviews = [];
 let invitedCandidates = [];
 let cvScreenings = [];
 let portalUsers = [];
+let contractSettings = readSavedContractSettings();
+let contractRequests = [];
+let contractHistory = [];
+let contractTablesMissing = false;
 let interviewsTableMissing = false;
 let invitedTableMissing = false;
 let cvScreeningsTableMissing = false;
@@ -101,6 +120,9 @@ const DATA_CACHE_TTL_MS = 120000;
 const SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
 const SIDEBAR_STATE_KEY = 'hrga_sidebar_collapse_v1';
 const SESSION_PROFILE_KEY = 'hrga_session_profile_v1';
+const DEMO_CONTRACT_REQUESTS_KEY = 'hrga_contract_requests_demo_v1';
+const DEMO_CONTRACT_HISTORY_KEY = 'hrga_contract_history_demo_v1';
+const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'systemImport']);
 
 const TITLES = {
   dashboard: 'Dashboard',
@@ -115,6 +137,8 @@ const TITLES = {
   print: 'Application Print',
   settings: 'Recruitment Settings',
   userManagement: 'User Management',
+  contractSettings: 'Contract Settings',
+  systemImport: 'Data Import',
   attendanceSuite: 'Attendance Suite',
   attendanceCalendar: 'Calendar Settings',
   attendanceStaffHoliday: 'Conditional Holiday Schedule',
@@ -328,6 +352,15 @@ function seedDemoWorkspaceData() {
       notes: 'Above UMK sample case'
     }
   ];
+  contractSettings = readSavedContractSettings();
+  try {
+    const reqRaw = JSON.parse(localStorage.getItem(DEMO_CONTRACT_REQUESTS_KEY) || '[]');
+    contractRequests = Array.isArray(reqRaw) ? reqRaw : [];
+  } catch { contractRequests = []; }
+  try {
+    const histRaw = JSON.parse(localStorage.getItem(DEMO_CONTRACT_HISTORY_KEY) || '[]');
+    contractHistory = Array.isArray(histRaw) ? histRaw : [];
+  } catch { contractHistory = []; }
   lastDataFetchedAt = Date.now();
 }
 
@@ -648,19 +681,22 @@ async function fetchAndCacheFreshSnapshot() {
     invitedCandidates = invRows;
     cvScreenings = scrRows;
     lastDataFetchedAt = Date.now();
-    await cacheSet('workspace_snapshot', {
-      applicants,
-      employees,
-      stage1Leads,
-      interviews,
-      invitedCandidates,
-      cvScreenings,
-      interviewsTableMissing,
-      invitedTableMissing,
-      cvScreeningsTableMissing,
-      stage1HasRecommendationCol,
-      employeesExtendedMissing
-    });
+    await Promise.all([
+      cacheSet('workspace_snapshot', {
+        applicants,
+        employees,
+        stage1Leads,
+        interviews,
+        invitedCandidates,
+        cvScreenings,
+        interviewsTableMissing,
+        invitedTableMissing,
+        cvScreeningsTableMissing,
+        stage1HasRecommendationCol,
+        employeesExtendedMissing
+      }),
+      loadContractWorkspaceState(true)
+    ]);
   })().finally(() => {
     inflightRefreshPromise = null;
   });
@@ -702,6 +738,7 @@ async function refreshData(force = false) {
   if (!force && !lastDataFetchedAt) {
     const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
     if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
+      await loadContractWorkspaceState(false);
       if (cached.stale || (Date.now() - cached.savedAt) >= DATA_CACHE_TTL_MS) {
         triggerBackgroundRevalidate();
       }
@@ -746,7 +783,9 @@ function renderDashboard() {
     interviews,
     applicants,
     stage1Leads,
-    invitedCandidates
+    invitedCandidates,
+    contractRequests,
+    isRootAdmin: isRootAdminAccount(currentAdminProfile)
   });
   const totalAttentionCount = attentionItems.reduce((sum, item) => sum + item.count, 0);
   const attentionHtml = attentionItems.length
@@ -798,10 +837,7 @@ function renderDashboard() {
     </section>
     <section class="panel dashboard-attention-panel" aria-label="Needs Attention">
       <div class="panel-head">
-        <div class="attention-head-copy">
-          <h3>Needs Attention</h3>
-          <span class="attention-head-sub">Actionable contract renewals, PKWT agreements, and pending recruitment tasks</span>
-        </div>
+        <h3>Needs Attention</h3>
         <span class="status-pill ${totalAttentionCount > 0 ? 'gold' : 'green'}">${totalAttentionCount} item${totalAttentionCount === 1 ? '' : 's'}</span>
       </div>
       ${attentionHtml}
@@ -835,9 +871,8 @@ function renderDashboard() {
  * LEAD REGISTER (stage1) — Connected live status synced with Candidate List
  * ============================================================================ */
 function stage1RowsHtml(rows) {
-  if (!rows.length) return emptyRow(7, 'No lead records yet');
+  if (!rows.length) return emptyRow(6, 'No lead records yet');
   return rows.map(row => {
-    const rec = normalizeLeadRecommendation(row.recommendation);
     const unified = resolveLeadUnifiedStatus(row, {
       applicants,
       interviews,
@@ -850,11 +885,6 @@ function stage1RowsHtml(rows) {
       <td>${esc(row.source || '-')}</td>
       <td>${esc(row.whatsapp || '-')}</td>
       <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '-'}</td>
-      <td>
-        <select class="select" style="min-width:170px" data-stage1-rec="${esc(row.id)}" aria-label="Recommendation remarks for ${esc(row.full_name)}">
-          ${LEAD_RECOMMENDATION_OPTIONS.map(opt => `<option value="${esc(opt)}" ${rec === opt ? 'selected' : ''}>${esc(opt)}</option>`).join('')}
-        </select>
-      </td>
       <td data-stage1-status="${esc(row.id)}"><span class="status-pill ${unified.tone}">${esc(unified.label)}</span></td>
     </tr>`;
   }).join('');
@@ -865,7 +895,7 @@ function renderStage1() {
   const paint = query => {
     const filtered = rows.filter(row => {
       const unified = resolveLeadUnifiedStatus(row, { applicants, interviews, employees, invitedCandidates });
-      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${row.recommendation || ''} ${unified.label}`.toLowerCase().includes(query);
+      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${unified.label}`.toLowerCase().includes(query);
     });
     $('#stage1-rows').innerHTML = stage1RowsHtml(filtered);
     bindStage1Actions(rows);
@@ -873,7 +903,7 @@ function renderStage1() {
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
     `<section class="panel table-panel">${tableToolbar('Search name / position / source / WhatsApp / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>CV</th><th>REMARKS</th><th>STATUS</th></tr></thead>
+        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>CV</th><th>STATUS</th></tr></thead>
         <tbody id="stage1-rows">${stage1RowsHtml(rows)}</tbody>
       </table></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
@@ -882,44 +912,6 @@ function renderStage1() {
 }
 
 function bindStage1Actions(rows) {
-  $$('[data-stage1-rec]').forEach(select => select.addEventListener('change', async () => {
-    const id = select.dataset.stage1Rec;
-    const value = normalizeLeadRecommendation(select.value);
-    const legacyRec = value === 'Recommended' ? 'Direkomendasikan' : value === 'Not Recommended' ? 'Tidak Direkomendasikan' : 'Belum Ditentukan';
-    const nextStatus = value === 'Recommended' ? 'invited' : value === 'Not Recommended' ? 'rejected' : 'reviewed';
-    select.disabled = true;
-    try {
-      const payload = stage1HasRecommendationCol
-        ? { recommendation: value, status: nextStatus, updated_at: new Date().toISOString() }
-        : { status: nextStatus, updated_at: new Date().toISOString() };
-      let { error } = await supabase.from('candidate_stage1_applications').update(payload).eq('id', id);
-      if (error && stage1HasRecommendationCol && String(error.message || '').toLowerCase().includes('check')) {
-        ({ error } = await supabase.from('candidate_stage1_applications').update({
-          recommendation: legacyRec,
-          status: nextStatus,
-          updated_at: new Date().toISOString()
-        }).eq('id', id));
-      }
-      if (error) throw error;
-      const target = stage1Leads.find(item => item.id === id);
-      if (target) {
-        target.recommendation = value;
-        target.status = nextStatus;
-        const statusCell = $(`[data-stage1-status="${CSS.escape(id)}"]`);
-        if (statusCell) {
-          const unified = resolveLeadUnifiedStatus(target, { applicants, interviews, employees, invitedCandidates });
-          statusCell.innerHTML = `<span class="status-pill ${unified.tone}">${esc(unified.label)}</span>`;
-        }
-      }
-      invalidateDataCache();
-      say(`Remarks updated: ${value}.`);
-    } catch (err) {
-      say(err.message || 'Failed to update remarks.');
-    } finally {
-      select.disabled = false;
-    }
-  }));
-
   $$('[data-stage1-cv]').forEach(button => button.addEventListener('click', () => {
     const record = rows.find(item => item.id === button.dataset.stage1Cv);
     if (!record?.cv_path) { say('CV file path not found.'); return; }
@@ -1325,7 +1317,12 @@ function bindStage2CandidateActions() {
       say('Candidate is already linked to Employee Directory. Remove or update the employee record first.');
       return;
     }
-    const confirmed = window.confirm(`Delete candidate ${applicant.full_name} (NIK ${applicant.nik})?`);
+    const confirmed = await openConfirmDialog({
+      title: 'Delete Candidate',
+      message: `Delete candidate ${applicant.full_name} (NIK ${applicant.nik})?`,
+      confirmLabel: 'Delete',
+      danger: true
+    });
     if (!confirmed) return;
     button.disabled = true;
     button.textContent = 'Deleting…';
@@ -1410,8 +1407,6 @@ function renderInvitedView() {
     applicants,
     stage1Leads
   });
-  const respondedCount = allRows.filter(r => r.status === 'Responded').length;
-  const noResponseCount = allRows.filter(r => r.status === 'No Response').length;
   const screeningSummary = aggregateCvScreeningBySource(cvScreenings);
   const linkedApplicantIds = new Set(invitedCandidates.map(i => i.linked_applicant_id).filter(Boolean));
 
@@ -1440,12 +1435,6 @@ function renderInvitedView() {
     '<button type="button" class="btn btn-primary" id="add-invited-candidate">+ Add to List</button>'
   ) + migrationBanner + `
     <div class="invited-stack">
-      <div class="invited-kpis">
-        <article class="invited-kpi-card"><small>Total Recorded</small><b>${allRows.length}</b></article>
-        <article class="invited-kpi-card"><small>Responded</small><b>${respondedCount}</b></article>
-        <article class="invited-kpi-card"><small>No Response</small><b>${noResponseCount}</b></article>
-      </div>
-
       <section class="panel table-panel">
         ${tableToolbar('Search date / name / position / source / status…', 'Invited Candidates')}
         <div class="table-wrap">
@@ -1520,7 +1509,13 @@ function renderInvitedView() {
     $$('[data-inv-delete]').forEach(btn => btn.addEventListener('click', async () => {
       const manualId = btn.dataset.invDelete;
       const target = invitedCandidates.find(i => i.id === manualId);
-      if (!window.confirm(`Delete invited record for ${target?.candidate_name || 'this candidate'}?`)) return;
+      const ok = await openConfirmDialog({
+        title: 'Delete Invited Candidate',
+        message: `Delete invited record for ${target?.candidate_name || 'this candidate'}?`,
+        confirmLabel: 'Delete',
+        danger: true
+      });
+      if (!ok) return;
       try {
         const { error } = await supabase.from('invited_candidates').delete().eq('id', manualId);
         if (error) throw error;
@@ -1590,7 +1585,13 @@ function renderInvitedView() {
   }));
   $$('[data-scr-delete]').forEach(btn => btn.addEventListener('click', async () => {
     const id = btn.dataset.scrDelete;
-    if (!window.confirm('Remove this CV screening entry?')) return;
+    const ok = await openConfirmDialog({
+      title: 'Delete CV Screening Entry',
+      message: 'Remove this CV screening entry?',
+      confirmLabel: 'Delete',
+      danger: true
+    });
+    if (!ok) return;
     try {
       const { error } = await supabase.from('cv_screenings').delete().eq('id', id);
       if (error) throw error;
@@ -2182,15 +2183,477 @@ async function exportEmployees() {
 }
 
 /* ============================================================================
- * CONTRACTS & PKWT MANAGEMENT (Expiring 2-Month Queue + Final Interview Passed)
+ * CONTRACTS, PKWT APPROVAL WORKFLOW, SYSTEM CONTRACT SETTINGS & BULK IMPORT
  * ============================================================================ */
-function getActiveUmkThreshold() {
+function readLocalJson(key, fallback) {
   try {
-    const saved = JSON.parse(localStorage.getItem('hrga_contract_settings_v1') || 'null');
-    const umk = parseNumericCurrency(saved?.currUmkAmount);
-    if (umk > 0) return umk;
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {}
-  return DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
+}
+
+function mapDbRequestToLocal(row = {}) {
+  return {
+    id: row.id,
+    status: row.status || 'pending',
+    requestedAt: row.created_at || row.requested_at || new Date().toISOString(),
+    requestedBy: row.requested_by_name || row.requestedBy || 'HR Admin',
+    reviewedAt: row.reviewed_at || row.reviewedAt || null,
+    reviewedBy: row.reviewed_by_name || row.reviewedBy || null,
+    employeeId: row.employee_id ?? row.employeeId ?? null,
+    applicantId: row.applicant_id ?? row.applicantId ?? null,
+    interviewId: row.interview_id ?? row.interviewId ?? null,
+    fullName: row.full_name ?? row.fullName ?? '',
+    employeeNik: row.employee_nik ?? row.employeeNik ?? '',
+    ktpNik: row.ktp_nik ?? row.ktpNik ?? '',
+    department: row.department ?? '',
+    position: row.position ?? '',
+    address: row.address ?? '',
+    phone: row.phone ?? '',
+    employmentStatus: row.employment_status ?? row.employmentStatus ?? 'KONTRAK',
+    contractStartDate: row.contract_start_date ?? row.contractStartDate ?? '',
+    contractEndDate: row.contract_end_date ?? row.contractEndDate ?? '',
+    durationMonths: Number(row.duration_months ?? row.durationMonths ?? 12) || 12,
+    docSequence: row.doc_sequence ?? row.docSequence ?? '',
+    contractNumber: row.contract_number ?? row.contractNumber ?? '',
+    salary: Number(row.salary ?? 0) || 0,
+    previousSnapshot: row.previous_snapshot ?? row.previousSnapshot ?? null
+  };
+}
+
+function mapLocalRequestToDb(req) {
+  return {
+    status: req.status || 'pending',
+    requested_by: currentUserId || null,
+    requested_by_name: req.requestedBy || 'HR Admin',
+    reviewed_by_name: req.reviewedBy || null,
+    reviewed_at: req.reviewedAt || null,
+    employee_id: req.employeeId || null,
+    applicant_id: req.applicantId || null,
+    interview_id: req.interviewId || null,
+    full_name: req.fullName || '',
+    employee_nik: req.employeeNik || '',
+    ktp_nik: req.ktpNik || '',
+    department: req.department || '',
+    position: req.position || '',
+    address: req.address || '',
+    phone: req.phone || '',
+    employment_status: req.employmentStatus || 'KONTRAK',
+    contract_start_date: req.contractStartDate || null,
+    contract_end_date: req.contractEndDate || null,
+    duration_months: req.durationMonths || 12,
+    doc_sequence: req.docSequence || '',
+    contract_number: req.contractNumber || '',
+    salary: req.salary || 0,
+    previous_snapshot: req.previousSnapshot || {}
+  };
+}
+
+function mapDbHistoryToLocal(row = {}) {
+  return {
+    id: row.id,
+    requestId: row.request_id ?? row.requestId ?? null,
+    employeeId: row.employee_id ?? row.employeeId ?? null,
+    createdEmployeeId: row.created_employee_id ?? row.createdEmployeeId ?? null,
+    applicantId: row.applicant_id ?? row.applicantId ?? null,
+    interviewId: row.interview_id ?? row.interviewId ?? null,
+    fullName: row.full_name ?? row.fullName ?? '',
+    employeeNik: row.employee_nik ?? row.employeeNik ?? '',
+    position: row.position ?? '',
+    contractNumber: row.contract_number ?? row.contractNumber ?? '',
+    docSequence: row.doc_sequence ?? row.docSequence ?? '',
+    contractStartDate: row.contract_start_date ?? row.contractStartDate ?? '',
+    contractEndDate: row.contract_end_date ?? row.contractEndDate ?? '',
+    salary: Number(row.salary ?? 0) || 0,
+    status: row.status || 'applied',
+    previousSnapshot: row.previous_snapshot ?? row.previousSnapshot ?? {},
+    appliedBy: row.applied_by_name ?? row.appliedBy ?? 'Administrator',
+    appliedAt: row.created_at ?? row.appliedAt ?? new Date().toISOString(),
+    cancelledBy: row.cancelled_by_name ?? row.cancelledBy ?? null,
+    cancelledAt: row.cancelled_at ?? row.cancelledAt ?? null
+  };
+}
+
+async function loadContractWorkspaceState(force = false) {
+  if (isDemoMode || !supabase) {
+    contractSettings = readSavedContractSettings();
+    const storedReq = readLocalJson(DEMO_CONTRACT_REQUESTS_KEY, []);
+    const storedHist = readLocalJson(DEMO_CONTRACT_HISTORY_KEY, []);
+    if (Array.isArray(storedReq)) contractRequests = storedReq;
+    if (Array.isArray(storedHist)) contractHistory = storedHist;
+    return;
+  }
+  if (!force && contractSettings && (contractRequests.length || contractHistory.length)) return;
+  try {
+    const [settingsRes, reqSettingRes, histSettingRes, reqTableRes, histTableRes] = await Promise.all([
+      supabase.from('portal_settings').select('value').eq('key', 'contract_settings').maybeSingle(),
+      supabase.from('portal_settings').select('value').eq('key', 'contract_update_requests').maybeSingle(),
+      supabase.from('portal_settings').select('value').eq('key', 'contract_history').maybeSingle(),
+      supabase.from('contract_update_requests').select('*').order('created_at', { ascending: false }).limit(200),
+      supabase.from('contract_history').select('*').order('created_at', { ascending: false }).limit(200)
+    ]);
+
+    if (settingsRes?.data?.value && typeof settingsRes.data.value === 'object') {
+      contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...settingsRes.data.value };
+      writeSavedContractSettings(contractSettings);
+    } else {
+      contractSettings = readSavedContractSettings();
+    }
+
+    if (reqTableRes.error || histTableRes.error) {
+      contractTablesMissing = true;
+      contractRequests = Array.isArray(reqSettingRes?.data?.value) ? reqSettingRes.data.value : [];
+      contractHistory = Array.isArray(histSettingRes?.data?.value) ? histSettingRes.data.value : [];
+    } else {
+      contractTablesMissing = false;
+      contractRequests = (reqTableRes.data || []).map(mapDbRequestToLocal);
+      contractHistory = (histTableRes.data || []).map(mapDbHistoryToLocal);
+    }
+  } catch {
+    contractSettings = readSavedContractSettings();
+  }
+}
+
+async function saveContractSettingsState(nextSettings) {
+  contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...contractSettings, ...nextSettings };
+  writeSavedContractSettings(contractSettings);
+  if (isDemoMode || !supabase) return;
+  const { error } = await supabase.from('portal_settings').upsert({
+    key: 'contract_settings',
+    value: contractSettings,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'key' });
+  if (error) throw error;
+}
+
+async function saveContractRequestsFallback() {
+  if (isDemoMode || !supabase) {
+    writeLocalJson(DEMO_CONTRACT_REQUESTS_KEY, contractRequests);
+    return;
+  }
+  const { error } = await supabase.from('portal_settings').upsert({
+    key: 'contract_update_requests',
+    value: contractRequests,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'key' });
+  if (error) throw error;
+}
+
+async function saveContractHistoryFallback() {
+  if (isDemoMode || !supabase) {
+    writeLocalJson(DEMO_CONTRACT_HISTORY_KEY, contractHistory);
+    return;
+  }
+  const { error } = await supabase.from('portal_settings').upsert({
+    key: 'contract_history',
+    value: contractHistory,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'key' });
+  if (error) throw error;
+}
+
+async function submitContractUpdateRequest(req) {
+  if (isDemoMode || !supabase || contractTablesMissing) {
+    contractRequests = [req, ...contractRequests.filter(r => r.id !== req.id)];
+    await saveContractRequestsFallback();
+    return req;
+  }
+  const { data, error } = await supabase.from('contract_update_requests')
+    .insert(mapLocalRequestToDb(req))
+    .select('*')
+    .single();
+  if (error) {
+    if (isMissingSchemaError(error)) {
+      contractTablesMissing = true;
+      contractRequests = [req, ...contractRequests];
+      await saveContractRequestsFallback();
+      return req;
+    }
+    throw error;
+  }
+  const saved = mapDbRequestToLocal(data);
+  contractRequests = [saved, ...contractRequests.filter(r => r.id !== saved.id)];
+  return saved;
+}
+
+async function approveContractRequest(requestId) {
+  if (!isRootAdminAccount(currentAdminProfile)) {
+    throw new Error('Only Administrator / Root Admin can approve employee contract updates.');
+  }
+  const req = contractRequests.find(r => r.id === requestId);
+  if (!req) throw new Error('Update request not found.');
+  if (req.status !== 'pending') throw new Error('This update request has already been processed.');
+
+  const nowIso = new Date().toISOString();
+  const baseNotes = req.contractNumber ? `Contract No. ${req.contractNumber}` : '';
+  const empFields = {
+    applicant_id: req.applicantId || null,
+    employee_no: req.employeeNik,
+    full_name: req.fullName,
+    department: req.department || '',
+    position: req.position || '',
+    employment_status: req.employmentStatus || 'KONTRAK',
+    contract_start_date: req.contractStartDate || null,
+    contract_end_date: req.contractEndDate || null,
+    address: req.address || '',
+    ktp_nik: req.ktpNik || '',
+    phone: req.phone || '',
+    salary: req.salary || 0,
+    updated_at: nowIso
+  };
+
+  let targetEmployeeId = req.employeeId || null;
+  let createdEmployeeId = null;
+
+  if (isDemoMode || !supabase) {
+    if (targetEmployeeId) {
+      const idx = employees.findIndex(e => e.id === targetEmployeeId);
+      if (idx >= 0) employees[idx] = { ...employees[idx], ...empFields };
+    } else {
+      const byNikIdx = employees.findIndex(e =>
+        String(e.employee_no || '').trim().toUpperCase() === String(req.employeeNik || '').trim().toUpperCase()
+      );
+      if (byNikIdx >= 0) {
+        targetEmployeeId = employees[byNikIdx].id;
+        employees[byNikIdx] = { ...employees[byNikIdx], ...empFields };
+      } else {
+        targetEmployeeId = `emp-demo-${Date.now()}`;
+        createdEmployeeId = targetEmployeeId;
+        employees.unshift({
+          id: targetEmployeeId,
+          join_date: req.contractStartDate || nowIso.slice(0, 10),
+          notes: baseNotes,
+          ...empFields
+        });
+      }
+    }
+    if (req.interviewId) {
+      const iIdx = interviews.findIndex(i => i.id === req.interviewId);
+      if (iIdx >= 0) {
+        interviews[iIdx] = {
+          ...interviews[iIdx],
+          contract_number: req.contractNumber,
+          contract_start_date: req.contractStartDate,
+          contract_end_date: req.contractEndDate,
+          contract_duration_months: req.durationMonths,
+          salary: req.salary,
+          official_position: req.position,
+          assigned_nik: req.employeeNik
+        };
+      }
+    }
+    if (req.applicantId) {
+      const aIdx = applicants.findIndex(a => a.id === req.applicantId);
+      if (aIdx >= 0) applicants[aIdx] = { ...applicants[aIdx], stage: 'hired' };
+    }
+  } else {
+    if (targetEmployeeId) {
+      const { error } = await supabase.from('employees').update(empFields).eq('id', targetEmployeeId);
+      if (error) throw error;
+    } else {
+      const existingByNik = employees.find(e =>
+        String(e.employee_no || '').trim().toUpperCase() === String(req.employeeNik || '').trim().toUpperCase()
+      );
+      const upsertBody = {
+        ...empFields,
+        join_date: existingByNik?.join_date || req.contractStartDate || nowIso.slice(0, 10),
+        notes: existingByNik?.notes || baseNotes
+      };
+      const { data: upserted, error } = await supabase.from('employees')
+        .upsert(upsertBody, { onConflict: 'employee_no' })
+        .select('id')
+        .single();
+      if (error) throw error;
+      targetEmployeeId = upserted?.id || existingByNik?.id || null;
+      if (!existingByNik && targetEmployeeId) createdEmployeeId = targetEmployeeId;
+    }
+    if (req.interviewId) {
+      await supabase.from('candidate_interviews').update({
+        contract_number: req.contractNumber,
+        contract_start_date: req.contractStartDate,
+        contract_end_date: req.contractEndDate,
+        contract_duration_months: req.durationMonths,
+        salary: req.salary,
+        official_position: req.position,
+        assigned_nik: req.employeeNik,
+        updated_at: nowIso
+      }).eq('id', req.interviewId);
+    }
+    if (req.applicantId) {
+      await supabase.from('applicants')
+        .update({ stage: 'hired', updated_at: nowIso })
+        .eq('id', req.applicantId);
+    }
+  }
+
+  req.status = 'approved';
+  req.reviewedAt = nowIso;
+  req.reviewedBy = currentAdminProfile?.displayName || 'Administrator';
+  req.employeeId = targetEmployeeId;
+
+  const historyEntry = {
+    id: `chist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    requestId: req.id,
+    employeeId: targetEmployeeId,
+    createdEmployeeId,
+    applicantId: req.applicantId || null,
+    interviewId: req.interviewId || null,
+    fullName: req.fullName,
+    employeeNik: req.employeeNik,
+    position: req.position,
+    contractNumber: req.contractNumber,
+    docSequence: req.docSequence,
+    contractStartDate: req.contractStartDate,
+    contractEndDate: req.contractEndDate,
+    salary: req.salary,
+    status: 'applied',
+    previousSnapshot: req.previousSnapshot || {},
+    appliedBy: currentAdminProfile?.displayName || 'Administrator',
+    appliedAt: nowIso
+  };
+
+  if (isDemoMode || !supabase || contractTablesMissing) {
+    contractHistory = [historyEntry, ...contractHistory];
+    await saveContractRequestsFallback();
+    await saveContractHistoryFallback();
+  } else {
+    await supabase.from('contract_update_requests').update({
+      status: 'approved',
+      employee_id: targetEmployeeId,
+      reviewed_by: currentUserId || null,
+      reviewed_by_name: req.reviewedBy,
+      reviewed_at: nowIso,
+      updated_at: nowIso
+    }).eq('id', req.id);
+
+    const { data: hData, error: hErr } = await supabase.from('contract_history').insert({
+      request_id: req.id,
+      employee_id: targetEmployeeId,
+      created_employee_id: createdEmployeeId,
+      applicant_id: req.applicantId || null,
+      interview_id: req.interviewId || null,
+      full_name: req.fullName,
+      employee_nik: req.employeeNik,
+      position: req.position,
+      contract_number: req.contractNumber,
+      doc_sequence: req.docSequence,
+      contract_start_date: req.contractStartDate || null,
+      contract_end_date: req.contractEndDate || null,
+      salary: req.salary || 0,
+      status: 'applied',
+      previous_snapshot: req.previousSnapshot || {},
+      applied_by: currentUserId || null,
+      applied_by_name: historyEntry.appliedBy
+    }).select('*').single();
+
+    if (hErr && isMissingSchemaError(hErr)) {
+      contractTablesMissing = true;
+      contractHistory = [historyEntry, ...contractHistory];
+      await saveContractRequestsFallback();
+      await saveContractHistoryFallback();
+    } else if (hErr) {
+      throw hErr;
+    } else if (hData) {
+      contractHistory = [mapDbHistoryToLocal(hData), ...contractHistory];
+    }
+  }
+
+  const numericSeq = Number(String(req.docSequence || '').replace(/\D/g, '')) || 0;
+  if (numericSeq > (Number(contractSettings.lastDocSequence) || 0)) {
+    await saveContractSettingsState({ lastDocSequence: numericSeq });
+  }
+  invalidateDataCache();
+}
+
+async function rejectContractRequest(requestId) {
+  if (!isRootAdminAccount(currentAdminProfile)) {
+    throw new Error('Only Administrator / Root Admin can reject contract updates.');
+  }
+  const req = contractRequests.find(r => r.id === requestId);
+  if (!req) return;
+  const nowIso = new Date().toISOString();
+  req.status = 'rejected';
+  req.reviewedAt = nowIso;
+  req.reviewedBy = currentAdminProfile?.displayName || 'Administrator';
+  if (isDemoMode || !supabase || contractTablesMissing) {
+    await saveContractRequestsFallback();
+  } else {
+    const { error } = await supabase.from('contract_update_requests').update({
+      status: 'rejected',
+      reviewed_by: currentUserId || null,
+      reviewed_by_name: req.reviewedBy,
+      reviewed_at: nowIso,
+      updated_at: nowIso
+    }).eq('id', req.id);
+    if (error) throw error;
+  }
+}
+
+async function cancelAppliedContract(historyId) {
+  if (!isRootAdminAccount(currentAdminProfile)) {
+    throw new Error('Only Administrator / Root Admin can cancel applied contracts.');
+  }
+  const entry = contractHistory.find(h => h.id === historyId);
+  if (!entry) throw new Error('Contract history record not found.');
+
+  const rollback = applyContractCancellationRollback(entry, { employees, interviews });
+  const nowIso = new Date().toISOString();
+
+  if (isDemoMode || !supabase) {
+    employees = rollback.updatedEmployees;
+    if (rollback.createdEmployeeToDelete) {
+      employees = employees.filter(e => e.id !== rollback.createdEmployeeToDelete);
+    }
+    interviews = rollback.updatedInterviews;
+  } else {
+    if (rollback.createdEmployeeToDelete) {
+      const { error } = await supabase.from('employees').delete().eq('id', rollback.createdEmployeeToDelete);
+      if (error) throw error;
+    } else if (rollback.employeeId && rollback.employeeRestore) {
+      const { error } = await supabase.from('employees')
+        .update({ ...rollback.employeeRestore, updated_at: nowIso })
+        .eq('id', rollback.employeeId);
+      if (error) throw error;
+    }
+    if (rollback.interviewId && rollback.interviewRestore) {
+      const { error } = await supabase.from('candidate_interviews')
+        .update({ ...rollback.interviewRestore, updated_at: nowIso })
+        .eq('id', rollback.interviewId);
+      if (error) throw error;
+    }
+    employees = rollback.updatedEmployees;
+    interviews = rollback.updatedInterviews;
+  }
+
+  entry.status = 'cancelled';
+  entry.cancelledBy = currentAdminProfile?.displayName || 'Administrator';
+  entry.cancelledAt = nowIso;
+
+  if (isDemoMode || !supabase || contractTablesMissing) {
+    await saveContractHistoryFallback();
+  } else {
+    const { error } = await supabase.from('contract_history').update({
+      status: 'cancelled',
+      cancelled_by: currentUserId || null,
+      cancelled_by_name: entry.cancelledBy,
+      cancelled_at: nowIso
+    }).eq('id', entry.id);
+    if (error) throw error;
+  }
+  invalidateDataCache();
+}
+
+function getActiveUmkThreshold() {
+  const umk = parseNumericCurrency(contractSettings?.currUmkAmount);
+  return umk > 0 ? umk : DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
 }
 
 function buildContractRecordFromInterview(intv, cand = null) {
@@ -2221,29 +2684,60 @@ function buildContractRecordFromInterview(intv, cand = null) {
 }
 
 function openPkwtForRecord(record) {
+  const nextDocSequence = computeNextDocSequence({
+    contractHistory,
+    contractRequests,
+    interviews,
+    lastDocSequence: contractSettings?.lastDocSequence || 0
+  });
+
   openPkwtConfigModal({
     record,
-    onNotify: msg => say(msg),
-    onPersistEmployee: async ({ record: rec, config, payload }) => {
-      if (!rec.employeeId) return;
-      const updateBody = {
-        full_name: config.employeeName,
-        position: config.employeePosition,
-        address: config.employeeAddress,
-        contract_start_date: payload.signingDate,
-        contract_end_date: payload.endDate,
-        salary: config.cashWageAmount,
-        updated_at: new Date().toISOString()
-      };
-      if (isDemoMode) {
-        const idx = employees.findIndex(e => e.id === rec.employeeId);
-        if (idx >= 0) employees[idx] = { ...employees[idx], ...updateBody };
-        return;
+    contractSettings,
+    nextDocSequence,
+    onAfterPrint: async ({ record: rec, config, payload }) => {
+      const printedSeqNum = Number(String(payload.docSequence || '').replace(/\D/g, '')) || 0;
+      if (printedSeqNum > (Number(contractSettings.lastDocSequence) || 0)) {
+        await saveContractSettingsState({ lastDocSequence: printedSeqNum }).catch(() => {});
       }
-      if (!supabase) return;
-      const { error } = await supabase.from('employees').update(updateBody).eq('id', rec.employeeId);
-      if (error) throw error;
-      invalidateDataCache();
+
+      const currentEmployee = (rec.employeeId && employees.find(e => e.id === rec.employeeId)) ||
+        (rec.applicantId && employees.find(e => e.applicant_id === rec.applicantId)) ||
+        (rec.employeeNik && employees.find(e =>
+          String(e.employee_no || '').trim().toUpperCase() === String(rec.employeeNik || '').trim().toUpperCase()
+        )) ||
+        null;
+      const currentInterview = (rec.interviewId && interviews.find(i => i.id === rec.interviewId)) || null;
+      const isRoot = isRootAdminAccount(currentAdminProfile);
+
+      openPostPrintEmployeeUpdateModal({
+        record: rec,
+        config,
+        payload,
+        currentEmployee,
+        isRootAdmin: isRoot,
+        onSubmitUpdate: async ({ overrides, approveImmediately }) => {
+          const req = buildContractUpdateRequestPayload({
+            record: rec,
+            config,
+            payload,
+            currentEmployee,
+            currentInterview,
+            requestedBy: currentAdminProfile?.displayName || 'HR Admin',
+            overrides
+          });
+          const savedReq = await submitContractUpdateRequest(req);
+          if (approveImmediately && isRoot) {
+            await approveContractRequest(savedReq.id);
+            say(`Approved & updated Employee Directory for ${savedReq.fullName}.`);
+          } else {
+            say(`Contract update submitted for Root Admin approval (${savedReq.fullName}).`);
+          }
+          if (activeView === 'contracts') renderContractsView();
+          else if (activeView === 'employees') renderEmployees();
+          else if (activeView === 'interview') renderInterviewView();
+        }
+      });
     }
   }).catch(err => say(err.message || 'Unable to open PKWT configuration.'));
 }
@@ -2256,8 +2750,50 @@ function formatIdrShort(amount) {
 function renderContractsView() {
   const queue = buildContractWorkspaceQueue({ employees, interviews, applicants });
   const activeUmk = getActiveUmkThreshold();
+  const isRoot = isRootAdminAccount(currentAdminProfile);
+  const pendingRequests = contractRequests.filter(r => r.status === 'pending');
   let currentFilter = 'all';
   let currentQuery = '';
+
+  const approvalSectionHtml = pendingRequests.length
+    ? `<section class="panel approval-panel" aria-label="Pending Employee Contract Updates">
+        <div class="panel-head">
+          <h3>Pending Employee Data Updates (Post-Print Approval)</h3>
+          <span class="status-pill gold">${pendingRequests.length} pending</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>EMPLOYEE</th>
+                <th>EMPLOYEE NIK</th>
+                <th>CONTRACT NO.</th>
+                <th>PERIOD</th>
+                <th>SALARY</th>
+                <th>SUBMITTED BY</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pendingRequests.map(req => `<tr>
+                <td><b>${esc(req.fullName)}</b><small class="table-subline">${esc(req.position || '—')}</small></td>
+                <td style="font-family:var(--font-mono)">${esc(req.employeeNik || '—')}</td>
+                <td style="font-family:var(--font-mono)">${esc(req.contractNumber || formatContractCode(req.docSequence, req.contractStartDate))}</td>
+                <td>${esc(formatDmyDash(req.contractStartDate))} → ${esc(formatDmyDash(req.contractEndDate))}</td>
+                <td><b>${esc(formatIdrShort(req.salary))}</b></td>
+                <td>${esc(req.requestedBy || 'HR Admin')}</td>
+                <td>${isRoot
+                  ? `<div class="row-actions">
+                      <button type="button" class="btn btn-primary btn-xs" data-approve-creq="${esc(req.id)}">Approve &amp; Update</button>
+                      <button type="button" class="icon-btn danger" data-reject-creq="${esc(req.id)}">Reject</button>
+                    </div>`
+                  : '<span class="status-pill gold">Pending Root Admin Approval</span>'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </section>`
+    : '';
 
   const rowsHtml = list => {
     if (!list.length) return emptyRow(6, 'No expiring contracts (2-month window) or Final Interview passed candidates');
@@ -2273,7 +2809,7 @@ function renderContractsView() {
         ? `<span class="status-pill ${rule.meetsUmk ? 'green' : 'gold'}">${rule.meetsUmk ? 'PKWT Only (1 Doc)' : 'PKWT + 4 PB (5 Docs)'}</span>`
         : `<span class="status-pill gray">Set Salary in PKWT</span>`;
 
-      return `<tr class="${row.priorityGroup === 1 ? 'contract-priority-row' : ''}">
+      return `<tr class="${row.priorityGroup === 1 ? 'contract-priority-row ' : ''}contract-row-clickable" data-contract-row="${esc(row.queueKey)}">
         <td>
           <b>${esc(row.fullName)}</b>
           <small class="table-subline">${esc(row.employeeNik || 'No NIK assigned')}</small>
@@ -2310,42 +2846,24 @@ function renderContractsView() {
     });
     const tbody = $('#contract-rows');
     if (tbody) tbody.innerHTML = rowsHtml(filtered);
+    $$('[data-contract-row]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const rec = queue.rows.find(r => r.queueKey === tr.dataset.contractRow);
+        if (rec) openPkwtForRecord(rec);
+      });
+    });
     $$('[data-configure-pkwt]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
         const rec = queue.rows.find(r => r.queueKey === btn.dataset.configurePkwt);
         if (rec) openPkwtForRecord(rec);
       });
     });
   };
 
-  content.innerHTML = header(
-    'Contracts',
-    'Contract employees expiring within 2 months (prioritized at top) and candidates who passed Final Interview.',
-    '<button class="btn btn-secondary" id="refresh-contracts">Refresh ↻</button>'
-  ) + `
-    <section class="contracts-kpi-strip" aria-label="Contract queue summary">
-      <article class="stat-card">
-        <div class="stat-top"><span>Expiring (2 Months)</span><span class="stat-icon-tile walnut" aria-hidden="true">!</span></div>
-        <div class="stat-number">${queue.expiringCount}</div>
-        <div class="stat-note">Current &amp; next month renewals</div>
-      </article>
-      <article class="stat-card">
-        <div class="stat-top"><span>Final Interview Passed</span><span class="stat-icon-tile" aria-hidden="true">✓</span></div>
-        <div class="stat-number">${queue.finalInterviewCount}</div>
-        <div class="stat-note">Ready for PKWT setup</div>
-      </article>
-      <article class="stat-card">
-        <div class="stat-top"><span>Total Actionable</span><span class="stat-icon-tile" aria-hidden="true">#</span></div>
-        <div class="stat-number">${queue.rows.length}</div>
-        <div class="stat-note">Ordered by priority</div>
-      </article>
-      <article class="stat-card">
-        <div class="stat-top"><span>Active UMK Threshold</span><span class="stat-icon-tile walnut" aria-hidden="true">Rp</span></div>
-        <div class="stat-number" style="font-size:20px">${esc(formatIdrShort(activeUmk))}</div>
-        <div class="stat-note">≥ UMK: 1 doc · &lt; UMK: 5 docs</div>
-      </article>
-    </section>
-    <section class="panel table-panel">
+  content.innerHTML = header('Contracts', '', '<button class="btn btn-secondary" id="refresh-contracts">Refresh ↻</button>') +
+    approvalSectionHtml +
+    `<section class="panel table-panel">
       <div class="table-toolbar contracts-toolbar">
         <div class="contracts-filter-tabs" role="tablist" aria-label="Filter contracts">
           <button type="button" class="contracts-tab is-active" data-contract-tab="all">All (${queue.rows.length})</button>
@@ -2374,6 +2892,37 @@ function renderContractsView() {
     </section>`;
 
   $('#refresh-contracts')?.addEventListener('click', () => loadView('contracts', true));
+  $$('[data-approve-creq]').forEach(btn => btn.addEventListener('click', async () => {
+    const id = btn.dataset.approveCreq;
+    btn.disabled = true;
+    btn.textContent = 'Approving…';
+    try {
+      await approveContractRequest(id);
+      say('Employee Directory updated and contract archived in history.');
+      renderContractsView();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Approve & Update';
+      say(err.message || 'Failed to approve update.');
+    }
+  }));
+  $$('[data-reject-creq]').forEach(btn => btn.addEventListener('click', async () => {
+    const id = btn.dataset.rejectCreq;
+    const ok = await openConfirmDialog({
+      title: 'Reject Contract Update',
+      message: 'Reject this post-print employee update request?',
+      confirmLabel: 'Reject',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await rejectContractRequest(id);
+      say('Contract update request rejected.');
+      renderContractsView();
+    } catch (err) {
+      say(err.message || 'Failed to reject request.');
+    }
+  }));
   $$('[data-contract-tab]').forEach(tab => {
     tab.addEventListener('click', () => {
       currentFilter = tab.dataset.contractTab || 'all';
@@ -2386,6 +2935,467 @@ function renderContractsView() {
     applyFilter();
   });
   applyFilter();
+}
+
+function formatDigitsId(n) {
+  const num = parseNumericCurrency(n);
+  return num > 0 ? num.toLocaleString('id-ID') : '';
+}
+
+/* ============================================================================
+ * SYSTEM SETTINGS -> CONTRACT SETTINGS (A. PKWT & B. Contract Cancellation)
+ * ============================================================================ */
+async function renderContractSettings() {
+  await loadContractWorkspaceState(false);
+  const s = { ...DEFAULT_CONTRACT_SETTINGS, ...contractSettings };
+
+  const historyRowsHtml = contractHistory.length
+    ? contractHistory.map(h => {
+        const isCancelled = h.status === 'cancelled';
+        return `<tr>
+          <td><b>${esc(h.fullName)}</b><small class="table-subline">${esc(h.employeeNik || '—')}</small></td>
+          <td style="font-family:var(--font-mono)">${esc(h.contractNumber || '—')}</td>
+          <td>${esc(h.position || '—')}<small class="table-subline">${esc(formatIdrShort(h.salary))}</small></td>
+          <td>${esc(formatDmyDash(h.contractStartDate))} → ${esc(formatDmyDash(h.contractEndDate))}</td>
+          <td>${esc(h.appliedBy || 'Administrator')}<small class="table-subline">${esc(idDate(h.appliedAt))}</small></td>
+          <td><span class="status-pill ${isCancelled ? 'gray' : 'green'}">${isCancelled ? 'Cancelled' : 'Applied'}</span></td>
+          <td>${isCancelled
+            ? `<small class="subtle">Reverted${h.cancelledAt ? ` (${esc(idDate(h.cancelledAt))})` : ''}</small>`
+            : `<button type="button" class="icon-btn danger" data-cancel-history="${esc(h.id)}">Cancel Contract</button>`}</td>
+        </tr>`;
+      }).join('')
+    : emptyRow(7, 'No applied contract records yet');
+
+  content.innerHTML = `<div class="system-settings-grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>A. PKWT</h3>
+        <span class="status-pill blue">System Defaults</span>
+      </div>
+      <div style="padding:20px">
+        <form id="contract-settings-form">
+          <div class="contract-settings-form">
+            <label>Previous Year UMK Year
+              <input class="input" type="number" name="prevUmkYear" min="2020" max="2040" value="${esc(s.prevUmkYear)}" required>
+            </label>
+            <label>Previous Year UMK Amount (IDR)
+              <input class="input" type="text" inputmode="numeric" name="prevUmkAmount" value="${esc(formatDigitsId(s.prevUmkAmount))}" required>
+            </label>
+            <label>Current Year UMK Year
+              <input class="input" type="number" name="currUmkYear" min="2020" max="2040" value="${esc(s.currUmkYear)}" required>
+            </label>
+            <label>Current Year UMK Amount (IDR)
+              <input class="input" type="text" inputmode="numeric" name="currUmkAmount" value="${esc(formatDigitsId(s.currUmkAmount))}" required>
+            </label>
+            <label>Payday Date (Day of Month)
+              <input class="input" type="number" name="paydayDay" min="1" max="31" value="${esc(s.paydayDay)}" required>
+            </label>
+            <label>Signing City
+              <input class="input" type="text" name="signingCity" maxlength="60" value="${esc(s.signingCity)}" required>
+            </label>
+            <label>Company Representative Signer Name
+              <input class="input" type="text" name="hrName" maxlength="100" value="${esc(s.hrName)}" required>
+            </label>
+            <label>Company Representative Signer Title
+              <input class="input" type="text" name="hrSignatureTitle" maxlength="100" value="${esc(s.hrSignatureTitle)}" required>
+            </label>
+            <label>Governor Decree No. (UMK Basis)
+              <input class="input" type="text" name="governorDecreeNo" maxlength="80" value="${esc(s.governorDecreeNo)}" required>
+            </label>
+            <label>Weekday Overtime Rate (IDR)
+              <input class="input" type="text" inputmode="numeric" name="overtimeWeekdayRate" value="${esc(formatDigitsId(s.overtimeWeekdayRate))}" required>
+            </label>
+            <label>Holiday Overtime Rate (IDR)
+              <input class="input" type="text" inputmode="numeric" name="overtimeHolidayRate" value="${esc(formatDigitsId(s.overtimeHolidayRate))}" required>
+            </label>
+            <label>Last Issued Sequence No.
+              <input class="input" type="number" name="lastDocSequence" min="0" value="${esc(s.lastDocSequence || 0)}">
+            </label>
+          </div>
+          <div class="contract-settings-actions">
+            <button type="submit" class="btn btn-primary" id="save-contract-settings">Save PKWT Settings</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="panel-head">
+        <h3>B. Contract Cancellation</h3>
+        <span class="status-pill gray">${contractHistory.filter(h => h.status === 'applied').length} active</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>EMPLOYEE</th>
+              <th>CONTRACT NO.</th>
+              <th>POSITION &amp; SALARY</th>
+              <th>PERIOD</th>
+              <th>APPLIED BY</th>
+              <th>STATUS</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>${historyRowsHtml}</tbody>
+        </table>
+      </div>
+    </section>
+  </div>`;
+
+  const form = $('#contract-settings-form');
+  ['prevUmkAmount', 'currUmkAmount', 'overtimeWeekdayRate', 'overtimeHolidayRate'].forEach(field => {
+    const input = form.elements[field];
+    if (!input) return;
+    input.addEventListener('input', () => {
+      input.value = formatDigitsId(input.value);
+    });
+  });
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const btn = $('#save-contract-settings');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await saveContractSettingsState({
+        prevUmkYear: Number(form.elements.prevUmkYear.value) || DEFAULT_CONTRACT_SETTINGS.prevUmkYear,
+        prevUmkAmount: parseNumericCurrency(form.elements.prevUmkAmount.value),
+        currUmkYear: Number(form.elements.currUmkYear.value) || DEFAULT_CONTRACT_SETTINGS.currUmkYear,
+        currUmkAmount: parseNumericCurrency(form.elements.currUmkAmount.value),
+        paydayDay: Math.min(31, Math.max(1, Number(form.elements.paydayDay.value) || 10)),
+        signingCity: form.elements.signingCity.value.trim() || 'Pasuruan',
+        hrName: form.elements.hrName.value.trim() || DEFAULT_CONTRACT_SETTINGS.hrName,
+        hrSignatureTitle: form.elements.hrSignatureTitle.value.trim() || DEFAULT_CONTRACT_SETTINGS.hrSignatureTitle,
+        governorDecreeNo: form.elements.governorDecreeNo.value.trim() || DEFAULT_CONTRACT_SETTINGS.governorDecreeNo,
+        overtimeWeekdayRate: parseNumericCurrency(form.elements.overtimeWeekdayRate.value),
+        overtimeHolidayRate: parseNumericCurrency(form.elements.overtimeHolidayRate.value),
+        lastDocSequence: Math.max(0, Number(form.elements.lastDocSequence.value) || 0)
+      });
+      say('PKWT settings saved.');
+    } catch (err) {
+      say(err.message || 'Failed to save PKWT settings.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save PKWT Settings';
+    }
+  });
+
+  $$('[data-cancel-history]').forEach(btn => btn.addEventListener('click', async () => {
+    const entry = contractHistory.find(h => h.id === btn.dataset.cancelHistory);
+    if (!entry) return;
+    const ok = await openConfirmDialog({
+      title: 'Cancel Applied Contract',
+      message: `Cancel contract ${entry.contractNumber} for ${entry.fullName} and revert Employee Directory data to its prior state?`,
+      confirmLabel: 'Cancel & Revert',
+      danger: true
+    });
+    if (!ok) return;
+    btn.disabled = true;
+    btn.textContent = 'Reverting…';
+    try {
+      await cancelAppliedContract(entry.id);
+      say(`Contract ${entry.contractNumber} cancelled and employee data reverted.`);
+      await renderContractSettings();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Cancel Contract';
+      say(err.message || 'Failed to cancel contract.');
+    }
+  }));
+}
+
+/* ============================================================================
+ * SYSTEM SETTINGS -> DATA IMPORT (Candidate List & Lead Register XLSX/CSV)
+ * ============================================================================ */
+function downloadCsvFile(headers, sampleRow, filename) {
+  const escapeCell = v => {
+    const s = String(v ?? '');
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [
+    headers.map(escapeCell).join(','),
+    headers.map(h => escapeCell(sampleRow[h] ?? '')).join(',')
+  ].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function parseCsvTextToObjects(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  const clean = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inQuotes) {
+      if (ch === '"' && clean[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && clean[i + 1] === '\n') i++;
+      row.push(cell);
+      if (row.some(c => c.trim() !== '')) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell);
+  if (row.some(c => c.trim() !== '')) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => String(h || '').trim());
+  return rows.slice(1).map(cols => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      if (h) obj[h] = cols[idx] ?? '';
+    });
+    return obj;
+  });
+}
+
+async function readSpreadsheetFileObjects(file) {
+  if (/\.csv$/i.test(file.name)) {
+    return parseCsvTextToObjects(await file.text());
+  }
+  const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+  const firstSheet = wb.SheetNames[0];
+  if (!firstSheet) throw new Error('No worksheet found in uploaded file.');
+  return XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { defval: '' });
+}
+
+async function downloadSpreadsheetTemplateXlsx(headers, sampleRow, sheetName, filename) {
+  try {
+    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet([sampleRow], { header: headers });
+    ws['!cols'] = headers.map(h => ({ wch: Math.max(16, h.length + 4) }));
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.writeFile(wb, filename);
+    say(`Downloaded ${filename}.`);
+  } catch (err) {
+    say(err.message || 'Failed to generate XLSX template.');
+  }
+}
+
+function renderSystemImport() {
+  content.innerHTML = `<div class="import-cards-grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Candidate List Import</h3>
+        <span class="status-pill blue">XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${CANDIDATE_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-cand-xlsx">Download XLSX Template ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-cand-csv">Download CSV Template ↓</button>
+        </div>
+        <div class="import-drop-row">
+          <input id="import-cand-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-cand-submit" disabled>Import Candidates</button>
+        </div>
+        <div id="import-cand-preview" class="upload-preview-box hidden"></div>
+        <div id="import-cand-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Lead Register Import</h3>
+        <span class="status-pill blue">XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${LEAD_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-lead-xlsx">Download XLSX Template ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-lead-csv">Download CSV Template ↓</button>
+        </div>
+        <div class="import-drop-row">
+          <input id="import-lead-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-lead-submit" disabled>Import Leads</button>
+        </div>
+        <div id="import-lead-preview" class="upload-preview-box hidden"></div>
+        <div id="import-lead-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+  </div>`;
+
+  $('#dl-cand-xlsx').addEventListener('click', () =>
+    downloadSpreadsheetTemplateXlsx(CANDIDATE_IMPORT_HEADERS, CANDIDATE_IMPORT_SAMPLE_ROW, 'Candidate List', 'Template_Candidate_List.xlsx')
+  );
+  $('#dl-cand-csv').addEventListener('click', () =>
+    downloadCsvFile(CANDIDATE_IMPORT_HEADERS, CANDIDATE_IMPORT_SAMPLE_ROW, 'Template_Candidate_List.csv')
+  );
+  $('#dl-lead-xlsx').addEventListener('click', () =>
+    downloadSpreadsheetTemplateXlsx(LEAD_IMPORT_HEADERS, LEAD_IMPORT_SAMPLE_ROW, 'Lead Register', 'Template_Lead_Register.xlsx')
+  );
+  $('#dl-lead-csv').addEventListener('click', () =>
+    downloadCsvFile(LEAD_IMPORT_HEADERS, LEAD_IMPORT_SAMPLE_ROW, 'Template_Lead_Register.csv')
+  );
+
+  let parsedCandidates = [];
+  const candFile = $('#import-cand-file');
+  const candSubmit = $('#import-cand-submit');
+  const candPreview = $('#import-cand-preview');
+  const candError = $('#import-cand-error');
+
+  candFile.addEventListener('change', async () => {
+    parsedCandidates = [];
+    candSubmit.disabled = true;
+    candError.textContent = '';
+    candPreview.classList.add('hidden');
+    const file = candFile.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readSpreadsheetFileObjects(file);
+      const { rows, errors } = parseCandidateImportRows(raw);
+      if (errors.length) candError.textContent = errors.slice(0, 3).join(' ');
+      if (!rows.length) {
+        if (!candError.textContent) candError.textContent = 'No valid candidate rows found.';
+        return;
+      }
+      parsedCandidates = rows;
+      candSubmit.disabled = false;
+      candPreview.classList.remove('hidden');
+      candPreview.innerHTML = `<b>${rows.length} candidate row(s) ready</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.full_name)}</b> (${esc(r.nik)}) — ${esc(r.position)}</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
+    } catch (err) {
+      candError.textContent = err.message || 'Failed to parse Candidate List file.';
+    }
+  });
+
+  candSubmit.addEventListener('click', async () => {
+    if (!parsedCandidates.length) return;
+    candSubmit.disabled = true;
+    candSubmit.textContent = 'Importing…';
+    candError.textContent = '';
+    try {
+      const existingKeys = new Set(applicants.map(a => `${String(a.nik || '').trim()}|${String(a.position || '').trim().toLowerCase()}`));
+      const toInsert = parsedCandidates.filter(r => !existingKeys.has(`${r.nik}|${r.position.toLowerCase()}`));
+      const skipped = parsedCandidates.length - toInsert.length;
+
+      if (toInsert.length) {
+        if (isDemoMode || !supabase) {
+          const nowIso = new Date().toISOString();
+          const newRows = toInsert.map((r, idx) => ({
+            id: `app-imp-${Date.now()}-${idx}`,
+            ...r,
+            disc_submissions: [],
+            created_at: nowIso
+          }));
+          applicants = [...newRows, ...applicants];
+        } else {
+          for (let i = 0; i < toInsert.length; i += 100) {
+            const batch = toInsert.slice(i, i + 100);
+            const { error } = await supabase.from('applicants').insert(batch);
+            if (error) throw error;
+          }
+          invalidateDataCache();
+          await fetchAndCacheFreshSnapshot();
+        }
+      }
+      parsedCandidates = [];
+      candFile.value = '';
+      candPreview.classList.add('hidden');
+      say(`Imported ${toInsert.length} candidate(s)${skipped ? ` (${skipped} duplicate skipped)` : ''}.`);
+    } catch (err) {
+      candError.textContent = err.message || 'Failed to import candidates.';
+    } finally {
+      candSubmit.disabled = true;
+      candSubmit.textContent = 'Import Candidates';
+    }
+  });
+
+  let parsedLeads = [];
+  const leadFile = $('#import-lead-file');
+  const leadSubmit = $('#import-lead-submit');
+  const leadPreview = $('#import-lead-preview');
+  const leadError = $('#import-lead-error');
+
+  leadFile.addEventListener('change', async () => {
+    parsedLeads = [];
+    leadSubmit.disabled = true;
+    leadError.textContent = '';
+    leadPreview.classList.add('hidden');
+    const file = leadFile.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readSpreadsheetFileObjects(file);
+      const { rows, errors } = parseLeadImportRows(raw);
+      if (errors.length) leadError.textContent = errors.slice(0, 3).join(' ');
+      if (!rows.length) {
+        if (!leadError.textContent) leadError.textContent = 'No valid lead rows found.';
+        return;
+      }
+      parsedLeads = rows;
+      leadSubmit.disabled = false;
+      leadPreview.classList.remove('hidden');
+      leadPreview.innerHTML = `<b>${rows.length} lead row(s) ready</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.full_name)}</b> — ${esc(r.position)} (${esc(r.source)})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
+    } catch (err) {
+      leadError.textContent = err.message || 'Failed to parse Lead Register file.';
+    }
+  });
+
+  leadSubmit.addEventListener('click', async () => {
+    if (!parsedLeads.length) return;
+    leadSubmit.disabled = true;
+    leadSubmit.textContent = 'Importing…';
+    leadError.textContent = '';
+    try {
+      if (isDemoMode || !supabase) {
+        const nowIso = new Date().toISOString();
+        const newRows = parsedLeads.map((r, idx) => ({
+          id: `lead-imp-${Date.now()}-${idx}`,
+          ...r,
+          created_at: nowIso
+        }));
+        stage1Leads = [...newRows, ...stage1Leads];
+      } else {
+        for (let i = 0; i < parsedLeads.length; i += 100) {
+          const batch = parsedLeads.slice(i, i + 100);
+          const { error } = await supabase.from('candidate_stage1_applications').insert(batch);
+          if (error) throw error;
+        }
+        invalidateDataCache();
+        await fetchAndCacheFreshSnapshot();
+      }
+      const importedCount = parsedLeads.length;
+      parsedLeads = [];
+      leadFile.value = '';
+      leadPreview.classList.add('hidden');
+      say(`Imported ${importedCount} lead record(s) into Lead Register.`);
+    } catch (err) {
+      leadError.textContent = err.message || 'Failed to import leads.';
+    } finally {
+      leadSubmit.disabled = true;
+      leadSubmit.textContent = 'Import Leads';
+    }
+  });
 }
 
 /* ============================================================================
@@ -2513,7 +3523,13 @@ async function renderUserManagement() {
     $$('[data-user-delete]').forEach(btn => btn.addEventListener('click', async () => {
       const username = btn.dataset.userDelete;
       const user = portalUsers.find(item => item.username === username);
-      if (!window.confirm(`Remove user access for ${user?.display_name || username}?`)) return;
+      const ok = await openConfirmDialog({
+        title: 'Remove User Access',
+        message: `Remove user access for ${user?.display_name || username}?`,
+        confirmLabel: 'Remove',
+        danger: true
+      });
+      if (!ok) return;
       try {
         const { error } = await supabase.rpc('delete_portal_user', { p_username: username });
         if (error) throw error;
@@ -2862,12 +3878,22 @@ async function loadView(view, forceRefresh = false) {
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#page-title').textContent = TITLES[view] || 'Dashboard';
 
-  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'print']);
+  if (ROOT_ADMIN_VIEWS.has(view) && !isRootAdminAccount(currentAdminProfile)) {
+    content.innerHTML = `<section class="panel placeholder-panel"><div>
+      <div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h2>Access Restricted</h2>
+      <p>System Settings can only be accessed by Root Administrator accounts.</p>
+    </div></section>`;
+    return;
+  }
+
+  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'contractSettings', 'systemImport', 'print']);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
     let hasCached = false;
     if (!forceRefresh && !isDemoMode) {
       const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
       if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
+        await loadContractWorkspaceState(false);
         hasCached = true;
       }
     }
@@ -2887,6 +3913,8 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'tracking') renderTrackingView();
     else if (view === 'employees') renderEmployees();
     else if (view === 'contracts') renderContractsView();
+    else if (view === 'contractSettings') await renderContractSettings();
+    else if (view === 'systemImport') renderSystemImport();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
     else if (view === 'userManagement') await renderUserManagement();
@@ -2920,6 +3948,10 @@ function applyAdminProfileUi(profile) {
   if (nameEl) nameEl.textContent = adminDisplayName;
   const roleEl = $('#admin-role-label');
   if (roleEl) roleEl.textContent = profile.isRootAdmin ? 'Root Admin' : (profile.role || 'Superadmin');
+  const accessGroup = sidebarEl?.querySelector('[data-group-id="access"]');
+  if (accessGroup) {
+    accessGroup.classList.toggle('hidden', !profile.isRootAdmin);
+  }
 }
 
 async function resolveAdminProfileFromServer(session) {
@@ -3095,6 +4127,8 @@ $('#logout-btn').addEventListener('click', () => {
   invitedCandidates = [];
   cvScreenings = [];
   portalUsers = [];
+  contractRequests = [];
+  contractHistory = [];
   activeView = 'dashboard';
   shell.classList.add('hidden');
   loginView.classList.remove('hidden');
@@ -3108,14 +4142,27 @@ $('#logout-btn').addEventListener('click', () => {
 async function init() {
   initSidebarAccordions();
   if (isDemoMode) {
-    applyAdminProfileUi({
-      userId: 'demo-admin',
-      username: 'ST 130116',
-      employeeNik: 'ST 130116',
-      displayName: 'Diana Anita Sari',
-      role: 'Superadmin',
-      isRootAdmin: true
-    });
+    const demoNonRoot = (() => {
+      try { return new URLSearchParams(location.search).get('nonroot') === '1'; }
+      catch { return false; }
+    })();
+    applyAdminProfileUi(demoNonRoot
+      ? {
+          userId: 'demo-staff',
+          username: 'ST 250112',
+          employeeNik: 'ST 250112',
+          displayName: 'Hendra Wijaya',
+          role: 'HR Staff',
+          isRootAdmin: false
+        }
+      : {
+          userId: 'demo-admin',
+          username: 'ST 130116',
+          employeeNik: 'ST 130116',
+          displayName: 'Diana Anita Sari',
+          role: 'Superadmin',
+          isRootAdmin: true
+        });
     seedDemoWorkspaceData();
     loginView.classList.add('hidden');
     shell.classList.remove('hidden');

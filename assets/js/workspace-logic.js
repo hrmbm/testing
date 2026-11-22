@@ -172,7 +172,15 @@ export function maskPin(pin = '') {
   return '•'.repeat(len);
 }
 
-export function isRootAdminAccount({ username = '', employeeNik = '', displayName = '' } = {}) {
+export function isRootAdminAccount(profile = {}) {
+  const {
+    username = '',
+    employeeNik = '',
+    displayName = '',
+    isRootAdmin = false,
+    is_root_admin = false
+  } = profile || {};
+  if (isRootAdmin || is_root_admin) return true;
   const normUser = normalizeLoginIdentifier(username);
   const normNik = normalizeLoginIdentifier(employeeNik);
   const normDisplay = String(displayName ?? '').trim().toLowerCase();
@@ -1163,7 +1171,7 @@ function normalizeHeaderKey(key = '') {
   return String(key ?? '')
     .trim()
     .toLowerCase()
-    .replace(/[.\s_-]+/g, '');
+    .replace(/[^a-z0-9]+/g, '');
 }
 
 const EMPLOYEE_HEADER_MAP = {
@@ -1293,3 +1301,258 @@ export function formatEmployeeExportRow(employee, applicant = null) {
     Agama: employee.religion || appData.agama || ''
   };
 }
+
+export const LEAD_IMPORT_HEADERS = [
+  'Applicant Name',
+  'Position',
+  'Source',
+  'WhatsApp No.',
+  'Recommendation'
+];
+
+export const LEAD_IMPORT_SAMPLE_ROW = {
+  'Applicant Name': 'Rizky Pratama',
+  Position: 'CNC',
+  Source: 'Jobstreet',
+  'WhatsApp No.': '081234567890',
+  Recommendation: 'Recommended'
+};
+
+const LEAD_IMPORT_HEADER_MAP = {
+  applicantname: 'full_name',
+  fullname: 'full_name',
+  name: 'full_name',
+  nama: 'full_name',
+  namalengkap: 'full_name',
+  namapelamar: 'full_name',
+  position: 'position',
+  posisi: 'position',
+  jabatan: 'position',
+  source: 'source',
+  sumber: 'source',
+  whatsapp: 'whatsapp',
+  whatsappno: 'whatsapp',
+  nowhatsapp: 'whatsapp',
+  notelp: 'whatsapp',
+  telepon: 'whatsapp',
+  phone: 'whatsapp',
+  hp: 'whatsapp',
+  recommendation: 'recommendation',
+  rekomendasi: 'recommendation',
+  remarks: 'recommendation'
+};
+
+export function parseLeadImportRows(rawRows = []) {
+  const rows = [];
+  const errors = [];
+
+  (rawRows || []).forEach((rawRow, idx) => {
+    const mapped = {};
+    for (const [key, val] of Object.entries(rawRow || {})) {
+      const target = LEAD_IMPORT_HEADER_MAP[normalizeHeaderKey(key)];
+      if (target) mapped[target] = val;
+    }
+
+    const fullName = String(mapped.full_name ?? '').trim();
+    const position = String(mapped.position ?? '').trim();
+    if (!fullName && !position) return;
+    if (!fullName) {
+      errors.push(`Row ${idx + 2}: Applicant Name is required.`);
+      return;
+    }
+    if (!position) {
+      errors.push(`Row ${idx + 2}: Position is required (${fullName}).`);
+      return;
+    }
+
+    const rawPhone = String(mapped.whatsapp ?? '').trim();
+    const digits = rawPhone.replace(/\D/g, '');
+    const whatsapp = digits.startsWith('62')
+      ? `0${digits.slice(2)}`
+      : (digits.startsWith('8') ? `0${digits}` : (digits || rawPhone));
+
+    const rec = normalizeLeadRecommendation(mapped.recommendation || 'Pending');
+    const status = rec === 'Recommended' ? 'invited' : rec === 'Not Recommended' ? 'rejected' : 'reviewed';
+
+    rows.push({
+      full_name: fullName,
+      position,
+      source: String(mapped.source ?? '').trim() || 'Jobstreet',
+      whatsapp,
+      recommendation: rec,
+      status
+    });
+  });
+
+  return { rows, errors };
+}
+
+export const CANDIDATE_IMPORT_HEADERS = [
+  'Full Name',
+  'NIK (16 Digits)',
+  'Position',
+  'Stage',
+  'Phone / WhatsApp',
+  'Email',
+  'Gender',
+  'Birth Place',
+  'Birth Date',
+  'Domicile Address',
+  'Last Education',
+  'Marital Status',
+  'Religion',
+  'Source'
+];
+
+export const CANDIDATE_IMPORT_SAMPLE_ROW = {
+  'Full Name': 'Budi Santoso',
+  'NIK (16 Digits)': '3514122006840004',
+  Position: 'Spray',
+  Stage: 'application_submitted',
+  'Phone / WhatsApp': '081234567891',
+  Email: 'budi.santoso@example.com',
+  Gender: 'Laki-laki',
+  'Birth Place': 'Pasuruan',
+  'Birth Date': '20-06-1994',
+  'Domicile Address': 'Ds. Randupitu RT 02 RW 05, Kec. Gempol, Kab. Pasuruan',
+  'Last Education': 'SMK',
+  'Marital Status': 'Menikah',
+  Religion: 'Islam',
+  Source: 'Jobstreet'
+};
+
+const CANDIDATE_IMPORT_HEADER_MAP = {
+  fullname: 'full_name',
+  name: 'full_name',
+  nama: 'full_name',
+  namalengkap: 'full_name',
+  nik: 'nik',
+  nik16digits: 'nik',
+  noktp: 'nik',
+  ktp: 'nik',
+  position: 'position',
+  posisi: 'position',
+  jabatan: 'position',
+  stage: 'stage',
+  tahap: 'stage',
+  status: 'stage',
+  phonewhatsapp: 'phone',
+  phone: 'phone',
+  whatsapp: 'phone',
+  telepon: 'phone',
+  notelp: 'phone',
+  hp: 'phone',
+  email: 'email',
+  gender: 'gender',
+  jeniskelamin: 'gender',
+  kelamin: 'gender',
+  birthplace: 'birth_place',
+  tempatlahir: 'birth_place',
+  birthdate: 'birth_date',
+  tanggallahir: 'birth_date',
+  tgllahir: 'birth_date',
+  domicileaddress: 'address',
+  domisili: 'address',
+  alamat: 'address',
+  address: 'address',
+  lasteducation: 'education',
+  pendidikan: 'education',
+  pendidikanterakhir: 'education',
+  maritalstatus: 'marital_status',
+  statuskawin: 'marital_status',
+  statuspernikahan: 'marital_status',
+  religion: 'religion',
+  agama: 'religion',
+  source: 'source',
+  sumber: 'source'
+};
+
+const VALID_APPLICANT_STAGES = new Set([
+  'application_submitted',
+  'disc_completed',
+  'stage4_pending',
+  'os_sent',
+  'hired',
+  'rejected'
+]);
+
+function normalizeCandidateStageImport(raw) {
+  const val = String(raw ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (VALID_APPLICANT_STAGES.has(val)) return val;
+  if (val.includes('disc')) return 'disc_completed';
+  if (val.includes('hired') || val.includes('karyawan') || val.includes('accepted')) return 'hired';
+  if (val.includes('reject') || val.includes('tolak')) return 'rejected';
+  if (val.includes('os')) return 'os_sent';
+  if (val.includes('interview') || val.includes('stage4')) return 'stage4_pending';
+  return 'application_submitted';
+}
+
+export function parseCandidateImportRows(rawRows = []) {
+  const rows = [];
+  const errors = [];
+
+  (rawRows || []).forEach((rawRow, idx) => {
+    const mapped = {};
+    for (const [key, val] of Object.entries(rawRow || {})) {
+      const target = CANDIDATE_IMPORT_HEADER_MAP[normalizeHeaderKey(key)];
+      if (target) mapped[target] = val;
+    }
+
+    const fullName = String(mapped.full_name ?? '').trim();
+    const nikDigits = String(mapped.nik ?? '').replace(/\D/g, '');
+    const position = String(mapped.position ?? '').trim();
+    if (!fullName && !nikDigits && !position) return;
+
+    if (!fullName) {
+      errors.push(`Row ${idx + 2}: Full Name is required.`);
+      return;
+    }
+    if (nikDigits.length !== 16) {
+      errors.push(`Row ${idx + 2}: NIK must contain exactly 16 digits (${fullName}).`);
+      return;
+    }
+    if (!position) {
+      errors.push(`Row ${idx + 2}: Position is required (${fullName}).`);
+      return;
+    }
+
+    const rawPhone = String(mapped.phone ?? '').trim();
+    const phoneDigits = rawPhone.replace(/\D/g, '');
+    const phone = phoneDigits.startsWith('62')
+      ? `0${phoneDigits.slice(2)}`
+      : (phoneDigits.startsWith('8') ? `0${phoneDigits}` : (phoneDigits || rawPhone));
+
+    const birthDateIso = parseSpreadsheetDateToIso(mapped.birth_date) || '';
+    const address = String(mapped.address ?? '').trim();
+    const genderRaw = String(mapped.gender ?? '').trim();
+    const gender = /^l/i.test(genderRaw) ? 'L' : (/^(p|w|f)/i.test(genderRaw) ? 'P' : genderRaw);
+    const stage = normalizeCandidateStageImport(mapped.stage);
+
+    rows.push({
+      full_name: fullName,
+      nik: nikDigits,
+      position,
+      stage,
+      application_data: {
+        nama: fullName,
+        nik: nikDigits,
+        posisi: position,
+        telepon: phone,
+        email: String(mapped.email ?? '').trim(),
+        gender,
+        tempat_lahir: String(mapped.birth_place ?? '').trim(),
+        tanggal_lahir: birthDateIso,
+        domisili: address,
+        alamat_asal: address,
+        pendidikan_terakhir: String(mapped.education ?? '').trim(),
+        status_kawin: String(mapped.marital_status ?? '').trim(),
+        agama: String(mapped.religion ?? '').trim(),
+        sumber_info: String(mapped.source ?? '').trim() || 'Jobstreet',
+        setuju: true
+      }
+    });
+  });
+
+  return { rows, errors };
+}
+

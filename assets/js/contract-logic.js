@@ -65,6 +65,10 @@ export const DEFAULT_CONTRACT_SETTINGS = {
   overtimeWeekdayRate: 44980,
   overtimeHolidayRate: 59973,
   paydayDay: 10,
+  hrName: 'Diana Anita Sari',
+  hrSignatureTitle: 'Manager HR GA',
+  signingCity: 'Pasuruan',
+  lastDocSequence: 0,
   defaultDocSequence: '001'
 };
 
@@ -385,12 +389,195 @@ export function buildAgreementPayload(config = {}, companyMaster = null) {
   };
 }
 
+export function formatContractCode(seq, signingDate = new Date(), type = 'PKWT') {
+  const iso = toIsoDate(signingDate);
+  const [, mStr, ] = iso.split('-');
+  const y = Number(iso.slice(0, 4)) || new Date().getFullYear();
+  const m = Number(mStr) || 1;
+  const romans = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+  const padded = String(String(seq || '1').replace(/[^\d]/g, '') || '1').padStart(3, '0');
+  return `${padded}/${type}/${romans[(m - 1 + 12) % 12]}/${y}`;
+}
+
+export function computeNextDocSequence({
+  contractHistory = [],
+  contractRequests = [],
+  interviews = [],
+  lastDocSequence = 0
+} = {}) {
+  let maxSeq = Math.max(0, Number(String(lastDocSequence || 0).replace(/[^\d]/g, '')) || 0);
+  const bumpFrom = val => {
+    const m = String(val || '').match(/(\d{1,6})/);
+    if (m) maxSeq = Math.max(maxSeq, Number(m[1]) || 0);
+  };
+
+  (contractHistory || []).forEach(item => {
+    if (item && item.status !== 'cancelled') {
+      bumpFrom(item.docSequence ?? item.contractNumber);
+    }
+  });
+  (contractRequests || []).forEach(req => {
+    if (req && req.status !== 'rejected' && req.status !== 'cancelled') {
+      bumpFrom(req.docSequence ?? req.contractNumber);
+    }
+  });
+  (interviews || []).forEach(intv => {
+    if (intv?.contract_number) bumpFrom(intv.contract_number);
+  });
+
+  return String(maxSeq + 1).padStart(3, '0');
+}
+
+export function createContractSnapshot(employee = null, interview = null) {
+  return {
+    employee: employee
+      ? {
+          id: employee.id,
+          employee_no: employee.employee_no || '',
+          department: employee.department || '',
+          position: employee.position || '',
+          address: employee.address || '',
+          employment_status: employee.employment_status || 'KONTRAK',
+          contract_start_date: employee.contract_start_date || null,
+          contract_end_date: employee.contract_end_date || null,
+          salary: employee.salary ?? null
+        }
+      : null,
+    interview: interview
+      ? {
+          id: interview.id,
+          contract_number: interview.contract_number || '',
+          contract_start_date: interview.contract_start_date || null,
+          contract_end_date: interview.contract_end_date || null,
+          contract_duration_months: interview.contract_duration_months ?? null,
+          salary: interview.salary ?? null,
+          official_position: interview.official_position || ''
+        }
+      : null
+  };
+}
+
+export function buildContractUpdateRequestPayload({
+  record = {},
+  config = {},
+  payload = {},
+  currentEmployee = null,
+  currentInterview = null,
+  requestedBy = 'HR Admin',
+  overrides = {}
+} = {}) {
+  const startIso = toIsoDate(overrides.contractStartDate || payload.signingDate || new Date());
+  const durationMonths = Math.max(1, Math.round(Number(overrides.durationMonths ?? payload.durationMonths ?? 12)));
+  const endIso = overrides.contractEndDate && /^\d{4}-\d{2}-\d{2}$/.test(overrides.contractEndDate)
+    ? overrides.contractEndDate
+    : computeEndDate(startIso, durationMonths);
+  const seq = String(overrides.docSequence || payload.docSequence || config.docSequence || '001').trim();
+  const contractNumber = overrides.contractNumber || formatContractCode(seq, startIso, 'PKWT');
+  const salary = parseNumericCurrency(overrides.salary ?? config.cashWageAmount);
+
+  return {
+    id: overrides.id || `creq-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    status: 'pending',
+    requestedAt: new Date().toISOString(),
+    requestedBy: String(requestedBy || 'HR Admin').trim(),
+    employeeId: currentEmployee?.id || record.employeeId || null,
+    applicantId: record.applicantId || currentEmployee?.applicant_id || currentInterview?.applicant_id || null,
+    interviewId: currentInterview?.id || record.interviewId || null,
+    fullName: String(overrides.fullName ?? config.employeeName ?? record.fullName ?? '').trim(),
+    employeeNik: String(overrides.employeeNik ?? config.employeeNik ?? currentEmployee?.employee_no ?? record.employeeNik ?? '').trim(),
+    ktpNik: String(overrides.ktpNik ?? config.employeeKtp ?? currentEmployee?.ktp_nik ?? record.ktpNik ?? '').trim(),
+    department: String(overrides.department ?? config.employeeDepartment ?? currentEmployee?.department ?? record.department ?? '').trim(),
+    position: String(overrides.position ?? config.employeePosition ?? record.position ?? '').trim(),
+    address: String(overrides.address ?? config.employeeAddress ?? record.address ?? '').trim(),
+    phone: String(record.phone || currentEmployee?.phone || '').trim(),
+    employmentStatus: String(overrides.employmentStatus || 'KONTRAK').trim(),
+    contractStartDate: startIso,
+    contractEndDate: endIso,
+    durationMonths,
+    docSequence: seq,
+    contractNumber,
+    salary,
+    previousSnapshot: createContractSnapshot(currentEmployee, currentInterview)
+  };
+}
+
+export function applyContractCancellationRollback(historyEntry, {
+  employees = [],
+  interviews = []
+} = {}) {
+  if (!historyEntry || historyEntry.status === 'cancelled') {
+    throw new Error('This contract record has already been cancelled.');
+  }
+  const prevEmp = historyEntry.previousSnapshot?.employee || null;
+  const prevIntv = historyEntry.previousSnapshot?.interview || null;
+
+  const updatedEmployees = (employees || []).map(emp => {
+    if (emp.id !== historyEntry.employeeId) return emp;
+    if (!prevEmp) return emp;
+    return {
+      ...emp,
+      position: prevEmp.position ?? emp.position,
+      department: prevEmp.department ?? emp.department,
+      address: prevEmp.address ?? emp.address,
+      employment_status: prevEmp.employment_status ?? emp.employment_status,
+      contract_start_date: prevEmp.contract_start_date ?? null,
+      contract_end_date: prevEmp.contract_end_date ?? null,
+      salary: prevEmp.salary ?? null
+    };
+  });
+
+  const updatedInterviews = (interviews || []).map(intv => {
+    if (intv.id !== historyEntry.interviewId) return intv;
+    if (!prevIntv) return intv;
+    return {
+      ...intv,
+      contract_number: prevIntv.contract_number ?? '',
+      contract_start_date: prevIntv.contract_start_date ?? null,
+      contract_end_date: prevIntv.contract_end_date ?? null,
+      contract_duration_months: prevIntv.contract_duration_months ?? null,
+      salary: prevIntv.salary ?? null,
+      official_position: prevIntv.official_position ?? intv.official_position
+    };
+  });
+
+  return {
+    employeeId: historyEntry.employeeId || null,
+    employeeRestore: prevEmp
+      ? {
+          position: prevEmp.position,
+          department: prevEmp.department,
+          address: prevEmp.address,
+          employment_status: prevEmp.employment_status,
+          contract_start_date: prevEmp.contract_start_date,
+          contract_end_date: prevEmp.contract_end_date,
+          salary: prevEmp.salary
+        }
+      : null,
+    createdEmployeeToDelete: (!prevEmp && historyEntry.createdEmployeeId) ? historyEntry.createdEmployeeId : null,
+    interviewId: historyEntry.interviewId || null,
+    interviewRestore: prevIntv
+      ? {
+          contract_number: prevIntv.contract_number,
+          contract_start_date: prevIntv.contract_start_date,
+          contract_end_date: prevIntv.contract_end_date,
+          contract_duration_months: prevIntv.contract_duration_months,
+          salary: prevIntv.salary,
+          official_position: prevIntv.official_position
+        }
+      : null,
+    updatedEmployees,
+    updatedInterviews
+  };
+}
+
 export function buildDashboardAttentionItems({
   employees = [],
   interviews = [],
   applicants = [],
   stage1Leads = [],
   invitedCandidates = [],
+  contractRequests = [],
+  isRootAdmin = false,
   referenceDate = new Date()
 } = {}) {
   const queue = buildContractWorkspaceQueue({ employees, interviews, applicants, referenceDate });
@@ -416,14 +603,29 @@ export function buildDashboardAttentionItems({
     isContractEmployee(emp) && (!emp.contract_end_date || !String(emp.address || '').trim())
   ).length;
 
+  const pendingApprovals = (contractRequests || []).filter(r => r.status === 'pending').length;
+
   const items = [];
+
+  if (isRootAdmin && pendingApprovals > 0) {
+    items.push({
+      id: 'pkwt-pending-approvals',
+      category: 'PKWT Approval',
+      title: 'Employee Contract Updates Pending Approval',
+      description: `${pendingApprovals} printed contract update${pendingApprovals === 1 ? '' : 's'} waiting for Administrator approval.`,
+      count: pendingApprovals,
+      severity: 'urgent',
+      targetView: 'contracts',
+      ctaLabel: 'Review Approvals'
+    });
+  }
 
   if (queue.expiringCount > 0) {
     items.push({
       id: 'pkwt-expiring',
       category: 'PKWT & Contracts',
       title: 'Contracts Expiring (Current & Next Month)',
-      description: `${queue.expiringCount} contract employee${queue.expiringCount === 1 ? '' : 's'} require PKWT renewal or follow-up.`,
+      description: `${queue.expiringCount} contract employee${queue.expiringCount === 1 ? '' : 's'} require PKWT renewal.`,
       count: queue.expiringCount,
       severity: 'urgent',
       targetView: 'contracts',
@@ -436,7 +638,7 @@ export function buildDashboardAttentionItems({
       id: 'pkwt-final-interview',
       category: 'PKWT & Contracts',
       title: 'Passed Final Interview — PKWT Setup',
-      description: `${queue.finalInterviewCount} accepted candidate${queue.finalInterviewCount === 1 ? '' : 's'} ready for PKWT agreement printing.`,
+      description: `${queue.finalInterviewCount} accepted candidate${queue.finalInterviewCount === 1 ? '' : 's'} ready for PKWT setup.`,
       count: queue.finalInterviewCount,
       severity: 'warning',
       targetView: 'contracts',
@@ -449,11 +651,11 @@ export function buildDashboardAttentionItems({
       id: 'leads-recommended',
       category: 'Lead Register',
       title: 'Recommended Leads Not Yet Invited',
-      description: `${recommendedLeadsPending} recommended lead${recommendedLeadsPending === 1 ? '' : 's'} waiting for Stage 2 invitation.`,
+      description: `${recommendedLeadsPending} recommended lead${recommendedLeadsPending === 1 ? '' : 's'} awaiting Stage 2 invitation.`,
       count: recommendedLeadsPending,
       severity: 'info',
       targetView: 'stage1',
-      ctaLabel: 'Review Leads'
+      ctaLabel: 'Open Lead Register'
     });
   }
 
@@ -462,11 +664,11 @@ export function buildDashboardAttentionItems({
       id: 'candidates-awaiting-disc',
       category: 'Candidate List',
       title: 'Forms Submitted Awaiting DISC',
-      description: `${awaitingDisc} candidate${awaitingDisc === 1 ? '' : 's'} submitted Stage 2 and have not completed DISC yet.`,
+      description: `${awaitingDisc} candidate${awaitingDisc === 1 ? ' has' : 's have'} not completed DISC.`,
       count: awaitingDisc,
       severity: 'info',
       targetView: 'stage2',
-      ctaLabel: 'Open Candidates'
+      ctaLabel: 'Open Candidate List'
     });
   }
 
@@ -475,7 +677,7 @@ export function buildDashboardAttentionItems({
       id: 'candidates-awaiting-interview',
       category: 'Interview Pipeline',
       title: 'DISC Completed Awaiting Interview',
-      description: `${awaitingInterview} candidate${awaitingInterview === 1 ? '' : 's'} finished DISC and need interview scheduling.`,
+      description: `${awaitingInterview} candidate${awaitingInterview === 1 ? '' : 's'} awaiting interview scheduling.`,
       count: awaitingInterview,
       severity: 'warning',
       targetView: 'interview',
@@ -486,7 +688,7 @@ export function buildDashboardAttentionItems({
       id: 'invited-sync',
       category: 'Invited',
       title: 'Candidates Missing Invite Log',
-      description: `${uninvitedFormCandidates} active candidate${uninvitedFormCandidates === 1 ? '' : 's'} not yet tracked in Invited.`,
+      description: `${uninvitedFormCandidates} candidate${uninvitedFormCandidates === 1 ? '' : 's'} not yet tracked in Invited.`,
       count: uninvitedFormCandidates,
       severity: 'info',
       targetView: 'invited',
@@ -499,7 +701,7 @@ export function buildDashboardAttentionItems({
       id: 'directory-incomplete',
       category: 'Employee Directory',
       title: 'Contract Records Missing End Date or Address',
-      description: `${incompleteContractEmployees} contract employee${incompleteContractEmployees === 1 ? '' : 's'} need complete directory details for PKWT.`,
+      description: `${incompleteContractEmployees} contract employee${incompleteContractEmployees === 1 ? '' : 's'} missing required PKWT fields.`,
       count: incompleteContractEmployees,
       severity: 'info',
       targetView: 'employees',

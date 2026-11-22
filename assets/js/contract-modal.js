@@ -6,15 +6,13 @@ import {
   buildAgreementPayload,
   computeEndDate,
   determineRequiredContractDocuments,
-  extractDocSequence,
-  formatDurationParts,
-  inferDurationMonths,
+  formatContractCode,
   parseNumericCurrency,
   renderAgreementHtml,
   toIsoDate
 } from './contract-logic.js?v=20261121-hrga-workspace-15';
 
-const CONTRACT_SETTINGS_KEY = 'hrga_contract_settings_v1';
+export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
 function formatCurrencyDigits(raw = '') {
   const digits = String(raw ?? '').replace(/[^\d]/g, '');
@@ -25,30 +23,35 @@ function formatCurrencyDigits(raw = '') {
 let cachedMasters = null;
 const cachedTemplates = new Map();
 
-function readSavedContractSettings() {
+export function readSavedContractSettings() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(CONTRACT_SETTINGS_KEY) || 'null');
-    return parsed && typeof parsed === 'object' ? { ...DEFAULT_CONTRACT_SETTINGS, ...parsed } : { ...DEFAULT_CONTRACT_SETTINGS };
+    const parsed = JSON.parse(localStorage.getItem(CONTRACT_SETTINGS_STORAGE_KEY) || 'null');
+    return parsed && typeof parsed === 'object'
+      ? { ...DEFAULT_CONTRACT_SETTINGS, ...parsed }
+      : { ...DEFAULT_CONTRACT_SETTINGS };
   } catch {
     return { ...DEFAULT_CONTRACT_SETTINGS };
   }
 }
 
-function writeSavedContractSettings(settings) {
+export function writeSavedContractSettings(settings = {}) {
   try {
-    localStorage.setItem(CONTRACT_SETTINGS_KEY, JSON.stringify({
-      companyId: settings.companyId,
-      prevUmkYear: settings.prevUmkYear,
-      prevUmkAmount: settings.prevUmkAmount,
-      currUmkYear: settings.currUmkYear,
-      currUmkAmount: settings.currUmkAmount,
-      governorDecreeNo: settings.governorDecreeNo,
-      overtimeWeekdayRate: settings.overtimeWeekdayRate,
-      overtimeHolidayRate: settings.overtimeHolidayRate,
-      paydayDay: settings.paydayDay,
-      signingCity: settings.signingCity,
-      hrName: settings.hrName,
-      hrSignatureTitle: settings.hrSignatureTitle
+    const current = readSavedContractSettings();
+    localStorage.setItem(CONTRACT_SETTINGS_STORAGE_KEY, JSON.stringify({
+      ...current,
+      companyId: settings.companyId ?? current.companyId,
+      prevUmkYear: Number(settings.prevUmkYear) || current.prevUmkYear,
+      prevUmkAmount: parseNumericCurrency(settings.prevUmkAmount ?? current.prevUmkAmount),
+      currUmkYear: Number(settings.currUmkYear) || current.currUmkYear,
+      currUmkAmount: parseNumericCurrency(settings.currUmkAmount ?? current.currUmkAmount),
+      governorDecreeNo: settings.governorDecreeNo ?? current.governorDecreeNo,
+      overtimeWeekdayRate: parseNumericCurrency(settings.overtimeWeekdayRate ?? current.overtimeWeekdayRate),
+      overtimeHolidayRate: parseNumericCurrency(settings.overtimeHolidayRate ?? current.overtimeHolidayRate),
+      paydayDay: Number(settings.paydayDay) || current.paydayDay,
+      signingCity: settings.signingCity ?? current.signingCity,
+      hrName: settings.hrName ?? current.hrName,
+      hrSignatureTitle: settings.hrSignatureTitle ?? current.hrSignatureTitle,
+      lastDocSequence: Number(settings.lastDocSequence ?? current.lastDocSequence) || 0
     }));
   } catch {}
 }
@@ -69,10 +72,6 @@ async function loadContractTemplate(docMeta) {
   const html = await res.text();
   cachedTemplates.set(docMeta.key, html);
   return html;
-}
-
-function formatRupiah(amount) {
-  return `Rp ${Math.max(0, Math.round(Number(amount) || 0)).toLocaleString('id-ID')}`;
 }
 
 function decorateScreenPreview(html) {
@@ -104,81 +103,84 @@ function decorateScreenPreview(html) {
     : `${previewCss}${html}`;
 }
 
-function buildCombinedPrintHtml(renderedDocs, title = 'PKWT Agreement Package') {
-  const styles = [];
-  const bodies = [];
-  const parser = new DOMParser();
-
-  renderedDocs.forEach((docHtml, idx) => {
-    const parsed = parser.parseFromString(docHtml, 'text/html');
-    if (idx === 0) {
-      parsed.querySelectorAll('style').forEach(s => styles.push(s.textContent || ''));
-    }
-    const pageEl = parsed.querySelector('.a4-page');
-    if (pageEl) {
-      bodies.push(`<div class="contract-print-sheet">${pageEl.outerHTML}</div>`);
-    } else {
-      bodies.push(`<div class="contract-print-sheet">${parsed.body?.innerHTML || docHtml}</div>`);
-    }
-  });
-
-  return `<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8">
-  <title>${esc(title)}</title>
-  <style>
-    ${styles.join('\n')}
-    .contract-print-sheet + .contract-print-sheet {
-      page-break-before: always;
-      break-before: page;
-    }
-    @media print {
-      .a4-page {
-        min-height: auto !important;
-      }
-    }
-  </style>
-</head>
-<body>
-  ${bodies.join('\n')}
-</body>
-</html>`;
+function scopeTemplateCssForPrintStage(rawCss = '') {
+  return String(rawCss || '')
+    .replace(/\bbody\b/g, '#pkwt-print-stage')
+    .replace(/\bhtml\b/g, '#pkwt-print-stage');
 }
 
-function printHtmlViaHiddenIframe(html) {
-  const existing = document.getElementById('pkwt-hidden-print-frame');
-  if (existing) existing.remove();
-  const frame = document.createElement('iframe');
-  frame.id = 'pkwt-hidden-print-frame';
-  frame.setAttribute('aria-hidden', 'true');
-  frame.style.position = 'fixed';
-  frame.style.right = '0';
-  frame.style.bottom = '0';
-  frame.style.width = '1px';
-  frame.style.height = '1px';
-  frame.style.opacity = '0';
-  frame.style.pointerEvents = 'none';
-  frame.style.border = '0';
+function printDocumentsViaDomStage(renderedDocs, title = 'PKWT Agreement Package') {
+  return new Promise(resolve => {
+    const parser = new DOMParser();
+    const collectedStyles = [];
+    const sheets = [];
 
-  frame.onload = () => {
-    setTimeout(() => {
-      try {
-        frame.contentWindow?.focus();
-        frame.contentWindow?.print();
-      } catch (err) {
-        console.warn('Contract print invocation skipped:', err);
+    renderedDocs.forEach((docHtml, idx) => {
+      const parsed = parser.parseFromString(docHtml, 'text/html');
+      if (idx === 0) {
+        parsed.querySelectorAll('style').forEach(s => {
+          collectedStyles.push(scopeTemplateCssForPrintStage(s.textContent || ''));
+        });
       }
-    }, 120);
-  };
-  frame.srcdoc = html;
-  document.body.append(frame);
+      const pageEl = parsed.querySelector('.a4-page');
+      sheets.push(`<div class="pkwt-print-sheet">${pageEl ? pageEl.outerHTML : (parsed.body?.innerHTML || docHtml)}</div>`);
+    });
+
+    let stage = document.getElementById('pkwt-print-stage');
+    if (!stage) {
+      stage = document.createElement('div');
+      stage.id = 'pkwt-print-stage';
+      stage.setAttribute('aria-hidden', 'true');
+      document.body.append(stage);
+    }
+
+    let styleEl = document.getElementById('pkwt-print-dynamic-style');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'pkwt-print-dynamic-style';
+      document.head.append(styleEl);
+    }
+
+    styleEl.textContent = collectedStyles.join('\n');
+    stage.innerHTML = sheets.join('\n');
+
+    const prevTitle = document.title;
+    document.title = title;
+    document.body.classList.add('pkwt-printing');
+
+    let done = false;
+    let fallbackTimer = null;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      window.removeEventListener('afterprint', cleanup);
+      document.body.classList.remove('pkwt-printing');
+      document.title = prevTitle;
+      resolve();
+    };
+
+    window.addEventListener('afterprint', cleanup, { once: true });
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          window.print();
+        } catch (err) {
+          console.warn('window.print invocation error:', err);
+        } finally {
+          fallbackTimer = setTimeout(cleanup, 300);
+        }
+      }, 80);
+    });
+  });
 }
 
 export async function openPkwtConfigModal({
   record = {},
-  onPersistEmployee = null,
-  onNotify = null
+  contractSettings = null,
+  nextDocSequence = '',
+  onAfterPrint = null
 } = {}) {
   const [masters] = await Promise.all([
     loadCompanyMasters(),
@@ -193,19 +195,16 @@ export async function openPkwtConfigModal({
     modal.innerHTML = `<section class="pkwt-modal-card" role="dialog" aria-modal="true" aria-labelledby="pkwt-modal-title">
       <div class="pkwt-modal-head">
         <div>
-          <small id="pkwt-modal-kicker">CONTRACT &amp; PKWT CONFIGURATION</small>
+          <small>CONTRACT &amp; PKWT CONFIGURATION</small>
           <h2 id="pkwt-modal-title">Configure &amp; Print PKWT Agreement</h2>
         </div>
         <div class="pkwt-head-actions">
-          <span id="pkwt-umk-pill" class="status-pill green">1 Document Required</span>
           <button type="button" class="modal-close" id="pkwt-modal-close" aria-label="Close PKWT Configuration">×</button>
         </div>
       </div>
 
       <div class="pkwt-modal-body">
         <form id="pkwt-config-form" class="pkwt-config-pane">
-          <div id="pkwt-umk-banner" class="pkwt-umk-banner is-ok" role="status"></div>
-
           <fieldset class="pkwt-fieldset">
             <legend>1. Company &amp; Document Header</legend>
             <div class="pkwt-grid-2">
@@ -213,7 +212,7 @@ export async function openPkwtConfigModal({
                 <select class="select" name="companyId" required></select>
               </label>
               <label>Document Sequence No.
-                <input class="input" type="text" name="docSequence" maxlength="20" required placeholder="e.g., 184">
+                <input class="input" type="text" name="docSequence" maxlength="20" required placeholder="e.g., 202">
               </label>
               <label>Contract Start / Signing Date
                 <input class="input" type="date" name="signingDate" required>
@@ -224,17 +223,8 @@ export async function openPkwtConfigModal({
                   <option value="24">2 Years (24 Months)</option>
                 </select>
               </label>
-              <label>Contract End Date (Auto / Editable)
-                <input class="input" type="date" name="endDate" required>
-              </label>
-              <label>Duration Phrase (Preview)
-                <input class="input" type="text" name="durationPreview" readonly>
-              </label>
-              <label>Signing City
+              <label class="pkwt-col-span-2">Signing City
                 <input class="input" type="text" name="signingCity" maxlength="60" required>
-              </label>
-              <label>HR Signer Name
-                <input class="input" type="text" name="hrName" maxlength="100" required>
               </label>
             </div>
           </fieldset>
@@ -247,6 +237,9 @@ export async function openPkwtConfigModal({
               </label>
               <label>Official Position
                 <input class="input" type="text" name="employeePosition" maxlength="120" required>
+              </label>
+              <label class="pkwt-col-span-2">Monthly Cash Wage / Salary (IDR)
+                <input class="input" type="text" inputmode="numeric" name="cashWageAmount" required placeholder="e.g., 5.200.000">
               </label>
               <label class="pkwt-col-span-2">Address
                 <textarea class="textarea" name="employeeAddress" rows="2" maxlength="300" required placeholder="Full residential address for agreement"></textarea>
@@ -287,47 +280,6 @@ export async function openPkwtConfigModal({
               </div>
             </div>
           </fieldset>
-
-          <fieldset class="pkwt-fieldset">
-            <legend>3. Wage &amp; UMK Compliance Rule</legend>
-            <div class="pkwt-grid-2">
-              <label>Monthly Cash Wage / Salary (IDR)
-                <input class="input" type="text" inputmode="numeric" name="cashWageAmount" required placeholder="e.g., 5.200.000">
-              </label>
-              <label>Current Year UMK (IDR)
-                <input class="input" type="text" inputmode="numeric" name="currUmkAmount" required>
-              </label>
-              <label>Payday Date (Every Month)
-                <input class="input" type="number" name="paydayDay" min="1" max="31" required>
-              </label>
-              <label>UMK Year
-                <input class="input" type="number" name="currUmkYear" min="2020" max="2099" required>
-              </label>
-            </div>
-
-            <div id="pkwt-pb-fields" class="pkwt-pb-fields hidden">
-              <div class="pkwt-pb-note">Below-UMK Wage Details (Required for Joint Agreements 02–05)</div>
-              <div class="pkwt-grid-2">
-                <label>Previous Year UMK (IDR)
-                  <input class="input" type="text" inputmode="numeric" name="prevUmkAmount">
-                </label>
-                <label>Previous UMK Year
-                  <input class="input" type="number" name="prevUmkYear" min="2020" max="2099">
-                </label>
-                <label class="pkwt-col-span-2">Governor Decree No. (SK Gubernur)
-                  <input class="input" type="text" name="governorDecreeNo" maxlength="100">
-                </label>
-                <label>Weekday Overtime Rate / Hour (IDR)
-                  <input class="input" type="text" inputmode="numeric" name="overtimeWeekdayRate">
-                </label>
-                <label>Holiday Overtime Rate / Hour (IDR)
-                  <input class="input" type="text" inputmode="numeric" name="overtimeHolidayRate">
-                </label>
-              </div>
-            </div>
-          </fieldset>
-
-          ${onPersistEmployee ? `<label class="pkwt-check-label pkwt-save-sync"><input type="checkbox" name="syncToEmployee" checked><span>Update contract dates &amp; salary in Employee Directory when printing</span></label>` : ''}
         </form>
 
         <div class="pkwt-preview-pane">
@@ -358,37 +310,31 @@ export async function openPkwtConfigModal({
   const tabsWrap = $('#pkwt-doc-tabs', modal);
   const previewFrame = $('#pkwt-preview-frame', modal);
   const errorBox = $('#pkwt-modal-error', modal);
-  const umkBanner = $('#pkwt-umk-banner', modal);
-  const umkPill = $('#pkwt-umk-pill', modal);
-  const pbFieldsWrap = $('#pkwt-pb-fields', modal);
   const printSingleBtn = $('#pkwt-print-single', modal);
   const printAllBtn = $('#pkwt-print-all', modal);
 
   errorBox.textContent = '';
 
-  const savedSettings = readSavedContractSettings();
+  const activeSettings = {
+    ...readSavedContractSettings(),
+    ...(contractSettings && typeof contractSettings === 'object' ? contractSettings : {})
+  };
+
   const companySelect = form.elements.companyId;
   companySelect.innerHTML = masters.map(c =>
     `<option value="${esc(c.id)}">${esc(c.companyDisplayName || c.companyName)}</option>`
   ).join('');
 
-  const initialCompanyId = masters.some(m => m.id === savedSettings.companyId)
-    ? savedSettings.companyId
+  const initialCompanyId = masters.some(m => m.id === activeSettings.companyId)
+    ? activeSettings.companyId
     : (masters[0]?.id || 'comp-mbm');
   companySelect.value = initialCompanyId;
   const activeMaster = () => masters.find(m => m.id === companySelect.value) || masters[0];
 
   const startDate = toIsoDate(record.contractStartDate || record.workStartDate || new Date());
-  const durMonths = inferDurationMonths(
-    startDate,
-    record.contractEndDate || '',
-    Number(record.durationMonths) || 12
-  );
-  const endDate = record.contractEndDate && /^\d{4}-\d{2}-\d{2}$/.test(record.contractEndDate)
-    ? record.contractEndDate
-    : computeEndDate(startDate, durMonths);
+  const durMonths = Number(record.durationMonths) || 12;
 
-  form.elements.docSequence.value = extractDocSequence(record.contractNumber || '', savedSettings.defaultDocSequence || '001');
+  form.elements.docSequence.value = String(nextDocSequence || activeSettings.defaultDocSequence || '001');
   form.elements.signingDate.value = startDate;
   if (![...form.elements.durationMonths.options].some(o => Number(o.value) === durMonths)) {
     const opt = document.createElement('option');
@@ -397,16 +343,16 @@ export async function openPkwtConfigModal({
     form.elements.durationMonths.append(opt);
   }
   form.elements.durationMonths.value = String(durMonths);
-  form.elements.endDate.value = endDate;
-  form.elements.durationPreview.value = formatDurationParts(durMonths).fullPhrase;
 
   const master = activeMaster();
-  form.elements.signingCity.value = savedSettings.signingCity || master?.signingCity || 'Pasuruan';
-  form.elements.hrName.value = savedSettings.hrName || master?.hrName || 'Diana Anita Sari';
+  form.elements.signingCity.value = activeSettings.signingCity || master?.signingCity || 'Pasuruan';
 
   form.elements.employeeName.value = record.fullName || '';
   form.elements.employeePosition.value = record.position || '';
   form.elements.employeeAddress.value = record.address || '';
+
+  const initialSalary = parseNumericCurrency(record.salary) || parseNumericCurrency(activeSettings.currUmkAmount);
+  form.elements.cashWageAmount.value = formatCurrencyDigits(initialSalary);
 
   // Optional fields MUST start unchecked unless user explicitly checks them
   form.elements.includeKtp.checked = false;
@@ -434,36 +380,23 @@ export async function openPkwtConfigModal({
   };
   syncOptionalInputs();
 
-  const initialSalary = parseNumericCurrency(record.salary) || parseNumericCurrency(savedSettings.currUmkAmount);
-  form.elements.cashWageAmount.value = formatCurrencyDigits(initialSalary);
-  form.elements.currUmkAmount.value = formatCurrencyDigits(savedSettings.currUmkAmount);
-  form.elements.currUmkYear.value = String(savedSettings.currUmkYear || new Date().getFullYear());
-  form.elements.prevUmkAmount.value = formatCurrencyDigits(savedSettings.prevUmkAmount);
-  form.elements.prevUmkYear.value = String(savedSettings.prevUmkYear || (new Date().getFullYear() - 1));
-  form.elements.governorDecreeNo.value = savedSettings.governorDecreeNo || DEFAULT_CONTRACT_SETTINGS.governorDecreeNo;
-  form.elements.overtimeWeekdayRate.value = formatCurrencyDigits(savedSettings.overtimeWeekdayRate);
-  form.elements.overtimeHolidayRate.value = formatCurrencyDigits(savedSettings.overtimeHolidayRate);
-  form.elements.paydayDay.value = String(savedSettings.paydayDay || 10);
-
-  if (form.elements.syncToEmployee) {
-    form.elements.syncToEmployee.checked = Boolean(record.employeeId);
-  }
-
   let selectedDocKey = CONTRACT_DOCUMENTS[0].key;
   let renderSeq = 0;
 
   const collectFormConfig = () => {
     const currentMaster = activeMaster();
+    const sDate = toIsoDate(form.elements.signingDate.value);
+    const months = Number(form.elements.durationMonths.value) || 12;
     return {
       companyId: companySelect.value,
       docSequence: form.elements.docSequence.value.trim(),
-      signingDate: form.elements.signingDate.value,
-      durationMonths: Number(form.elements.durationMonths.value) || 12,
-      endDate: form.elements.endDate.value,
-      paydayDay: Number(form.elements.paydayDay.value) || 10,
+      signingDate: sDate,
+      durationMonths: months,
+      endDate: computeEndDate(sDate, months),
+      paydayDay: Number(activeSettings.paydayDay) || DEFAULT_CONTRACT_SETTINGS.paydayDay,
       signingCity: form.elements.signingCity.value.trim(),
-      hrName: form.elements.hrName.value.trim(),
-      hrSignatureTitle: savedSettings.hrSignatureTitle || currentMaster?.hrSignatureTitle || 'Manager HR GA',
+      hrName: activeSettings.hrName || currentMaster?.hrName || DEFAULT_CONTRACT_SETTINGS.hrName,
+      hrSignatureTitle: activeSettings.hrSignatureTitle || currentMaster?.hrSignatureTitle || DEFAULT_CONTRACT_SETTINGS.hrSignatureTitle,
       employeeName: form.elements.employeeName.value.trim(),
       employeePosition: form.elements.employeePosition.value.trim(),
       employeeAddress: form.elements.employeeAddress.value.trim(),
@@ -476,13 +409,13 @@ export async function openPkwtConfigModal({
       includeCustomNote: form.elements.includeCustomNote.checked,
       customNote: form.elements.customNote.value.trim(),
       cashWageAmount: parseNumericCurrency(form.elements.cashWageAmount.value),
-      currUmkAmount: parseNumericCurrency(form.elements.currUmkAmount.value),
-      currUmkYear: Number(form.elements.currUmkYear.value) || 2026,
-      prevUmkAmount: parseNumericCurrency(form.elements.prevUmkAmount.value),
-      prevUmkYear: Number(form.elements.prevUmkYear.value) || 2025,
-      governorDecreeNo: form.elements.governorDecreeNo.value.trim(),
-      overtimeWeekdayRate: parseNumericCurrency(form.elements.overtimeWeekdayRate.value),
-      overtimeHolidayRate: parseNumericCurrency(form.elements.overtimeHolidayRate.value)
+      currUmkAmount: parseNumericCurrency(activeSettings.currUmkAmount),
+      currUmkYear: Number(activeSettings.currUmkYear) || DEFAULT_CONTRACT_SETTINGS.currUmkYear,
+      prevUmkAmount: parseNumericCurrency(activeSettings.prevUmkAmount),
+      prevUmkYear: Number(activeSettings.prevUmkYear) || DEFAULT_CONTRACT_SETTINGS.prevUmkYear,
+      governorDecreeNo: activeSettings.governorDecreeNo || DEFAULT_CONTRACT_SETTINGS.governorDecreeNo,
+      overtimeWeekdayRate: parseNumericCurrency(activeSettings.overtimeWeekdayRate),
+      overtimeHolidayRate: parseNumericCurrency(activeSettings.overtimeHolidayRate)
     };
   };
 
@@ -492,18 +425,6 @@ export async function openPkwtConfigModal({
     const currentMaster = activeMaster();
     const rule = determineRequiredContractDocuments(config.cashWageAmount, config.currUmkAmount);
 
-    umkPill.textContent = `${rule.requiredCount} ${rule.requiredCount === 1 ? 'Document' : 'Documents'} Required`;
-    umkPill.className = `status-pill ${rule.meetsUmk ? 'green' : 'gold'}`;
-
-    if (rule.meetsUmk) {
-      umkBanner.className = 'pkwt-umk-banner is-ok';
-      umkBanner.innerHTML = `<b>Wage meets or exceeds UMK (${formatRupiah(rule.umk)}):</b> Only <b>PKWT (1 document)</b> is required. Joint Agreements (Perjanjian Bersama / Penyelesaian Bersama) are automatically omitted.`;
-    } else {
-      umkBanner.className = 'pkwt-umk-banner is-warn';
-      umkBanner.innerHTML = `<b>Wage is below UMK (${formatRupiah(rule.umk)}) · Shortfall ${formatRupiah(rule.shortfall)}:</b> All <b>5 agreements</b> (PKWT + 4 Joint Agreements) are required.`;
-    }
-
-    pbFieldsWrap.classList.toggle('hidden', rule.meetsUmk);
     printAllBtn.textContent = `Print All Required (${rule.requiredCount})`;
 
     if (!rule.documents.some(d => d.key === selectedDocKey)) {
@@ -536,36 +457,21 @@ export async function openPkwtConfigModal({
     }
   };
 
-  // Wire field listeners
   companySelect.onchange = () => {
     const m = activeMaster();
-    if (m) {
+    if (m && !activeSettings.signingCity) {
       form.elements.signingCity.value = m.signingCity || 'Pasuruan';
-      form.elements.hrName.value = m.hrName || 'Diana Anita Sari';
     }
     renderPreview();
   };
 
-  const syncDatesFromDuration = () => {
-    const sDate = form.elements.signingDate.value;
-    const months = Number(form.elements.durationMonths.value) || 12;
-    form.elements.durationPreview.value = formatDurationParts(months).fullPhrase;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(sDate)) {
-      form.elements.endDate.value = computeEndDate(sDate, months);
-    }
+  form.elements.signingDate.onchange = () => renderPreview();
+  form.elements.durationMonths.onchange = () => renderPreview();
+
+  form.elements.cashWageAmount.oninput = () => {
+    form.elements.cashWageAmount.value = formatCurrencyDigits(form.elements.cashWageAmount.value);
     renderPreview();
   };
-
-  form.elements.signingDate.onchange = syncDatesFromDuration;
-  form.elements.durationMonths.onchange = syncDatesFromDuration;
-
-  ['cashWageAmount', 'currUmkAmount', 'prevUmkAmount', 'overtimeWeekdayRate', 'overtimeHolidayRate'].forEach(name => {
-    const el = form.elements[name];
-    el.oninput = () => {
-      el.value = formatCurrencyDigits(el.value);
-      renderPreview();
-    };
-  });
 
   ['includeKtp', 'includeNik', 'includeDepartment', 'includeCustomNote'].forEach(name => {
     form.elements[name].onchange = () => {
@@ -575,7 +481,7 @@ export async function openPkwtConfigModal({
   });
 
   form.oninput = event => {
-    if (['cashWageAmount', 'currUmkAmount', 'prevUmkAmount', 'overtimeWeekdayRate', 'overtimeHolidayRate', 'signingDate', 'durationMonths'].includes(event.target?.name)) {
+    if (['cashWageAmount', 'signingDate', 'durationMonths'].includes(event.target?.name)) {
       return;
     }
     renderPreview();
@@ -595,8 +501,6 @@ export async function openPkwtConfigModal({
     }
 
     const currentMaster = activeMaster();
-    writeSavedContractSettings(config);
-
     const rule = determineRequiredContractDocuments(config.cashWageAmount, config.currUmkAmount);
     const docsToPrint = printAll
       ? rule.documents
@@ -616,21 +520,20 @@ export async function openPkwtConfigModal({
         })
       );
 
-      if (onPersistEmployee && form.elements.syncToEmployee?.checked) {
-        await onPersistEmployee({
-          record,
-          config,
-          payload
-        });
-      }
-
-      const combined = buildCombinedPrintHtml(
+      await printDocumentsViaDomStage(
         htmlList,
         `${config.employeeName} — ${printAll ? `${docsToPrint.length} Contract Documents` : docsToPrint[0].title}`
       );
-      printHtmlViaHiddenIframe(combined);
-      if (onNotify) {
-        onNotify(`Prepared ${docsToPrint.length} agreement document${docsToPrint.length === 1 ? '' : 's'} for ${config.employeeName}.`);
+
+      modal.classList.add('hidden');
+
+      if (typeof onAfterPrint === 'function') {
+        await onAfterPrint({
+          record,
+          config,
+          payload,
+          docsPrinted: docsToPrint.length
+        });
       }
     } catch (err) {
       errorBox.textContent = err.message || 'Failed to prepare agreement package for printing.';
@@ -645,4 +548,154 @@ export async function openPkwtConfigModal({
 
   modal.classList.remove('hidden');
   await renderPreview();
+}
+
+export function openPostPrintEmployeeUpdateModal({
+  record = {},
+  config = {},
+  payload = {},
+  currentEmployee = null,
+  isRootAdmin = false,
+  onSubmitUpdate = null
+} = {}) {
+  let modal = document.getElementById('pkwt-post-print-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'pkwt-post-print-modal';
+    modal.className = 'modal-backdrop hidden';
+    modal.innerHTML = `<section class="employee-modal-card" style="width:min(720px,100%)" role="dialog" aria-modal="true" aria-labelledby="pkwt-post-title">
+      <div class="employee-modal-head">
+        <div>
+          <small>POST-PRINT EMPLOYEE UPDATE</small>
+          <h2 id="pkwt-post-title">Update Employee Directory Record</h2>
+        </div>
+        <button type="button" class="modal-close" id="pkwt-post-close" aria-label="Close">×</button>
+      </div>
+      <form id="pkwt-post-form">
+        <div class="employee-form-grid">
+          <label>Full Name
+            <input class="input" type="text" name="fullName" required maxlength="120">
+          </label>
+          <label>Employee NIK
+            <input class="input" type="text" name="employeeNik" required maxlength="40" placeholder="e.g., MBM-2026-0202">
+          </label>
+          <label>Official Position
+            <input class="input" type="text" name="position" required maxlength="120">
+          </label>
+          <label>Department
+            <input class="input" type="text" name="department" maxlength="120" placeholder="e.g., Production">
+          </label>
+          <label>Employment Status
+            <select class="select" name="employmentStatus">
+              <option value="KONTRAK">KONTRAK</option>
+              <option value="PKWT">PKWT</option>
+            </select>
+          </label>
+          <label>Contract Number
+            <input class="input" type="text" name="contractNumber" required maxlength="80">
+          </label>
+          <label>Contract Start Date
+            <input class="input" type="date" name="contractStartDate" required>
+          </label>
+          <label>Contract End Date
+            <input class="input" type="date" name="contractEndDate" required>
+          </label>
+          <label>Monthly Salary (IDR)
+            <input class="input" type="text" inputmode="numeric" name="salary" required>
+          </label>
+          <label>Address
+            <input class="input" type="text" name="address" maxlength="300" required>
+          </label>
+        </div>
+        <div id="pkwt-post-error" class="form-error" role="alert"></div>
+        <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary" id="pkwt-post-skip">Skip</button>
+          <button type="submit" class="btn btn-secondary" id="pkwt-post-submit">Submit for Admin Approval</button>
+          <button type="button" class="btn btn-primary hidden" id="pkwt-post-approve-now">Approve &amp; Update Employee</button>
+        </div>
+      </form>
+    </section>`;
+    document.body.append(modal);
+
+    const close = () => modal.classList.add('hidden');
+    $('#pkwt-post-close', modal).addEventListener('click', close);
+    $('#pkwt-post-skip', modal).addEventListener('click', close);
+  }
+
+  const form = $('#pkwt-post-form', modal);
+  const errorBox = $('#pkwt-post-error', modal);
+  const submitBtn = $('#pkwt-post-submit', modal);
+  const approveNowBtn = $('#pkwt-post-approve-now', modal);
+  errorBox.textContent = '';
+
+  const startDate = toIsoDate(payload.signingDate || config.signingDate || new Date());
+  const durationMonths = Number(payload.durationMonths || config.durationMonths) || 12;
+  const endDate = payload.endDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.endDate)
+    ? payload.endDate
+    : computeEndDate(startDate, durationMonths);
+
+  form.elements.fullName.value = config.employeeName || currentEmployee?.full_name || record.fullName || '';
+  form.elements.employeeNik.value = (config.includeNik ? config.employeeNik : '') || currentEmployee?.employee_no || record.employeeNik || '';
+  form.elements.position.value = config.employeePosition || currentEmployee?.position || record.position || '';
+  form.elements.department.value = (config.includeDepartment ? config.employeeDepartment : '') || currentEmployee?.department || record.department || '';
+  form.elements.employmentStatus.value = currentEmployee?.employment_status?.toUpperCase() === 'PKWT' ? 'PKWT' : 'KONTRAK';
+  form.elements.contractNumber.value = formatContractCode(payload.docSequence || config.docSequence || '001', startDate, 'PKWT');
+  form.elements.contractStartDate.value = startDate;
+  form.elements.contractEndDate.value = endDate;
+  form.elements.salary.value = formatCurrencyDigits(config.cashWageAmount || record.salary || 0);
+  form.elements.address.value = config.employeeAddress || currentEmployee?.address || record.address || '';
+
+  form.elements.salary.oninput = () => {
+    form.elements.salary.value = formatCurrencyDigits(form.elements.salary.value);
+  };
+
+  approveNowBtn.classList.toggle('hidden', !isRootAdmin);
+  submitBtn.className = isRootAdmin ? 'btn btn-secondary' : 'btn btn-primary';
+
+  const runSave = async (approveImmediately) => {
+    errorBox.textContent = '';
+    if (!form.reportValidity()) return;
+    const overrides = {
+      fullName: form.elements.fullName.value.trim(),
+      employeeNik: form.elements.employeeNik.value.trim().toUpperCase(),
+      position: form.elements.position.value.trim(),
+      department: form.elements.department.value.trim(),
+      employmentStatus: form.elements.employmentStatus.value,
+      contractNumber: form.elements.contractNumber.value.trim(),
+      contractStartDate: form.elements.contractStartDate.value,
+      contractEndDate: form.elements.contractEndDate.value,
+      durationMonths,
+      docSequence: String(payload.docSequence || config.docSequence || '001').trim(),
+      salary: parseNumericCurrency(form.elements.salary.value),
+      address: form.elements.address.value.trim()
+    };
+    if (!overrides.employeeNik) {
+      errorBox.textContent = 'Employee NIK is required.';
+      form.elements.employeeNik.focus();
+      return;
+    }
+
+    submitBtn.disabled = true;
+    approveNowBtn.disabled = true;
+    try {
+      if (typeof onSubmitUpdate === 'function') {
+        await onSubmitUpdate({ overrides, approveImmediately });
+      }
+      modal.classList.add('hidden');
+    } catch (err) {
+      errorBox.textContent = err.message || 'Failed to submit employee update.';
+    } finally {
+      submitBtn.disabled = false;
+      approveNowBtn.disabled = false;
+    }
+  };
+
+  form.onsubmit = event => {
+    event.preventDefault();
+    runSave(false);
+  };
+  approveNowBtn.onclick = () => runSave(true);
+
+  modal.classList.remove('hidden');
+  form.elements.employeeNik.focus();
 }
