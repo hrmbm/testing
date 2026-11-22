@@ -44,6 +44,14 @@ import {
   openUserModal,
   openPinRevealPrompt
 } from './admin-modals.js?v=20261121-hrga-workspace-15';
+import {
+  DEFAULT_CONTRACT_SETTINGS,
+  buildContractWorkspaceQueue,
+  buildDashboardAttentionItems,
+  determineRequiredContractDocuments,
+  parseNumericCurrency
+} from './contract-logic.js?v=20261121-hrga-workspace-15';
+import { openPkwtConfigModal } from './contract-modal.js?v=20261121-hrga-workspace-15';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -103,6 +111,7 @@ const TITLES = {
   interview: 'Interview Pipeline',
   tracking: 'Tracking & Report',
   employees: 'Employee Directory',
+  contracts: 'Contracts',
   print: 'Application Print',
   settings: 'Recruitment Settings',
   userManagement: 'User Management',
@@ -119,6 +128,208 @@ const TITLES = {
   vehicleExpenses: 'Vehicle Expenses',
   vehicleReports: 'Vehicle Reports'
 };
+
+const isDemoMode = (() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    return q.get('demo') === '1' || q.get('autostart') === '1';
+  } catch {
+    return false;
+  }
+})();
+
+function seedDemoWorkspaceData() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const pad = n => String(n).padStart(2, '0');
+  const isoDay = (yr, mo, dy) => `${yr}-${pad(mo)}-${pad(dy)}`;
+  const nextMDate = new Date(Date.UTC(y, m, 1));
+  const ny = nextMDate.getUTCFullYear();
+  const nm = nextMDate.getUTCMonth() + 1;
+  const laterMDate = new Date(Date.UTC(y, m + 5, 1));
+  const ly = laterMDate.getUTCFullYear();
+  const lm = laterMDate.getUTCMonth() + 1;
+
+  stage1Leads = [
+    {
+      id: 'lead-demo-1',
+      full_name: 'Rizky Pratama',
+      position: 'CNC',
+      source: 'Jobstreet',
+      whatsapp: '081234560011',
+      recommendation: 'Recommended',
+      created_at: new Date().toISOString()
+    }
+  ];
+  invitedCandidates = [];
+  applicants = [
+    {
+      id: 'app-demo-1',
+      full_name: 'Agus Nur Wahid',
+      nik: '3514000000000184',
+      position: 'Foreman Packing',
+      stage: 'hired',
+      created_at: new Date().toISOString(),
+      application_data: {
+        alamat_asal: 'Dusun III Sukajai, Kec. Bumi Ratu Nuban Lampung Tengah',
+        telepon: '081290001184',
+        tempat_lahir: 'Lampung Tengah',
+        tanggal_lahir: '1994-05-12',
+        pendidikan_terakhir: 'SMA',
+        gender: 'L',
+        agama: 'Islam'
+      }
+    },
+    {
+      id: 'app-demo-2',
+      full_name: 'Budi Santoso',
+      nik: '3514000000000299',
+      position: 'Spray',
+      stage: 'hired',
+      created_at: new Date().toISOString(),
+      application_data: {
+        alamat_asal: 'Ds. Randupitu RT 02 RW 05, Kec. Gempol, Kab. Pasuruan',
+        telepon: '081355667788',
+        tempat_lahir: 'Pasuruan',
+        tanggal_lahir: '1996-08-19',
+        pendidikan_terakhir: 'SMK',
+        gender: 'L',
+        agama: 'Islam'
+      }
+    },
+    {
+      id: 'app-demo-3',
+      full_name: 'Siti Aminah',
+      nik: '3514000000000311',
+      position: 'QC Finishing',
+      stage: 'application_submitted',
+      created_at: new Date().toISOString(),
+      application_data: {
+        alamat_asal: 'Kec. Pandaan, Kab. Pasuruan',
+        telepon: '081233445566',
+        gender: 'P'
+      }
+    }
+  ];
+  employees = [
+    {
+      id: 'emp-demo-exp-1',
+      applicant_id: null,
+      employee_no: 'ST 250112',
+      full_name: 'Hendra Wijaya',
+      department: 'Produksi / CNC',
+      position: 'Operator CNC',
+      employment_status: 'KONTRAK',
+      join_date: isoDay(y - 1, m, 28),
+      contract_start_date: isoDay(y - 1, m, 28),
+      contract_end_date: isoDay(y, m, 27),
+      address: 'Jl. Raya Pandaan No. 42, Kec. Pandaan, Kab. Pasuruan',
+      ktp_nik: '3514122711950002',
+      phone: '081330112233',
+      salary: 4400000,
+      notes: 'Contract No. 088/PKWT/XI/2025'
+    },
+    {
+      id: 'emp-demo-exp-2',
+      applicant_id: null,
+      employee_no: 'ST 251204',
+      full_name: 'Dewi Kartika',
+      department: 'Purchasing',
+      position: 'Staff Purchasing',
+      employment_status: 'KONTRAK',
+      join_date: isoDay(y - 1, nm, 15),
+      contract_start_date: isoDay(y - 1, nm, 15),
+      contract_end_date: isoDay(ny, nm, 14),
+      address: 'Perum Pondok Sejahtera Blok C-9, Sidoarjo',
+      ktp_nik: '3515085412970001',
+      phone: '081222334455',
+      salary: 5500000,
+      notes: 'Contract No. 112/PKWT/XII/2025'
+    },
+    {
+      id: 'emp-demo-later',
+      applicant_id: null,
+      employee_no: 'ST 260801',
+      full_name: 'Ahmad Fauzi',
+      department: 'Maintenance',
+      position: 'Teknisi Listrik',
+      employment_status: 'KONTRAK',
+      join_date: isoDay(y, m, 1),
+      contract_start_date: isoDay(y, m, 1),
+      contract_end_date: isoDay(ly, lm, 15),
+      address: 'Kec. Bangil, Kab. Pasuruan',
+      ktp_nik: '3514090101930005',
+      phone: '081777889900',
+      salary: 5300000,
+      notes: ''
+    },
+    {
+      id: 'emp-demo-pic',
+      applicant_id: null,
+      employee_no: 'ST 130116',
+      full_name: 'Diana Anita Sari',
+      department: 'HRD & GA',
+      position: 'Manager HRD & GA',
+      employment_status: 'TETAP',
+      join_date: '2013-01-16',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Pasuruan',
+      ktp_nik: '3514000000000001',
+      phone: '08133193313',
+      salary: 12000000,
+      notes: ''
+    }
+  ];
+  interviews = [
+    {
+      id: 'intv-demo-1',
+      source_type: 'applicant',
+      applicant_id: 'app-demo-1',
+      candidate_name: 'Agus Nur Wahid',
+      candidate_nik: '3514000000000184',
+      candidate_whatsapp: '081290001184',
+      applied_position: 'Foreman Packing',
+      interview_stage: 'Final Interview',
+      interview_date: isoDay(y, m, 2),
+      pic_name: 'Diana Anita Sari',
+      decision: 'Accepted',
+      work_start_date: isoDay(y, m, 2),
+      salary: 4400000,
+      contract_duration_months: 12,
+      contract_start_date: isoDay(y, m, 2),
+      contract_end_date: isoDay(y + 1, m, 1),
+      official_position: 'Foreman Packing',
+      assigned_nik: 'MBM-2026-0184',
+      contract_number: '184/PKWT/XI/2026',
+      notes: 'Below UMK sample case'
+    },
+    {
+      id: 'intv-demo-2',
+      source_type: 'applicant',
+      applicant_id: 'app-demo-2',
+      candidate_name: 'Budi Santoso',
+      candidate_nik: '3514000000000299',
+      candidate_whatsapp: '081355667788',
+      applied_position: 'Spray',
+      interview_stage: 'Final Interview',
+      interview_date: isoDay(y, m, 10),
+      pic_name: 'Diana Anita Sari',
+      decision: 'Accepted',
+      work_start_date: isoDay(y, m, 15),
+      salary: 5400000,
+      contract_duration_months: 12,
+      contract_start_date: isoDay(y, m, 15),
+      contract_end_date: isoDay(y + 1, m, 14),
+      official_position: 'Senior Spray Finishing',
+      assigned_nik: 'MBM-2026-0201',
+      contract_number: '201/PKWT/XI/2026',
+      notes: 'Above UMK sample case'
+    }
+  ];
+  lastDataFetchedAt = Date.now();
+}
 
 
 function say(message) {
@@ -462,7 +673,7 @@ function triggerBackgroundRevalidate() {
     .then(() => {
       const hasOpenModal = Boolean($('.modal-backdrop:not(.hidden)'));
       const searchVal = $('#table-search')?.value?.trim();
-      const autoRefreshViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
+      const autoRefreshViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'print']);
       if (!hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
         if (activeView === 'dashboard') renderDashboard();
         else if (activeView === 'invited') renderInvitedView();
@@ -472,6 +683,7 @@ function triggerBackgroundRevalidate() {
         else if (activeView === 'interview') renderInterviewView();
         else if (activeView === 'tracking') renderTrackingView();
         else if (activeView === 'employees') renderEmployees();
+        else if (activeView === 'contracts') renderContractsView();
         else if (activeView === 'print') renderPrint();
       }
     })
@@ -480,6 +692,10 @@ function triggerBackgroundRevalidate() {
 }
 
 async function refreshData(force = false) {
+  if (isDemoMode) {
+    if (!lastDataFetchedAt || force) seedDemoWorkspaceData();
+    return;
+  }
   if (!force && lastDataFetchedAt && (Date.now() - lastDataFetchedAt) < DATA_CACHE_TTL_MS) {
     return;
   }
@@ -525,6 +741,33 @@ function renderDashboard() {
   const topPositions = [...positionCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   const maxPosition = Math.max(1, ...topPositions.map(item => item[1]));
   const recent = applicants.slice(0, 7);
+  const attentionItems = buildDashboardAttentionItems({
+    employees,
+    interviews,
+    applicants,
+    stage1Leads,
+    invitedCandidates
+  });
+  const totalAttentionCount = attentionItems.reduce((sum, item) => sum + item.count, 0);
+  const attentionHtml = attentionItems.length
+    ? `<div class="attention-grid">${attentionItems.map(item => `
+        <button type="button" class="attention-card is-${esc(item.severity)}" data-view="${esc(item.targetView)}">
+          <div class="attention-card-top">
+            <span class="attention-category">${esc(item.category)}</span>
+            <span class="attention-count">${item.count}</span>
+          </div>
+          <div class="attention-title">${esc(item.title)}</div>
+          <div class="attention-desc">${esc(item.description)}</div>
+          <div class="attention-cta">${esc(item.ctaLabel)} <span aria-hidden="true">↗</span></div>
+        </button>`).join('')}</div>`
+    : `<div class="attention-empty">
+        <div>
+          <b>All caught up</b>
+          <p>No contracts expiring within 2 months and no pending items requiring action.</p>
+        </div>
+        <button type="button" class="btn btn-secondary" data-view="contracts">Open Contracts ↗</button>
+      </div>`;
+
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Workspace overview">
       <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio">
@@ -547,11 +790,21 @@ function renderDashboard() {
         <span class="workspace-module-copy"><b>Interview Pipeline</b><span>HR 1 · HR 2 · User · Final</span></span>
         <span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
-      <button type="button" class="workspace-module" data-view="employees" data-module="vehicle">
-        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-        <span class="workspace-module-copy"><b>Employee Directory</b><span>Employee Records &amp; Import</span></span>
+      <button type="button" class="workspace-module" data-view="contracts" data-module="vehicle">
+        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>
+        <span class="workspace-module-copy"><b>Contracts &amp; PKWT</b><span>Expiring Renewals &amp; Final Interview</span></span>
         <span class="workspace-module-arrow" aria-hidden="true">↗</span>
       </button>
+    </section>
+    <section class="panel dashboard-attention-panel" aria-label="Needs Attention">
+      <div class="panel-head">
+        <div class="attention-head-copy">
+          <h3>Needs Attention</h3>
+          <span class="attention-head-sub">Actionable contract renewals, PKWT agreements, and pending recruitment tasks</span>
+        </div>
+        <span class="status-pill ${totalAttentionCount > 0 ? 'gold' : 'green'}">${totalAttentionCount} item${totalAttentionCount === 1 ? '' : 's'}</span>
+      </div>
+      ${attentionHtml}
     </section>
     <section class="dashboard-metrics" aria-label="Recruitment metrics">
       <article class="stat-card"><div class="stat-top"><span>Lead Register</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span></div><div class="stat-number">${stage1}</div><div class="stat-note">Initial incoming leads</div></article>
@@ -1415,13 +1668,19 @@ function renderInterviewStageCard(stage) {
             extra = `${esc(row.official_position || row.applied_position)} · NIK ${esc(row.assigned_nik)}${contractPart} · ${period}`;
           }
         }
+        const actionHtml = isFinal && dec === 'Accepted'
+          ? `<div class="row-actions">
+              <button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button>
+              <button type="button" class="icon-btn pkwt-inline-btn" data-interview-pkwt="${esc(row.id)}">Print PKWT</button>
+            </div>`
+          : `<button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button>`;
         return `<tr>
           <td><b>${esc(row.candidate_name)}</b><small class="table-subline">${esc(row.applied_position || '-')}</small></td>
           <td style="white-space:nowrap"><span class="interview-date-meta">${esc(dateLabel)}</span></td>
           <td>${esc(row.pic_name || '-')}</td>
           <td><span class="status-pill ${tone}">${esc(dec)}</span></td>
           <td style="max-width:210px;white-space:normal">${extra}</td>
-          <td><button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button></td>
+          <td>${actionHtml}</td>
         </tr>`;
       }).join('')
     : emptyRow(6, 'No candidates recorded');
@@ -1459,7 +1718,23 @@ function renderInterviewView() {
       existing,
       candidates,
       employees,
+      onPrintPkwt: (draftRow, cand) => {
+        openPkwtForRecord(buildContractRecordFromInterview(draftRow, cand));
+      },
       onSave: async (payload, selectedCand) => {
+        if (isDemoMode) {
+          const demoRow = {
+            id: payload.id || `intv-demo-${Date.now()}`,
+            ...payload,
+            updated_at: new Date().toISOString()
+          };
+          const idx = interviews.findIndex(i => i.id === demoRow.id);
+          if (idx >= 0) interviews[idx] = demoRow;
+          else interviews.unshift(demoRow);
+          say(`Saved ${INTERVIEW_STAGE_LABELS[stage]} record.`);
+          await loadView('interview', false);
+          return;
+        }
         if (interviewsTableMissing) {
           throw new Error('Please run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
         }
@@ -1598,6 +1873,10 @@ function renderInterviewView() {
   $$('[data-interview-edit]').forEach(btn => btn.addEventListener('click', () => {
     const existing = interviews.find(item => item.id === btn.dataset.interviewEdit);
     if (existing) openForStage(existing.interview_stage, existing);
+  }));
+  $$('[data-interview-pkwt]').forEach(btn => btn.addEventListener('click', () => {
+    const existing = interviews.find(item => item.id === btn.dataset.interviewPkwt);
+    if (existing) openPkwtForRecord(buildContractRecordFromInterview(existing));
   }));
 }
 
@@ -1900,6 +2179,213 @@ async function exportEmployees() {
     button.disabled = false;
     button.textContent = 'Download XLSX ↓';
   }
+}
+
+/* ============================================================================
+ * CONTRACTS & PKWT MANAGEMENT (Expiring 2-Month Queue + Final Interview Passed)
+ * ============================================================================ */
+function getActiveUmkThreshold() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('hrga_contract_settings_v1') || 'null');
+    const umk = parseNumericCurrency(saved?.currUmkAmount);
+    if (umk > 0) return umk;
+  } catch {}
+  return DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
+}
+
+function buildContractRecordFromInterview(intv, cand = null) {
+  const app = (intv.applicant_id && applicants.find(a => a.id === intv.applicant_id)) || cand?.applicantRef || null;
+  const appData = app?.application_data || {};
+  const emp = (intv.applicant_id && employees.find(e => e.applicant_id === intv.applicant_id)) ||
+    (intv.assigned_nik && employees.find(e => String(e.employee_no || '').trim().toUpperCase() === String(intv.assigned_nik || '').trim().toUpperCase())) ||
+    null;
+  return {
+    sourceType: 'final_interview',
+    employeeId: emp?.id || null,
+    applicantId: intv.applicant_id || null,
+    interviewId: intv.id || null,
+    fullName: intv.candidate_name || emp?.full_name || app?.full_name || '',
+    employeeNik: intv.assigned_nik || emp?.employee_no || '',
+    ktpNik: intv.candidate_nik || emp?.ktp_nik || app?.nik || '',
+    department: emp?.department || '',
+    position: intv.official_position || emp?.position || intv.applied_position || app?.position || '',
+    address: emp?.address || appData.alamat_asal || appData.domisili || '',
+    phone: intv.candidate_whatsapp || emp?.phone || appData.telepon || '',
+    salary: intv.salary ?? emp?.salary ?? null,
+    contractStartDate: intv.contract_start_date || intv.work_start_date || emp?.contract_start_date || '',
+    contractEndDate: intv.contract_end_date || emp?.contract_end_date || '',
+    durationMonths: intv.contract_duration_months || 12,
+    contractNumber: intv.contract_number || '',
+    workStartDate: intv.work_start_date || intv.contract_start_date || ''
+  };
+}
+
+function openPkwtForRecord(record) {
+  openPkwtConfigModal({
+    record,
+    onNotify: msg => say(msg),
+    onPersistEmployee: async ({ record: rec, config, payload }) => {
+      if (!rec.employeeId) return;
+      const updateBody = {
+        full_name: config.employeeName,
+        position: config.employeePosition,
+        address: config.employeeAddress,
+        contract_start_date: payload.signingDate,
+        contract_end_date: payload.endDate,
+        salary: config.cashWageAmount,
+        updated_at: new Date().toISOString()
+      };
+      if (isDemoMode) {
+        const idx = employees.findIndex(e => e.id === rec.employeeId);
+        if (idx >= 0) employees[idx] = { ...employees[idx], ...updateBody };
+        return;
+      }
+      if (!supabase) return;
+      const { error } = await supabase.from('employees').update(updateBody).eq('id', rec.employeeId);
+      if (error) throw error;
+      invalidateDataCache();
+    }
+  }).catch(err => say(err.message || 'Unable to open PKWT configuration.'));
+}
+
+function formatIdrShort(amount) {
+  const n = parseNumericCurrency(amount);
+  return n > 0 ? `Rp ${n.toLocaleString('id-ID')}` : 'Not Set';
+}
+
+function renderContractsView() {
+  const queue = buildContractWorkspaceQueue({ employees, interviews, applicants });
+  const activeUmk = getActiveUmkThreshold();
+  let currentFilter = 'all';
+  let currentQuery = '';
+
+  const rowsHtml = list => {
+    if (!list.length) return emptyRow(6, 'No expiring contracts (2-month window) or Final Interview passed candidates');
+    return list.map(row => {
+      const rule = determineRequiredContractDocuments(row.salary, activeUmk);
+      const periodText = row.contractStartDate && row.contractEndDate
+        ? `${formatDmyDash(row.contractStartDate)} → ${formatDmyDash(row.contractEndDate)}`
+        : (row.contractEndDate ? `Ends ${formatDmyDash(row.contractEndDate)}` : 'Pending start date');
+      const urgencySub = typeof row.daysRemaining === 'number'
+        ? (row.daysRemaining < 0 ? `${Math.abs(row.daysRemaining)}d overdue` : `${row.daysRemaining}d remaining`)
+        : 'New hire PKWT';
+      const wageBadge = row.salary > 0
+        ? `<span class="status-pill ${rule.meetsUmk ? 'green' : 'gold'}">${rule.meetsUmk ? 'PKWT Only (1 Doc)' : 'PKWT + 4 PB (5 Docs)'}</span>`
+        : `<span class="status-pill gray">Set Salary in PKWT</span>`;
+
+      return `<tr class="${row.priorityGroup === 1 ? 'contract-priority-row' : ''}">
+        <td>
+          <b>${esc(row.fullName)}</b>
+          <small class="table-subline">${esc(row.employeeNik || 'No NIK assigned')}</small>
+        </td>
+        <td>
+          <span class="status-pill ${esc(row.sourceTone)}">${esc(row.sourceBadge)}</span>
+          <small class="table-subline">${esc(urgencySub)}</small>
+        </td>
+        <td>
+          <b>${esc(row.position || '—')}</b>
+          <small class="table-subline">${esc(row.department || 'No department')}</small>
+        </td>
+        <td>
+          <span>${esc(periodText)}</span>
+          ${row.contractNumber ? `<small class="table-subline">${esc(row.contractNumber)}</small>` : ''}
+        </td>
+        <td>
+          <b>${esc(formatIdrShort(row.salary))}</b>
+          <div style="margin-top:4px">${wageBadge}</div>
+        </td>
+        <td>
+          <button type="button" class="btn btn-primary btn-xs" data-configure-pkwt="${esc(row.queueKey)}">Configure PKWT</button>
+        </td>
+      </tr>`;
+    }).join('');
+  };
+
+  const applyFilter = () => {
+    const filtered = queue.rows.filter(row => {
+      if (currentFilter === 'expiring' && row.sourceType !== 'expiring_contract') return false;
+      if (currentFilter === 'final' && row.sourceType !== 'final_interview') return false;
+      if (!currentQuery) return true;
+      return `${row.fullName} ${row.employeeNik} ${row.position} ${row.department} ${row.sourceBadge} ${row.contractNumber}`.toLowerCase().includes(currentQuery);
+    });
+    const tbody = $('#contract-rows');
+    if (tbody) tbody.innerHTML = rowsHtml(filtered);
+    $$('[data-configure-pkwt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const rec = queue.rows.find(r => r.queueKey === btn.dataset.configurePkwt);
+        if (rec) openPkwtForRecord(rec);
+      });
+    });
+  };
+
+  content.innerHTML = header(
+    'Contracts',
+    'Contract employees expiring within 2 months (prioritized at top) and candidates who passed Final Interview.',
+    '<button class="btn btn-secondary" id="refresh-contracts">Refresh ↻</button>'
+  ) + `
+    <section class="contracts-kpi-strip" aria-label="Contract queue summary">
+      <article class="stat-card">
+        <div class="stat-top"><span>Expiring (2 Months)</span><span class="stat-icon-tile walnut" aria-hidden="true">!</span></div>
+        <div class="stat-number">${queue.expiringCount}</div>
+        <div class="stat-note">Current &amp; next month renewals</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-top"><span>Final Interview Passed</span><span class="stat-icon-tile" aria-hidden="true">✓</span></div>
+        <div class="stat-number">${queue.finalInterviewCount}</div>
+        <div class="stat-note">Ready for PKWT setup</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-top"><span>Total Actionable</span><span class="stat-icon-tile" aria-hidden="true">#</span></div>
+        <div class="stat-number">${queue.rows.length}</div>
+        <div class="stat-note">Ordered by priority</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-top"><span>Active UMK Threshold</span><span class="stat-icon-tile walnut" aria-hidden="true">Rp</span></div>
+        <div class="stat-number" style="font-size:20px">${esc(formatIdrShort(activeUmk))}</div>
+        <div class="stat-note">≥ UMK: 1 doc · &lt; UMK: 5 docs</div>
+      </article>
+    </section>
+    <section class="panel table-panel">
+      <div class="table-toolbar contracts-toolbar">
+        <div class="contracts-filter-tabs" role="tablist" aria-label="Filter contracts">
+          <button type="button" class="contracts-tab is-active" data-contract-tab="all">All (${queue.rows.length})</button>
+          <button type="button" class="contracts-tab" data-contract-tab="expiring">Expiring 2 Months (${queue.expiringCount})</button>
+          <button type="button" class="contracts-tab" data-contract-tab="final">Final Interview Passed (${queue.finalInterviewCount})</button>
+        </div>
+        <div class="table-search">
+          <input id="contract-search" type="search" placeholder="Search name / NIK / position…">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>EMPLOYEE / CANDIDATE</th>
+              <th>PRIORITY &amp; SOURCE</th>
+              <th>POSITION &amp; DEPT</th>
+              <th>CONTRACT PERIOD</th>
+              <th>SALARY &amp; UMK RULE</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="contract-rows"></tbody>
+        </table>
+      </div>
+    </section>`;
+
+  $('#refresh-contracts')?.addEventListener('click', () => loadView('contracts', true));
+  $$('[data-contract-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      currentFilter = tab.dataset.contractTab || 'all';
+      $$('[data-contract-tab]').forEach(t => t.classList.toggle('is-active', t === tab));
+      applyFilter();
+    });
+  });
+  $('#contract-search')?.addEventListener('input', event => {
+    currentQuery = event.target.value.trim().toLowerCase();
+    applyFilter();
+  });
+  applyFilter();
 }
 
 /* ============================================================================
@@ -2376,16 +2862,16 @@ async function loadView(view, forceRefresh = false) {
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   $('#page-title').textContent = TITLES[view] || 'Dashboard';
 
-  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'print']);
+  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'print']);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
     let hasCached = false;
-    if (!forceRefresh) {
+    if (!forceRefresh && !isDemoMode) {
       const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
       if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
         hasCached = true;
       }
     }
-    if (!hasCached) {
+    if (!hasCached && !isDemoMode) {
       content.innerHTML = '<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div><h2>Loading data…</h2></div></section>';
     }
   }
@@ -2400,6 +2886,7 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'interview') renderInterviewView();
     else if (view === 'tracking') renderTrackingView();
     else if (view === 'employees') renderEmployees();
+    else if (view === 'contracts') renderContractsView();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
     else if (view === 'userManagement') await renderUserManagement();
@@ -2620,6 +3107,21 @@ $('#logout-btn').addEventListener('click', () => {
 
 async function init() {
   initSidebarAccordions();
+  if (isDemoMode) {
+    applyAdminProfileUi({
+      userId: 'demo-admin',
+      username: 'ST 130116',
+      employeeNik: 'ST 130116',
+      displayName: 'Diana Anita Sari',
+      role: 'Superadmin',
+      isRootAdmin: true
+    });
+    seedDemoWorkspaceData();
+    loginView.classList.add('hidden');
+    shell.classList.remove('hidden');
+    await loadView(activeView || 'dashboard', false);
+    return;
+  }
   if (!isConfigured) {
     $('#login-error').textContent = 'Set Project URL and Publishable key in assets/js/config.js.';
     return;

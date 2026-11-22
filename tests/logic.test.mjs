@@ -638,4 +638,210 @@ test('Tracking print markup uses Letter Landscape without redundant guide and Re
   ]);
 });
 
+import {
+  CONTRACT_DOCUMENTS,
+  DEFAULT_CONTRACT_SETTINGS,
+  getExpiringContractWindow,
+  isContractEmployee,
+  classifyExpiringContract,
+  determineRequiredContractDocuments,
+  extractDocSequence,
+  inferDurationMonths,
+  buildContractWorkspaceQueue,
+  buildAgreementPayload,
+  buildDashboardAttentionItems,
+  renderAgreementHtml
+} from '../assets/js/contract-logic.js';
+
+test('getExpiringContractWindow and classifyExpiringContract detect current and next month contracts only', () => {
+  const ref = '2026-11-15';
+  const win = getExpiringContractWindow(ref);
+  assert.equal(win.currentMonthKey, '2026-11');
+  assert.equal(win.nextMonthKey, '2026-12');
+  assert.equal(win.currentMonthStart, '2026-11-01');
+  assert.equal(win.nextMonthEnd, '2026-12-31');
+
+  const thisMonth = classifyExpiringContract({ employment_status: 'KONTRAK', contract_end_date: '2026-11-28' }, ref);
+  assert.equal(thisMonth.expiring, true);
+  assert.equal(thisMonth.bucket, 'current_month');
+  assert.equal(thisMonth.daysRemaining, 13);
+
+  const expiredEarlierThisMonth = classifyExpiringContract({ employment_status: 'PKWT', contract_end_date: '2026-11-05' }, ref);
+  assert.equal(expiredEarlierThisMonth.expiring, true);
+  assert.equal(expiredEarlierThisMonth.urgencyLabel, 'Expired This Month');
+
+  const nextMonth = classifyExpiringContract({ employment_status: 'KONTRAK', contract_end_date: '2026-12-18' }, ref);
+  assert.equal(nextMonth.expiring, true);
+  assert.equal(nextMonth.bucket, 'next_month');
+
+  const farFuture = classifyExpiringContract({ employment_status: 'KONTRAK', contract_end_date: '2027-01-15' }, ref);
+  assert.equal(farFuture.expiring, false);
+
+  const permanent = classifyExpiringContract({ employment_status: 'TETAP', contract_end_date: '2026-11-25' }, ref);
+  assert.equal(permanent.expiring, false);
+  assert.equal(isContractEmployee({ employment_status: 'TETAP', contract_end_date: '2026-11-25' }), false);
+});
+
+test('buildContractWorkspaceQueue places expiring 2-month contracts before Final Interview accepted candidates', () => {
+  const queue = buildContractWorkspaceQueue({
+    referenceDate: '2026-11-15',
+    employees: [
+      { id: 'e-far', full_name: 'Far Out', employee_no: 'KT 003', employment_status: 'KONTRAK', contract_end_date: '2027-03-01', salary: 5300000 },
+      { id: 'e-next', full_name: 'Next Month', employee_no: 'KT 002', employment_status: 'KONTRAK', contract_end_date: '2026-12-10', salary: 5200000 },
+      { id: 'e-cur', full_name: 'Current Month', employee_no: 'KT 001', employment_status: 'KONTRAK', contract_end_date: '2026-11-25', salary: 4500000 },
+      { id: 'e-tetap', full_name: 'Permanent Staff', employee_no: 'ST 001', employment_status: 'TETAP', contract_end_date: '2026-11-22' }
+    ],
+    interviews: [
+      { id: 'int-acc-1', applicant_id: 'app-1', candidate_name: 'Final Pass One', interview_stage: 'Final Interview', decision: 'Accepted', official_position: 'CNC Operator', salary: 5400000, work_start_date: '2026-12-01', contract_duration_months: 12 },
+      { id: 'int-rej', applicant_id: 'app-2', candidate_name: 'Final Rejected', interview_stage: 'Final Interview', decision: 'Rejected' }
+    ],
+    applicants: [
+      { id: 'app-1', full_name: 'Final Pass One', nik: '3514000000000001', position: 'CNC', application_data: { domisili: 'Gempol, Pasuruan' } }
+    ]
+  });
+
+  assert.equal(queue.expiringCount, 2);
+  assert.equal(queue.finalInterviewCount, 1);
+  assert.equal(queue.rows.length, 3);
+  assert.equal(queue.rows[0].employeeId, 'e-cur');
+  assert.equal(queue.rows[0].priorityGroup, 1);
+  assert.equal(queue.rows[1].employeeId, 'e-next');
+  assert.equal(queue.rows[1].priorityGroup, 1);
+  assert.equal(queue.rows[2].interviewId, 'int-acc-1');
+  assert.equal(queue.rows[2].priorityGroup, 2);
+  assert.equal(queue.rows[2].address, 'Gempol, Pasuruan');
+});
+
+test('determineRequiredContractDocuments enforces 1 PKWT doc >= UMK and all 5 docs < UMK', () => {
+  const umk = DEFAULT_CONTRACT_SETTINGS.currUmkAmount; // 5187681
+  const exactUmk = determineRequiredContractDocuments(umk, umk);
+  assert.equal(exactUmk.meetsUmk, true);
+  assert.equal(exactUmk.requiredCount, 1);
+  assert.equal(exactUmk.shortfall, 0);
+  assert.deepEqual(exactUmk.documents.map(d => d.key), ['01-pkwt']);
+
+  const aboveUmk = determineRequiredContractDocuments(5500000, umk);
+  assert.equal(aboveUmk.meetsUmk, true);
+  assert.equal(aboveUmk.requiredCount, 1);
+
+  const belowUmk = determineRequiredContractDocuments(4400000, umk);
+  assert.equal(belowUmk.meetsUmk, false);
+  assert.equal(belowUmk.requiredCount, 5);
+  assert.equal(belowUmk.shortfall, umk - 4400000);
+  assert.deepEqual(belowUmk.documents.map(d => d.key), CONTRACT_DOCUMENTS.map(d => d.key));
+});
+
+test('buildAgreementPayload omits unchecked optional fields and renderAgreementHtml formats real templates accurately', () => {
+  const masters = JSON.parse(fs.readFileSync('assets/contracts/company-masters.json', 'utf8'));
+  const mbmMaster = masters.find(m => m.id === 'comp-mbm');
+  const pkwtTpl = fs.readFileSync('assets/contracts/01-pkwt.html', 'utf8');
+  const pbWageTpl = fs.readFileSync('assets/contracts/02-pb-pembayaran-upah.html', 'utf8');
+
+  // Optional fields unchecked -> MUST NOT be inserted even when populated in config
+  const uncheckedPayload = buildAgreementPayload({
+    docSequence: '088',
+    signingDate: '2026-11-22',
+    durationMonths: 12,
+    signingCity: 'Pandaan',
+    hrName: 'Budi HR',
+    employeeName: 'Agus Nur Wahid',
+    employeePosition: 'Operator Mesin',
+    employeeAddress: 'Desa Randupitu RT 01 RW 02, Gempol',
+    includeKtp: false,
+    employeeKtp: '3514122006840004',
+    includeNik: false,
+    employeeNik: 'KT 260199',
+    includeDepartment: false,
+    employeeDepartment: 'Produksi',
+    includeCustomNote: false,
+    customNote: 'Ketentuan khusus test',
+    cashWageAmount: 4400000,
+    currUmkAmount: 5187681,
+    prevUmkAmount: 4866890,
+    governorDecreeNo: '188/889/KPTS/013/2026'
+  }, mbmMaster);
+
+  assert.equal(uncheckedPayload.employeeKtp, '');
+  assert.equal(uncheckedPayload.employeeNik, '');
+  assert.equal(uncheckedPayload.employeeDepartment, '');
+  assert.equal(uncheckedPayload.customNote, '');
+
+  const pkwtUnchecked = renderAgreementHtml(pkwtTpl, uncheckedPayload, mbmMaster);
+  assert.ok(!pkwtUnchecked.includes('3514122006840004'), 'KTP must not appear when unchecked');
+  assert.ok(!pkwtUnchecked.includes('KT 260199'), 'NIK must not appear when unchecked');
+  assert.ok(!pkwtUnchecked.includes('Departemen'), 'Department row must not appear when unchecked');
+  assert.ok(!pkwtUnchecked.includes('Ketentuan khusus test'), 'Custom note must not appear when unchecked');
+  assert.ok(pkwtUnchecked.includes('1 (satu) Tahun'), '12 months must render as 1 (satu) Tahun');
+  assert.ok(pkwtUnchecked.includes('Pandaan'), 'Custom signingCity must override company master');
+  assert.ok(pkwtUnchecked.includes('Budi HR'), 'Custom hrName must override company master');
+
+  // Optional fields checked -> MUST render in template
+  const checkedPayload = buildAgreementPayload({
+    docSequence: '088',
+    signingDate: '2026-11-22',
+    durationMonths: 12,
+    employeeName: 'Agus Nur Wahid',
+    employeePosition: 'Operator Mesin',
+    employeeAddress: 'Desa Randupitu RT 01 RW 02, Gempol',
+    includeKtp: true,
+    employeeKtp: '3514122006840004',
+    includeNik: true,
+    employeeNik: 'KT 260199',
+    includeDepartment: true,
+    employeeDepartment: 'Produksi',
+    includeCustomNote: true,
+    customNote: 'Ketentuan khusus test',
+    cashWageAmount: 4400000,
+    currUmkAmount: 5187681,
+    prevUmkAmount: 4866890,
+    governorDecreeNo: '188/889/KPTS/013/2026'
+  }, mbmMaster);
+
+  const pkwtChecked = renderAgreementHtml(pkwtTpl, checkedPayload, mbmMaster);
+  assert.ok(pkwtChecked.includes('3514122006840004'));
+  assert.ok(pkwtChecked.includes('KT 260199'));
+  assert.ok(pkwtChecked.includes('Produksi'));
+  assert.ok(pkwtChecked.includes('Ketentuan khusus test'));
+
+  const pbHtml = renderAgreementHtml(pbWageTpl, checkedPayload, mbmMaster);
+  assert.ok(pbHtml.includes('787.681'), 'Shortfall 787.681 must appear in PB Wage template');
+
+  assert.equal(extractDocSequence('184/PKWT/XI/2026'), '184');
+  assert.equal(inferDurationMonths('2026-11-22', '2027-11-21', 6), 12);
+});
+
+test('buildDashboardAttentionItems routes PKWT items to contracts and non-PKWT items to their menus, and Contracts sits under Employee Directory', () => {
+  const attention = buildDashboardAttentionItems({
+    referenceDate: '2026-11-15',
+    employees: [
+      { id: 'emp-1', full_name: 'Siti', employment_status: 'KONTRAK', contract_end_date: '2026-11-28', address: 'Gempol' }
+    ],
+    interviews: [
+      { id: 'int-1', applicant_id: 'app-pass', candidate_name: 'Budi', interview_stage: 'Final Interview', decision: 'Accepted' }
+    ],
+    applicants: [
+      { id: 'app-pass', full_name: 'Budi', stage: 'hired' },
+      { id: 'app-disc', full_name: 'Rina', stage: 'application_submitted' },
+      { id: 'app-wait-int', full_name: 'Joko', stage: 'disc_completed' }
+    ],
+    stage1Leads: [
+      { id: 'lead-1', full_name: 'Andi', recommendation: 'Recommended' }
+    ],
+    invitedCandidates: []
+  });
+
+  const byId = Object.fromEntries(attention.map(a => [a.id, a]));
+  assert.equal(byId['pkwt-expiring']?.targetView, 'contracts');
+  assert.equal(byId['pkwt-final-interview']?.targetView, 'contracts');
+  assert.equal(byId['leads-recommended']?.targetView, 'stage1');
+  assert.equal(byId['candidates-awaiting-disc']?.targetView, 'stage2');
+  assert.equal(byId['candidates-awaiting-interview']?.targetView, 'interview');
+
+  const indexHtml = fs.readFileSync('index.html', 'utf8');
+  const empPos = indexHtml.indexOf('data-view="employees"');
+  const contractsPos = indexHtml.indexOf('data-view="contracts"');
+  assert.ok(empPos > 0 && contractsPos > empPos, 'Contracts nav item must be placed below Employee Directory');
+});
+
+
 

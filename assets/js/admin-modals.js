@@ -137,7 +137,8 @@ export function openInterviewModal({
   existing = null,
   candidates = [],
   employees = [],
-  onSave
+  onSave,
+  onPrintPkwt = null
 }) {
   let modal = $('#interview-modal');
   if (!modal) {
@@ -215,6 +216,7 @@ export function openInterviewModal({
         </div>
         <div id="int-modal-error" class="form-error" role="alert"></div>
         <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary hidden" id="int-modal-print-pkwt">Print PKWT</button>
           <button type="button" class="btn btn-secondary" id="int-modal-cancel">Cancel</button>
           <button type="submit" class="btn btn-primary" id="int-modal-save">Save</button>
         </div>
@@ -314,15 +316,19 @@ export function openInterviewModal({
     form.elements.contract_range_display.value = calc ? calc.displayRange : '';
   };
 
+  const printPkwtBtn = $('#int-modal-print-pkwt', modal);
+
   const syncConditionalFields = () => {
     const dec = normalizeInterviewDecision(decisionSelect.value);
     if (!isFinal) {
       rejectGroup.classList.add('hidden');
       acceptGroup.classList.add('hidden');
+      printPkwtBtn?.classList.add('hidden');
       return;
     }
     rejectGroup.classList.toggle('hidden', dec !== 'Rejected');
     acceptGroup.classList.toggle('hidden', dec !== 'Accepted');
+    printPkwtBtn?.classList.toggle('hidden', !(dec === 'Accepted' && typeof onPrintPkwt === 'function'));
     rejectDetailWrap.classList.toggle('hidden', !form.elements.rejection_reason_category.value);
     if (dec === 'Accepted') {
       if (!form.elements.official_position.value.trim()) {
@@ -334,6 +340,45 @@ export function openInterviewModal({
       syncContractRange();
     }
   };
+
+  if (printPkwtBtn) {
+    printPkwtBtn.onclick = () => {
+      if (typeof onPrintPkwt !== 'function') return;
+      const cand = candidates.find(c => c.key === candSelect.value) || (existing ? {
+        source_type: existing.source_type,
+        applicant_id: existing.applicant_id,
+        stage1_id: existing.stage1_id,
+        candidate_name: existing.candidate_name,
+        candidate_nik: existing.candidate_nik,
+        candidate_whatsapp: existing.candidate_whatsapp,
+        applied_position: existing.applied_position
+      } : null);
+      if (!cand) {
+        errorBox.textContent = 'Please select a candidate first.';
+        return;
+      }
+      const workStart = form.elements.work_start_date.value;
+      const dur = Number(form.elements.contract_duration_months.value) || 12;
+      const calc = calculateContractDates(workStart, dur);
+      const salaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
+      onPrintPkwt({
+        id: existing?.id || null,
+        applicant_id: cand.applicant_id || null,
+        candidate_name: cand.candidate_name,
+        candidate_nik: cand.candidate_nik || '',
+        candidate_whatsapp: cand.candidate_whatsapp || '',
+        applied_position: cand.applied_position || '',
+        official_position: form.elements.official_position.value.trim() || cand.applied_position || '',
+        assigned_nik: form.elements.assigned_nik.value.trim().toUpperCase(),
+        contract_number: form.elements.contract_number.value.trim(),
+        work_start_date: workStart,
+        contract_duration_months: dur,
+        contract_start_date: calc?.startIso || workStart,
+        contract_end_date: calc?.endIso || '',
+        salary: Number.isFinite(salaryNum) && salaryNum > 0 ? salaryNum : null
+      }, cand);
+    };
+  }
 
   candSelect.onchange = () => {
     const selectedCand = candidates.find(c => c.key === candSelect.value);
