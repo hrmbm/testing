@@ -999,3 +999,27 @@ test('UI & CSS enforce removed KPIs/Remarks/guides, Root Admin submenus, and 1st
   assert.doesNotMatch(appCss, /\.data-table[^\n]*nth-child\(2\)/, 'No .data-table second column must be frozen');
   assert.doesNotMatch(appCss, /nth-child\(2\)[^{]*\{[^}]*(position\s*:\s*sticky|left\s*:)/, 'Second column must NOT have sticky/left freeze');
 });
+
+test('PKWT print opens foreground tab matching Application Print, foreground auto-print replaces opener setTimeout(tab.print), and non-Root Admin hides approval panel', async () => {
+  const { buildPkwtPrintPackageHtml } = await import('../assets/js/contract-logic.js');
+  const doc1 = '<html><head><style>@page{size:A4 portrait;} .a4-page{width:210mm;}</style></head><body><div class="a4-page">DOC 1 PKWT</div></body></html>';
+  const doc2 = '<html><head><style>@page{size:A4 portrait;} .a4-page{width:210mm;}</style></head><body><div class="a4-page">DOC 2 PB</div></body></html>';
+  const pkgHtml = buildPkwtPrintPackageHtml([doc1, doc2], { title: 'Hendra Wijaya — 2 Contract Documents' });
+
+  assert.ok(pkgHtml.includes('Print / Save PDF'), 'PKWT print tab must include Print / Save PDF toolbar button');
+  assert.ok(pkgHtml.includes('DOC 1 PKWT') && pkgHtml.includes('DOC 2 PB'), 'Package HTML must include all rendered documents');
+  assert.equal((pkgHtml.match(/class="pkwt-print-sheet"/g) || []).length, 2, 'Package HTML must wrap each sheet separately');
+  assert.ok(pkgHtml.includes('window.print()'), 'Package HTML must run foreground window.print() inside the opened tab');
+
+  const printJs = fs.readFileSync('assets/js/print.js', 'utf8');
+  assert.ok(!printJs.includes('tab.print()'), 'print.js must not invoke cross-window tab.print() from backgrounded opener');
+  assert.ok(printJs.includes('print-app-toolbar'), 'Application Print tab must include explicit Print / Save PDF toolbar');
+
+  const contractModalJs = fs.readFileSync('assets/js/contract-modal.js', 'utf8');
+  assert.ok(contractModalJs.includes('buildPkwtPrintPackageHtml'), 'contract-modal.js must build print package for dedicated tab');
+  assert.ok(contractModalJs.includes("window.open('', '_blank')"), 'contract-modal.js must open dedicated print tab synchronously');
+
+  const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(adminJs.includes('isRoot && pendingRequests.length'), 'Contracts approval queue must only be shown to Root Admin');
+});
+

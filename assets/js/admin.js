@@ -2755,7 +2755,7 @@ function renderContractsView() {
   let currentFilter = 'all';
   let currentQuery = '';
 
-  const approvalSectionHtml = pendingRequests.length
+  const approvalSectionHtml = isRoot && pendingRequests.length
     ? `<section class="panel approval-panel" aria-label="Pending Employee Contract Updates">
         <div class="panel-head">
           <h3>Pending Employee Data Updates (Post-Print Approval)</h3>

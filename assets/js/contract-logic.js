@@ -711,3 +711,165 @@ export function buildDashboardAttentionItems({
 
   return items;
 }
+
+function escapeHtmlBasic(str = '') {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function buildPkwtPrintPackageHtml(renderedDocs = [], {
+  title = 'PKWT Agreement Package',
+  autoPrint = true
+} = {}) {
+  const docs = Array.isArray(renderedDocs) ? renderedDocs.filter(Boolean) : [];
+  const seenStyles = new Set();
+  const collectedStyles = [];
+  const sheets = [];
+
+  docs.forEach(rawHtml => {
+    const html = String(rawHtml || '');
+    const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+    let m;
+    while ((m = styleRegex.exec(html)) !== null) {
+      const css = (m[1] || '').trim();
+      if (css && !seenStyles.has(css)) {
+        seenStyles.add(css);
+        collectedStyles.push(css);
+      }
+    }
+    const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);
+    const bodyInner = (bodyMatch ? bodyMatch[1] : html)
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .trim();
+    if (bodyInner) {
+      sheets.push(`<section class="pkwt-print-sheet">${bodyInner}</section>`);
+    }
+  });
+
+  const safeTitle = escapeHtmlBasic(title || 'PKWT Agreement Package');
+  const autoPrintScript = autoPrint
+    ? `<script>
+      (function () {
+        var fontWait = (document.fonts && document.fonts.ready)
+          ? document.fonts.ready.catch(function () {})
+          : Promise.resolve();
+        Promise.race([
+          fontWait,
+          new Promise(function (resolve) { setTimeout(resolve, 200); })
+        ]).then(function () {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+              try { window.print(); } catch (_) {}
+            });
+          });
+        });
+      })();
+    </script>`
+    : '';
+
+  return `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${safeTitle}</title>
+  <style>
+    ${collectedStyles.join('\n')}
+    html, body {
+      background: #1e293b;
+      margin: 0;
+      padding: 0;
+    }
+    .pkwt-print-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 22px;
+      background: #0f172a;
+      color: #f8fafc;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    }
+    .pkwt-print-toolbar-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pkwt-print-toolbar-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .pkwt-print-toolbar button {
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 7px;
+      padding: 7px 14px;
+      font: 600 12.5px inherit;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }
+    .pkwt-print-toolbar button.primary {
+      background: #0d5c6b;
+      border-color: #0d5c6b;
+    }
+    .pkwt-print-sheets {
+      padding: 18px 0 36px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+    .pkwt-print-sheet {
+      width: 100%;
+    }
+    .pkwt-print-sheets .a4-page {
+      margin: 0 auto;
+      box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
+    }
+    @media print {
+      html, body {
+        background: #ffffff !important;
+      }
+      .pkwt-print-toolbar {
+        display: none !important;
+      }
+      .pkwt-print-sheets {
+        padding: 0 !important;
+        margin: 0 !important;
+        display: block !important;
+        gap: 0 !important;
+      }
+      .pkwt-print-sheet {
+        break-after: page;
+        page-break-after: always;
+      }
+      .pkwt-print-sheet:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="pkwt-print-toolbar">
+    <span class="pkwt-print-toolbar-title">${safeTitle} (${docs.length} Document${docs.length === 1 ? '' : 's'})</span>
+    <div class="pkwt-print-toolbar-actions">
+      <button type="button" onclick="window.close()">Close</button>
+      <button type="button" class="primary" onclick="window.print()">Print / Save PDF ↗</button>
+    </div>
+  </div>
+  <main class="pkwt-print-sheets">
+    ${sheets.join('\n')}
+  </main>
+  ${autoPrintScript}
+</body>
+</html>`;
+}
+

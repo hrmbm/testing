@@ -4,6 +4,7 @@ import {
   CONTRACT_DOCUMENTS,
   DEFAULT_CONTRACT_SETTINGS,
   buildAgreementPayload,
+  buildPkwtPrintPackageHtml,
   computeEndDate,
   determineRequiredContractDocuments,
   formatContractCode,
@@ -184,7 +185,7 @@ export async function openPkwtConfigModal({
 } = {}) {
   const [masters] = await Promise.all([
     loadCompanyMasters(),
-    loadContractTemplate(CONTRACT_DOCUMENTS[0])
+    ...CONTRACT_DOCUMENTS.map(docMeta => loadContractTemplate(docMeta).catch(() => ''))
   ]);
 
   let modal = document.getElementById('pkwt-config-modal');
@@ -511,6 +512,17 @@ export async function openPkwtConfigModal({
     targetBtn.disabled = true;
     targetBtn.textContent = 'Preparing Print…';
 
+    const docTitle = `${config.employeeName} — ${printAll ? `${docsToPrint.length} Contract Document${docsToPrint.length === 1 ? '' : 's'}` : docsToPrint[0].title}`;
+    let printTab = null;
+    try {
+      printTab = window.open('', '_blank');
+      if (printTab && printTab.document) {
+        printTab.document.write(`<!doctype html><title>Preparing ${esc(docTitle)}…</title><p style="font:14px 'Plus Jakarta Sans',Arial,sans-serif;padding:30px">Preparing PKWT &amp; Agreement documents…</p>`);
+      }
+    } catch {
+      printTab = null;
+    }
+
     try {
       const payload = buildAgreementPayload(config, currentMaster);
       const htmlList = await Promise.all(
@@ -520,10 +532,18 @@ export async function openPkwtConfigModal({
         })
       );
 
-      await printDocumentsViaDomStage(
-        htmlList,
-        `${config.employeeName} — ${printAll ? `${docsToPrint.length} Contract Documents` : docsToPrint[0].title}`
-      );
+      if (printTab && !printTab.closed) {
+        const packageHtml = buildPkwtPrintPackageHtml(htmlList, {
+          title: docTitle,
+          autoPrint: true
+        });
+        printTab.document.open();
+        printTab.document.write(packageHtml);
+        printTab.document.close();
+        try { printTab.focus(); } catch {}
+      } else {
+        await printDocumentsViaDomStage(htmlList, docTitle);
+      }
 
       modal.classList.add('hidden');
 
@@ -536,6 +556,9 @@ export async function openPkwtConfigModal({
         });
       }
     } catch (err) {
+      if (printTab && !printTab.closed) {
+        try { printTab.close(); } catch {}
+      }
       errorBox.textContent = err.message || 'Failed to prepare agreement package for printing.';
     } finally {
       targetBtn.disabled = false;

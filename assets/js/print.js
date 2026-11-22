@@ -839,25 +839,96 @@ export async function printApplication(record, options = {}) {
     (doc.querySelector('.sheets-canvas') || doc.body).append(...extras.children);
 
     const style = doc.createElement('style');
-    style.textContent = DISC_SHARED_AND_BRAND_CSS;
+    style.textContent = `${DISC_SHARED_AND_BRAND_CSS}
+      .print-app-toolbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;background:#0f172a;color:#f8fafc;border-bottom:1px solid rgba(255,255,255,.14);font-family:'Plus Jakarta Sans',Arial,sans-serif}
+      .print-app-toolbar-title{font-size:13px;font-weight:600}
+      .print-app-toolbar-actions{display:flex;gap:8px}
+      .print-app-toolbar button{border:1px solid rgba(255,255,255,.24);border-radius:7px;padding:7px 14px;font:600 12.5px inherit;cursor:pointer;background:rgba(255,255,255,.08);color:#fff}
+      .print-app-toolbar button.primary{background:#0d5c6b;border-color:#0d5c6b}
+      @media print{.print-app-toolbar{display:none!important}}
+    `;
     doc.head.append(style);
+
+    const toolbar = doc.createElement('div');
+    toolbar.className = 'print-app-toolbar';
+    toolbar.innerHTML = `<span class="print-app-toolbar-title">${esc(record.full_name || cfg.companyName)} · Application, CV &amp; DISC</span>
+      <div class="print-app-toolbar-actions">
+        <button type="button" onclick="window.close()">Close</button>
+        <button type="button" class="primary" onclick="window.print()">Print / Save PDF ↗</button>
+      </div>`;
+    doc.body.prepend(toolbar);
+
+    const autoPrintScript = doc.createElement('script');
+    autoPrintScript.textContent = `
+      (function () {
+        function fitInline() {
+          var root = document.getElementById('applicationForm');
+          if (!root) return;
+          root.querySelectorAll('input[type="date"]').forEach(function (field) {
+            if (!field.value) field.setAttribute('data-print-empty', 'true');
+            else field.removeAttribute('data-print-empty');
+          });
+          document.body.classList.add('print-measuring');
+          try {
+            root.querySelectorAll('textarea').forEach(function (ta) {
+              ta.style.removeProperty('--print-h');
+              ta.style.minHeight = '0px';
+              ta.style.height = '1px';
+            });
+            void document.body.offsetHeight;
+            root.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field').forEach(function (field) {
+              field.style.setProperty('--print-h', Math.max(14, field.scrollHeight + 2) + 'px');
+            });
+            root.querySelectorAll('textarea.hobby-box').forEach(function (box) {
+              box.style.setProperty('--print-h', Math.max(42, box.scrollHeight + 3) + 'px');
+            });
+            root.querySelectorAll('textarea.answer').forEach(function (box) {
+              box.style.setProperty('--print-h', Math.max(53, box.scrollHeight + 3) + 'px');
+            });
+          } finally {
+            root.querySelectorAll('textarea').forEach(function (ta) {
+              ta.style.minHeight = '';
+              ta.style.height = '';
+            });
+            document.body.classList.remove('print-measuring');
+          }
+          root.querySelectorAll('textarea.cell-wrap, textarea.inline-wrap-field, textarea.hobby-box, textarea.answer').forEach(function (field) {
+            field.style.height = 'auto';
+            field.style.height = field.scrollHeight + 'px';
+          });
+        }
+        function triggerForegroundPrint() {
+          fitInline();
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+              try { window.print(); } catch (_) {}
+            });
+          });
+        }
+        var imgs = Array.prototype.slice.call(document.images || []);
+        var imgPromises = imgs.map(function (img) {
+          if (img.complete) return Promise.resolve();
+          return new Promise(function (resolve) {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          });
+        });
+        var fontPromise = (document.fonts && document.fonts.ready)
+          ? document.fonts.ready.catch(function () {})
+          : Promise.resolve();
+        Promise.race([
+          Promise.all([Promise.all(imgPromises), fontPromise]),
+          new Promise(function (resolve) { setTimeout(resolve, 250); })
+        ]).then(triggerForegroundPrint);
+      })();
+    `;
+    doc.body.append(autoPrintScript);
+
     tab.document.open();
     tab.document.write('<!doctype html>' + doc.documentElement.outerHTML);
     tab.document.close();
-    tab.focus();
-    const images = [...tab.document.images];
-    const readyPromise = Promise.all([
-      ...images.map(image => image.decode?.().catch(() => null)),
-      tab.document.fonts?.ready?.catch?.(() => null)
-    ]);
-    await Promise.race([
-      readyPromise,
-      new Promise(resolve => setTimeout(resolve, 750))
-    ]);
-    await new Promise(resolve => setTimeout(resolve, 40));
     fitMasterDocument(tab.document);
     tab.focus();
-    setTimeout(() => { try { tab.print(); } catch { /* browser print UI */ } }, 80);
   } catch (error) {
     tab.close();
     throw error;
@@ -1142,6 +1213,23 @@ export function buildTrackingReportHtml({ summary = { rows: [], totals: {} }, ro
       </footer>
     </section>
   </main>
+  <script>
+    (function () {
+      var fontWait = (document.fonts && document.fonts.ready)
+        ? document.fonts.ready.catch(function () {})
+        : Promise.resolve();
+      Promise.race([
+        fontWait,
+        new Promise(function (resolve) { setTimeout(resolve, 200); })
+      ]).then(function () {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            try { window.print(); } catch (_) {}
+          });
+        });
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -1154,5 +1242,4 @@ export function printTrackingReport(options = {}) {
   tab.document.write(html);
   tab.document.close();
   tab.focus();
-  setTimeout(() => { try { tab.print(); } catch { /* browser print UI */ } }, 140);
 }
