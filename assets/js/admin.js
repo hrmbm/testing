@@ -1,10 +1,10 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-13';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-13';
-import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-13';
-import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-13';
-import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-13';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-13';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-13';
+import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-15';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-15';
+import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-15';
+import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-15';
+import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-15';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-15';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-15';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -26,11 +26,13 @@ import {
   aggregateCvScreeningBySource,
   buildUnifiedTrackingRows,
   buildRecruitmentConclusionSummary,
+  resolveSharedDiscForApplicant,
+  resolveSharedInterviewsForApplicant,
   formatEmployeeExportRow,
   formatDmyDash,
   isRootAdminAccount,
   maskPin
-} from './workspace-logic.js?v=20261121-hrga-workspace-13';
+} from './workspace-logic.js?v=20261121-hrga-workspace-15';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -41,7 +43,7 @@ import {
   openEmployeeUploadModal,
   openUserModal,
   openPinRevealPrompt
-} from './admin-modals.js?v=20261121-hrga-workspace-13';
+} from './admin-modals.js?v=20261121-hrga-workspace-15';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -170,11 +172,13 @@ function getEmployeeForApplicant(applicant) {
 }
 
 function getDiscForApplicant(applicant) {
-  return Array.isArray(applicant?.disc_submissions) ? applicant.disc_submissions[0] : applicant?.disc_submissions;
+  return resolveSharedDiscForApplicant(applicant, applicants);
 }
 
-function getInterviewsForApplicant(applicantId) {
-  return interviews.filter(i => i.applicant_id === applicantId);
+function getInterviewsForApplicant(applicantId, applicantObj = null) {
+  const target = applicantObj || applicants.find(a => a.id === applicantId) || null;
+  if (!target) return interviews.filter(i => i.applicant_id === applicantId);
+  return resolveSharedInterviewsForApplicant(target, applicants, interviews);
 }
 
 const APPLICATION_FIELD_LABELS = {
@@ -242,7 +246,7 @@ function applicantRows(rows, action = 'print') {
   return rows.map(applicant => {
     const employee = getEmployeeForApplicant(applicant);
     const disc = getDiscForApplicant(applicant);
-    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id), employee);
+    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id, applicant), employee, null, { applicants, sharedDisc: disc });
     let graph = '<span class="status-pill gray">No graph yet</span>';
     let personality = '—';
     if (disc?.answers) {
@@ -504,7 +508,7 @@ function renderDashboard() {
   const hired = employees.length;
   const rejected = applicants.filter(a => a.stage === 'rejected').length;
   const submitted = stage2 + stage3 + applicants.filter(a => ['stage4_pending', 'os_sent', 'hired'].includes(a.stage)).length;
-  const discDone = stage3 + applicants.filter(a => Boolean(getDiscForApplicant(a)) && a.stage !== 'disc_completed').length;
+  const discDone = applicants.filter(a => Boolean(getDiscForApplicant(a)) || a.stage === 'disc_completed').length;
   const stages = [
     ['Lead Register', stage1, 'stage-muted'],
     ['Form Submitted', stage2, 'stage-blue'],
@@ -770,7 +774,7 @@ function stage2CellClass(key) {
 function stage2RowHtml(row, keys) {
   const data = row.application_data || {};
   const pos = row.position || data.posisi || '—';
-  const progress = deriveCandidateProgress(row, getInterviewsForApplicant(row.id), getEmployeeForApplicant(row));
+  const progress = deriveCandidateProgress(row, getInterviewsForApplicant(row.id, row), getEmployeeForApplicant(row), null, { applicants });
   return `<tr><td><b class="cell-clamp-2" title="${esc(row.full_name)}">${esc(row.full_name)}</b><small class="table-subline">${esc(row.nik)}</small></td>
     <td><div class="cell-clamp-2" title="${esc(pos)}">${esc(pos)}</div></td>
     ${keys.map(key => {
@@ -1006,7 +1010,7 @@ function bindStage2CandidateActions() {
       applicant,
       positions,
       onSave: async newPosition => {
-        const payload = buildDuplicateCandidatePayload(applicant, newPosition);
+        const payload = buildDuplicateCandidatePayload(applicant, newPosition, applicants);
         let insertRes = await supabase.from('applicants').insert(payload).select('*').single();
         if (insertRes.error && isMissingSchemaError(insertRes.error)) {
           const { duplicated_from: _drop, ...fallbackPayload } = payload;
@@ -1026,7 +1030,7 @@ function bindStage2CandidateActions() {
             await supabase.from('disc_submissions').insert(discPayload).then(() => {}, () => {});
           }
 
-          const intPayloads = buildDuplicatedInterviewPayloads(getInterviewsForApplicant(applicant.id), inserted, currentUserId);
+          const intPayloads = buildDuplicatedInterviewPayloads(getInterviewsForApplicant(applicant.id, applicant), inserted, currentUserId);
           if (intPayloads.length && !interviewsTableMissing) {
             const prepared = intPayloads.map(({ interview_date: d, contract_number: c, ...rest }) => ({
               ...rest,
@@ -1552,6 +1556,11 @@ function renderInterviewView() {
               .update({ stage: 'rejected', updated_at: new Date().toISOString() })
               .eq('id', payload.applicant_id);
             say(`Final Interview decision (${payload.candidate_name}: Rejected) saved.`);
+          } else if (dec === 'Holded' && payload.applicant_id) {
+            await supabase.from('applicants')
+              .update({ stage: 'stage4_pending', updated_at: new Date().toISOString() })
+              .eq('id', payload.applicant_id);
+            say(`Final Interview decision (${payload.candidate_name}: Holded) saved.`);
           } else if (dec === 'Sent to OS' && payload.applicant_id) {
             const { error: osErr } = await supabase.from('applicants')
               .update({ stage: 'os_sent', updated_at: new Date().toISOString() })
@@ -2067,7 +2076,7 @@ async function renderUserManagement() {
 function renderPrintRows(rows) {
   if (!rows.length) return emptyRow(4);
   return rows.map(applicant => {
-    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id), getEmployeeForApplicant(applicant));
+    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id, applicant), getEmployeeForApplicant(applicant), null, { applicants });
     return `<tr><td><b>${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
       <td>${esc(applicant.position || '—')}</td>
       <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
@@ -2196,7 +2205,9 @@ function bindPrint() {
     button.addEventListener('click', () => {
       const record = applicants.find(a => a.id === button.dataset.print);
       if (!record) return;
-      openPrintBrandModal(record, button);
+      const sharedDisc = getDiscForApplicant(record);
+      const printRecord = sharedDisc ? { ...record, disc_submissions: [sharedDisc] } : record;
+      openPrintBrandModal(printRecord, button);
     });
   });
 }

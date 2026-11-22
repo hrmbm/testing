@@ -1,6 +1,6 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-13';
-import { QUESTIONS } from './disc-engine.js?v=20261121-hrga-workspace-13';
-import { $, esc, cacheCandidateNik, getCachedCandidateNik, clearCachedCandidateNik, setBusy } from './common.js?v=20261121-hrga-workspace-13';
+import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-15';
+import { QUESTIONS } from './disc-engine.js?v=20261121-hrga-workspace-15';
+import { $, esc, cacheCandidateNik, getCachedCandidateNik, clearCachedCandidateNik, setBusy } from './common.js?v=20261121-hrga-workspace-15';
 
 const root=$('#disc-app');
 let nik='';

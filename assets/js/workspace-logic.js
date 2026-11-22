@@ -83,6 +83,7 @@ export const INTERVIEW_DECISIONS = [
 export const FINAL_INTERVIEW_DECISIONS = [
   'Accepted',
   'Rejected',
+  'Holded',
   'Sent to OS'
 ];
 
@@ -130,6 +131,7 @@ export function normalizeInterviewDecision(value = '') {
   if (key === 'tidak direkomendasikan' || key === 'not recommended') return 'Not Recommended';
   if (key === 'diterima' || key === 'accepted') return 'Accepted';
   if (key === 'ditolak' || key === 'rejected') return 'Rejected';
+  if (key === 'hold' || key === 'holded' || key === 'ditunda') return 'Holded';
   if (key === 'kirim ke os' || key === 'sent to os') return 'Sent to OS';
   return raw;
 }
@@ -246,7 +248,100 @@ export function calculateContractDates(startDateIso = '', durationMonths = 12) {
   };
 }
 
-export function buildDuplicateCandidatePayload(applicant, newPosition) {
+export function normalizeNikKey(value = '') {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.length >= 8) return digits;
+  const trimmed = String(value ?? '').trim().toLowerCase();
+  return trimmed.length >= 6 ? trimmed : '';
+}
+
+export function extractDirectDisc(applicant) {
+  if (!applicant) return null;
+  return (Array.isArray(applicant.disc_submissions)
+    ? applicant.disc_submissions[0]
+    : applicant.disc_submissions) || null;
+}
+
+export function collectSiblingApplicants(applicant, applicants = []) {
+  if (!applicant) return [];
+  const targetNik = normalizeNikKey(applicant.nik || applicant.application_data?.nik);
+  const directLinks = new Set([applicant.id, applicant.duplicated_from].filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  const pushUnique = item => {
+    if (!item || (item.id && seen.has(item.id))) return;
+    if (item.id) seen.add(item.id);
+    result.push(item);
+  };
+  pushUnique(applicant);
+  for (const cand of (applicants || [])) {
+    if (!cand || cand.id === applicant.id) continue;
+    const candNik = normalizeNikKey(cand.nik || cand.application_data?.nik);
+    const sameNik = Boolean(targetNik && candNik && candNik === targetNik);
+    const linkedChain = Boolean(
+      (cand.id && directLinks.has(cand.id)) ||
+      (cand.duplicated_from && directLinks.has(cand.duplicated_from)) ||
+      (cand.duplicated_from && applicant.id && cand.duplicated_from === applicant.id)
+    );
+    if (sameNik || linkedChain) {
+      pushUnique(cand);
+    }
+  }
+  return result;
+}
+
+export function resolveSharedDiscForApplicant(applicant, applicants = []) {
+  const direct = extractDirectDisc(applicant);
+  if (direct && (Array.isArray(direct.answers) ? direct.answers.length === 24 : true)) {
+    return direct;
+  }
+  const siblings = collectSiblingApplicants(applicant, applicants);
+  let fallback = direct;
+  for (const sib of siblings) {
+    if (sib === applicant) continue;
+    const disc = extractDirectDisc(sib);
+    if (!disc) continue;
+    if (Array.isArray(disc.answers) && disc.answers.length === 24) {
+      return disc;
+    }
+    if (!fallback) fallback = disc;
+  }
+  return fallback || null;
+}
+
+export function resolveSharedInterviewsForApplicant(applicant, applicants = [], interviews = []) {
+  if (!applicant && !interviews?.length) return [];
+  const siblings = collectSiblingApplicants(applicant, applicants);
+  const siblingIds = new Set(siblings.map(s => s.id).filter(Boolean));
+  if (applicant?.id) siblingIds.add(applicant.id);
+  const targetNik = normalizeNikKey(applicant?.nik || applicant?.application_data?.nik);
+
+  const matching = (interviews || []).filter(row => {
+    if (!row) return false;
+    if (row.applicant_id && siblingIds.has(row.applicant_id)) return true;
+    if (targetNik && normalizeNikKey(row.candidate_nik) === targetNik) return true;
+    return false;
+  });
+
+  if (!matching.length) return [];
+
+  const direct = matching.filter(row => row.applicant_id === applicant?.id);
+  const siblingOnly = matching.filter(row => row.applicant_id !== applicant?.id);
+
+  // Per interview stage, prefer direct records on this applicant; fill missing stages from sibling NIK records.
+  const directByStage = getLatestInterviewsByStage(direct);
+  const siblingByStage = getLatestInterviewsByStage(siblingOnly);
+
+  const combined = [...direct];
+  for (const stage of INTERVIEW_STAGES) {
+    if (!directByStage[stage] && siblingByStage[stage]) {
+      combined.push(siblingByStage[stage]);
+    }
+  }
+  return combined;
+}
+
+export function buildDuplicateCandidatePayload(applicant, newPosition, applicants = []) {
   if (!applicant || !applicant.id) {
     throw new Error('Invalid source candidate record.');
   }
@@ -266,9 +361,8 @@ export function buildDuplicateCandidatePayload(applicant, newPosition) {
   sourceData.__duplicated_from_id = applicant.id;
   sourceData.__duplicated_from_position = currentPosition;
 
-  const hasDisc = Boolean(
-    (Array.isArray(applicant.disc_submissions) ? applicant.disc_submissions[0] : applicant.disc_submissions)?.answers
-  );
+  const resolvedDisc = resolveSharedDiscForApplicant(applicant, applicants);
+  const hasDisc = Boolean(resolvedDisc?.answers);
   const rawStage = applicant.stage || 'application_submitted';
   let preservedStage = rawStage;
   if (rawStage === 'hired') {
@@ -373,7 +467,7 @@ export function getLatestInterviewsByStage(interviews = []) {
   return byStage;
 }
 
-export function deriveCandidateProgress(applicant, candidateInterviews = [], employeeRecord = null, stage1Lead = null) {
+export function deriveCandidateProgress(applicant, candidateInterviews = [], employeeRecord = null, stage1Lead = null, options = {}) {
   if (employeeRecord || applicant?.stage === 'hired') {
     return { label: 'Hired · Employee', tone: 'green', stageKey: 'hired' };
   }
@@ -383,6 +477,7 @@ export function deriveCandidateProgress(applicant, candidateInterviews = [], emp
     const dec = normalizeInterviewDecision(finalInt.decision);
     if (dec === 'Accepted') return { label: 'Hired · Employee', tone: 'green', stageKey: 'hired' };
     if (dec === 'Rejected') return { label: 'Final Interview · Rejected', tone: 'gray', stageKey: 'rejected' };
+    if (dec === 'Holded') return { label: 'Final Interview · Holded', tone: 'gold', stageKey: 'holded' };
     if (dec === 'Sent to OS') return { label: 'Final Interview · Sent to OS', tone: 'gold', stageKey: 'os' };
   }
   if (applicant?.stage === 'rejected') {
@@ -405,10 +500,12 @@ export function deriveCandidateProgress(applicant, candidateInterviews = [], emp
       };
     }
   }
-  const hasDisc = Boolean(
-    (Array.isArray(applicant?.disc_submissions) ? applicant.disc_submissions[0] : applicant?.disc_submissions) ||
-    applicant?.stage === 'disc_completed'
+  const sharedDisc = options?.sharedDisc || (
+    Array.isArray(options?.applicants)
+      ? resolveSharedDiscForApplicant(applicant, options.applicants)
+      : extractDirectDisc(applicant)
   );
+  const hasDisc = Boolean(sharedDisc || applicant?.stage === 'disc_completed');
   if (hasDisc) {
     return { label: 'DISC Completed', tone: 'green', stageKey: 'disc_completed' };
   }
@@ -471,7 +568,7 @@ export function findMatchingApplicantForLead(lead, { applicants = [], interviews
 export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [], employees = [], invitedCandidates = [] } = {}) {
   const linkedApplicant = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates });
   const stage1Ints = (interviews || []).filter(i => i.stage1_id === lead?.id);
-  const appInts = linkedApplicant ? (interviews || []).filter(i => i.applicant_id === linkedApplicant.id) : [];
+  const appInts = linkedApplicant ? resolveSharedInterviewsForApplicant(linkedApplicant, applicants, interviews) : [];
   const mergedMap = new Map();
   [...stage1Ints, ...appInts].forEach(i => {
     mergedMap.set(i.id || `${i.interview_stage}:${i.updated_at || i.created_at}`, i);
@@ -484,7 +581,8 @@ export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [
     linkedApplicant || { stage: 'stage1_pending' },
     [...mergedMap.values()],
     emp,
-    lead
+    lead,
+    { applicants }
   );
   return { ...progress, linkedApplicant };
 }
@@ -505,7 +603,8 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
     const matchedApp = findMatchingApplicantForLead(lead, { applicants, invitedCandidates: manualInvites });
     if (matchedApp) {
       matchedStage1Ids.add(lead.id);
-      if (!matchedLeadByApplicantId.has(matchedApp.id) && String(lead.source || '').trim()) {
+      const existingLead = matchedLeadByApplicantId.get(matchedApp.id);
+      if (!existingLead || (!String(existingLead.source || '').trim() && String(lead.source || '').trim())) {
         matchedLeadByApplicantId.set(matchedApp.id, lead);
       }
     }
@@ -518,7 +617,7 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
       ? (applicants || []).find(a => a.id === inv.linked_applicant_id) || null
       : null;
     const linkedLead = inv.linked_stage1_id ? (stage1ById.get(inv.linked_stage1_id) || null) : null;
-    const resolvedStatus = (linkedApp || String(linkedLead?.source || '').trim())
+    const resolvedStatus = (linkedApp || linkedLead)
       ? 'Responded'
       : (inv.status === 'Responded' ? 'Responded' : 'No Response');
     const fallbackLeadSource = linkedApp
@@ -535,7 +634,7 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
       inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
       candidateName: linkedApp?.full_name || linkedLead?.full_name || inv.candidate_name || '—',
       appliedPosition: inv.applied_position || linkedApp?.position || linkedLead?.position || '—',
-      source: inv.source || fallbackLeadSource || 'Other',
+      source: inv.source || fallbackLeadSource || (linkedApp ? 'Jobstreet' : 'Lead Register'),
       status: resolvedStatus,
       notes: inv.notes || '',
       isDuplicated: Boolean(linkedApp?.duplicated_from),
@@ -557,7 +656,7 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
       inviteDate: String(app.created_at || '').slice(0, 10),
       candidateName: app.full_name || app.application_data?.nama || '—',
       appliedPosition: app.position || app.application_data?.posisi || '—',
-      source: app.duplicated_from ? 'Duplicated Position' : (leadSource || 'Application Form'),
+      source: leadSource || 'Jobstreet',
       status: 'Responded',
       notes: '',
       isDuplicated: Boolean(app.duplicated_from),
@@ -566,9 +665,8 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
   }
 
   for (const lead of (stage1Leads || [])) {
-    const leadSource = String(lead.source || '').trim();
-    if (!leadSource) continue;
     if (linkedStage1Ids.has(lead.id) || matchedStage1Ids.has(lead.id)) continue;
+    const leadSource = String(lead.source || '').trim();
     rows.push({
       rowKey: `stage1:${lead.id}`,
       manualId: null,
@@ -579,7 +677,7 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
       inviteDate: String(lead.created_at || '').slice(0, 10),
       candidateName: lead.full_name || '—',
       appliedPosition: lead.position || '—',
-      source: leadSource,
+      source: leadSource || 'Lead Register',
       status: 'Responded',
       notes: 'Lead Register',
       isDuplicated: false,
@@ -662,7 +760,7 @@ export function buildUnifiedTrackingRows({
     }
   }
 
-  const getDisc = a => (Array.isArray(a.disc_submissions) ? a.disc_submissions[0] : a.disc_submissions) || null;
+  const getDisc = a => resolveSharedDiscForApplicant(a, applicants);
   const getEmp = a => (Array.isArray(a.employees) ? a.employees[0] : a.employees) ||
     (employees || []).find(e => e.applicant_id === a.id) || null;
 
@@ -677,9 +775,16 @@ export function buildUnifiedTrackingRows({
     };
   };
 
+  const resolveLatestStageDecision = byStage => {
+    for (const st of ['User 2', 'User 1', 'HR 2', 'HR 1']) {
+      if (byStage[st]) return byStage[st];
+    }
+    return null;
+  };
+
   for (const a of (applicants || [])) {
     if (a.stage === 'stage1_pending') continue;
-    const ints = (interviews || []).filter(i => i.applicant_id === a.id);
+    const ints = resolveSharedInterviewsForApplicant(a, applicants, interviews);
     const byStage = getLatestInterviewsByStage(ints);
     const emp = getEmp(a);
     const disc = getDisc(a);
@@ -687,28 +792,50 @@ export function buildUnifiedTrackingRows({
     const matchedLead = leadByApplicantId.get(a.id) || null;
     const finalInt = byStage['Final Interview'];
     const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
+    const latestPreFinal = resolveLatestStageDecision(byStage);
+    const latestPreFinalDec = latestPreFinal ? normalizeInterviewDecision(latestPreFinal.decision) : '';
+    const leadRec = matchedLead ? normalizeLeadRecommendation(matchedLead.recommendation) : '';
 
     let decisionLabel = 'In Progress';
     let decisionTone = 'gold';
     let rejectionReason = '';
+    let decisionDate = '';
     if (emp || a.stage === 'hired' || finalDec === 'Accepted') {
       decisionLabel = 'Accepted';
       decisionTone = 'green';
+      decisionDate = finalInt
+        ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
+        : '';
     } else if (finalDec === 'Rejected' || a.stage === 'rejected') {
       decisionLabel = 'Rejected';
       decisionTone = 'gray';
       rejectionReason = [finalInt?.rejection_reason_category, finalInt?.rejection_reason_detail]
         .filter(Boolean).join(' · ');
+      decisionDate = finalInt
+        ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
+        : '';
+    } else if (finalDec === 'Holded') {
+      decisionLabel = 'Holded';
+      decisionTone = 'gold';
+      decisionDate = finalInt
+        ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
+        : '';
     } else if (finalDec === 'Sent to OS' || a.stage === 'os_sent') {
       decisionLabel = 'Sent to OS';
       decisionTone = 'gold';
+      decisionDate = finalInt
+        ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
+        : '';
+    } else if (latestPreFinalDec === 'Not Recommended' || (!latestPreFinal && leadRec === 'Not Recommended')) {
+      decisionLabel = 'Not Recommended';
+      decisionTone = 'gray';
+      decisionDate = latestPreFinal
+        ? (latestPreFinal.interview_date || String(latestPreFinal.updated_at || latestPreFinal.created_at || '').slice(0, 10))
+        : '';
     }
 
-    const decisionDate = finalInt
-      ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10))
-      : '';
     const joinDate = emp?.join_date || finalInt?.work_start_date || '';
-    const resolvedSource = linkedInv?.source || String(matchedLead?.source || '').trim() || 'Application Form';
+    const resolvedSource = linkedInv?.source || String(matchedLead?.source || '').trim() || 'Jobstreet';
 
     rows.push({
       id: `app:${a.id}`,
@@ -740,21 +867,43 @@ export function buildUnifiedTrackingRows({
     const ints = (interviews || []).filter(i => i.stage1_id === s.id);
     const byStage = getLatestInterviewsByStage(ints);
     const linkedInv = inviteByStage1Id.get(s.id) || null;
+    const invStatus = linkedInv ? (linkedInv.status === 'Responded' ? 'Responded' : 'No Response') : 'Responded';
     const finalInt = byStage['Final Interview'];
     const finalDec = finalInt ? normalizeInterviewDecision(finalInt.decision) : '';
+    const latestPreFinal = resolveLatestStageDecision(byStage);
+    const latestPreFinalDec = latestPreFinal ? normalizeInterviewDecision(latestPreFinal.decision) : '';
     const leadRec = normalizeLeadRecommendation(s.recommendation);
-    let decisionLabel = 'Lead Register';
-    let decisionTone = 'blue';
+    let decisionLabel = 'In Progress';
+    let decisionTone = 'gold';
     let rejectionReason = '';
-    if (finalDec === 'Accepted') { decisionLabel = 'Accepted'; decisionTone = 'green'; }
-    else if (finalDec === 'Rejected') {
+    let decisionDate = '';
+    if (finalDec === 'Accepted') {
+      decisionLabel = 'Accepted';
+      decisionTone = 'green';
+      decisionDate = finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '';
+    } else if (finalDec === 'Rejected') {
       decisionLabel = 'Rejected';
       decisionTone = 'gray';
       rejectionReason = [finalInt?.rejection_reason_category, finalInt?.rejection_reason_detail].filter(Boolean).join(' · ');
-    } else if (finalDec === 'Sent to OS') { decisionLabel = 'Sent to OS'; decisionTone = 'gold'; }
-    else if (leadRec === 'Not Recommended') { decisionLabel = 'Not Recommended'; decisionTone = 'gray'; }
+      decisionDate = finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '';
+    } else if (finalDec === 'Holded') {
+      decisionLabel = 'Holded';
+      decisionTone = 'gold';
+      decisionDate = finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '';
+    } else if (finalDec === 'Sent to OS') {
+      decisionLabel = 'Sent to OS';
+      decisionTone = 'gold';
+      decisionDate = finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '';
+    } else if (latestPreFinalDec === 'Not Recommended' || (!latestPreFinal && leadRec === 'Not Recommended')) {
+      decisionLabel = 'Not Recommended';
+      decisionTone = 'gray';
+      decisionDate = latestPreFinal ? (latestPreFinal.interview_date || String(latestPreFinal.updated_at || latestPreFinal.created_at || '').slice(0, 10)) : '';
+    } else if (invStatus === 'No Response') {
+      decisionLabel = 'No Response';
+      decisionTone = 'gray';
+    }
 
-    const leadSource = String(s.source || linkedInv?.source || '').trim();
+    const leadSource = String(linkedInv?.source || s.source || '').trim();
 
     rows.push({
       id: `stage1:${s.id}`,
@@ -762,7 +911,7 @@ export function buildUnifiedTrackingRows({
       position: s.position || '',
       sub: `${s.position || '—'}${s.whatsapp ? ` · ${s.whatsapp}` : ''}`,
       inviteDate: String(s.created_at || '').slice(0, 10),
-      inviteStatus: leadSource ? 'Responded' : (linkedInv?.status || 'Lead Register'),
+      inviteStatus: invStatus,
       inviteSource: leadSource || 'Lead Register',
       formSubmittedDate: '',
       hrTestDate: '',
@@ -775,7 +924,7 @@ export function buildUnifiedTrackingRows({
       decision: decisionLabel,
       decisionTone,
       rejectionReason,
-      decisionDate: finalInt ? (finalInt.interview_date || String(finalInt.updated_at || finalInt.created_at || '').slice(0, 10)) : '',
+      decisionDate,
       joinDate: finalInt?.work_start_date || ''
     });
   }
@@ -783,13 +932,14 @@ export function buildUnifiedTrackingRows({
   for (const inv of (invitedCandidates || [])) {
     if (inv.linked_applicant_id) continue;
     if (inv.linked_stage1_id && seenStage1Ids.has(inv.linked_stage1_id)) continue;
+    const isResponded = inv.status === 'Responded';
     rows.push({
       id: `inv:${inv.id}`,
       name: inv.candidate_name || '—',
       position: inv.applied_position || '',
       sub: `${inv.applied_position || '—'} · ${inv.source || '—'}`,
       inviteDate: inv.invite_date || String(inv.created_at || '').slice(0, 10),
-      inviteStatus: inv.status === 'Responded' ? 'Responded' : 'No Response',
+      inviteStatus: isResponded ? 'Responded' : 'No Response',
       inviteSource: inv.source || '—',
       formSubmittedDate: '',
       hrTestDate: '',
@@ -799,8 +949,8 @@ export function buildUnifiedTrackingRows({
       user1: null,
       user2: null,
       finalInt: null,
-      decision: inv.status === 'Responded' ? 'In Progress' : 'No Response',
-      decisionTone: 'gray',
+      decision: isResponded ? 'In Progress' : 'No Response',
+      decisionTone: isResponded ? 'gold' : 'gray',
       rejectionReason: '',
       decisionDate: '',
       joinDate: ''
@@ -865,39 +1015,55 @@ export function buildRecruitmentConclusionSummary({
     ensureBucket(pos).invitedCount += 1;
   }
 
-  // 3. HR Test (DISC completed) & Hired/Accepted from applicants
-  const getDisc = a => (Array.isArray(a.disc_submissions) ? a.disc_submissions[0] : a.disc_submissions) || null;
+  // 3. HR Test (DISC completed) & Interview / Accepted from applicants (including shared same-NIK continuity)
   const hiredApplicantIds = new Set((employees || []).map(e => e.applicant_id).filter(Boolean));
+  const coveredDirectInterviewIds = new Set();
 
   for (const app of (applicants || [])) {
     if (app.stage === 'stage1_pending') continue;
     const pos = String(app.position || app.application_data?.posisi || '').trim();
     if (!pos) continue;
     const bucket = ensureBucket(pos);
-    const hasDisc = Boolean(getDisc(app) || app.stage === 'disc_completed');
+    const resolvedDisc = resolveSharedDiscForApplicant(app, applicants);
+    const hasDisc = Boolean(resolvedDisc || app.stage === 'disc_completed');
     if (hasDisc) bucket.hrTestCount += 1;
     if (app.stage === 'hired' || hiredApplicantIds.has(app.id)) {
       bucket.acceptedCandidates.add(`app:${app.id}`);
     }
+
+    const sharedInts = resolveSharedInterviewsForApplicant(app, applicants, interviews);
+    const candKey = `app:${app.id}`;
+    for (const row of sharedInts) {
+      if (row.applicant_id === app.id && row.id) coveredDirectInterviewIds.add(row.id);
+      if (row.interview_stage === 'HR 1' || row.interview_stage === 'HR 2') {
+        bucket.hrCandidates.add(candKey);
+      } else if (row.interview_stage === 'User 1' || row.interview_stage === 'User 2') {
+        bucket.userCandidates.add(candKey);
+      } else if (row.interview_stage === 'Final Interview') {
+        bucket.finalCandidates.add(candKey);
+        if (normalizeInterviewDecision(row.decision) === 'Accepted') {
+          bucket.acceptedCandidates.add(candKey);
+        }
+      }
+    }
   }
 
-  // 4. Interviews per Position (deduplicating HR 1+2 and User 1+2 per candidate per position)
+  // 4. Remaining standalone/stage1 interviews not covered by applicant buckets
   for (const row of (interviews || [])) {
-    const linkedApp = row.applicant_id
-      ? applicantById.get(row.applicant_id)
-      : (row.stage1_id ? matchedAppByStage1Id.get(row.stage1_id) : null);
+    if (row.id && coveredDirectInterviewIds.has(row.id)) continue;
+    if (row.applicant_id && applicantById.has(row.applicant_id)) continue;
+    const linkedApp = row.stage1_id ? matchedAppByStage1Id.get(row.stage1_id) : null;
+    if (linkedApp) continue;
     const linkedLead = row.stage1_id ? leadById.get(row.stage1_id) : null;
-    const rawPos = String(linkedApp?.position || linkedLead?.position || row.applied_position || '').trim();
+    const rawPos = String(linkedLead?.position || row.applied_position || '').trim();
     if (!rawPos) continue;
 
     const bucket = ensureBucket(rawPos);
-    const candKey = linkedApp?.id
-      ? `app:${linkedApp.id}`
-      : row.applicant_id
-        ? `app:${row.applicant_id}`
-        : row.stage1_id
-          ? `stage1:${row.stage1_id}`
-          : `name:${normalizePersonName(row.candidate_name)}`;
+    const candKey = row.applicant_id
+      ? `app:${row.applicant_id}`
+      : row.stage1_id
+        ? `stage1:${row.stage1_id}`
+        : `name:${normalizePersonName(row.candidate_name)}`;
 
     if (row.interview_stage === 'HR 1' || row.interview_stage === 'HR 2') {
       bucket.hrCandidates.add(candKey);

@@ -102,6 +102,8 @@ import {
   aggregateCvScreeningBySource,
   buildUnifiedTrackingRows,
   buildRecruitmentConclusionSummary,
+  resolveSharedDiscForApplicant,
+  resolveSharedInterviewsForApplicant,
   parseEmployeeSpreadsheetRows,
   formatEmployeeExportRow,
   verifyPinRevealPassword,
@@ -111,7 +113,9 @@ import {
   findDefaultInterviewer,
   isRootAdminAccount,
   buildEmployeeUserOptionLabel,
-  EMPLOYEE_TABLE_HEADERS
+  EMPLOYEE_TABLE_HEADERS,
+  FINAL_INTERVIEW_DECISIONS,
+  normalizeInterviewDecision
 } from '../assets/js/workspace-logic.js';
 
 test('calculateContractDates computes exact inclusive end date matching 17 March 2026 - 16 March 2027', () => {
@@ -377,14 +381,18 @@ test('Lead Register source auto-syncs to Invited Candidates as Responded and Tra
   ];
 
   const invitedRows = buildInvitedCandidatesViewRows({ manualInvites: [], applicants, stage1Leads });
-  // lead-3 matched app-1 -> merged once, carrying Indeed source; lead-1 added with Responded; lead-2 skipped (no source)
-  assert.equal(invitedRows.length, 2);
+  // lead-3 matched app-1 -> merged once carrying Indeed; lead-1 & lead-2 both auto-pulled from Lead Register as Responded
+  assert.equal(invitedRows.length, 3);
   const bimaInvite = invitedRows.find(r => r.linkedApplicantId === 'app-1');
   const sariInvite = invitedRows.find(r => r.linkedStage1Id === 'lead-1');
+  const tanpaSourceInvite = invitedRows.find(r => r.linkedStage1Id === 'lead-2');
   assert.equal(bimaInvite?.source, 'Indeed');
   assert.equal(bimaInvite?.status, 'Responded');
   assert.equal(sariInvite?.source, 'Glints');
   assert.equal(sariInvite?.status, 'Responded');
+  assert.equal(tanpaSourceInvite?.source, 'Lead Register');
+  assert.equal(tanpaSourceInvite?.status, 'Responded');
+  assert.equal(tanpaSourceInvite?.appliedPosition, 'CNC');
 
   const tracking = buildUnifiedTrackingRows({ applicants, stage1Leads, interviews: [], employees: [], invitedCandidates: [] });
   assert.equal(tracking.length, 3);
@@ -461,4 +469,173 @@ test('buildRecruitmentConclusionSummary deduplicates HR 1+2 and User 1+2 intervi
   const dupInts = buildDuplicatedInterviewPayloads([interviews[4]], { id: 'a4', full_name: 'Kandidat Satu', nik: '123', position: 'QA' }, 'admin');
   assert.equal(dupInts[0].contract_number, '045/PKWT/2026');
 });
+
+test('auto-pulled Candidate List rows default source to Jobstreet unless overridden manually', () => {
+  const applicants = [
+    { id: 'c1', full_name: 'Rudi Hartono', position: 'CNC', stage: 'application_submitted', created_at: '2026-03-10T00:00:00Z' },
+    { id: 'c2', full_name: 'Rudi Hartono', position: 'QA', stage: 'disc_completed', duplicated_from: 'c1', created_at: '2026-03-11T00:00:00Z' },
+    { id: 'c3', full_name: 'Siti Aminah', position: 'Operator', stage: 'application_submitted', created_at: '2026-03-12T00:00:00Z' }
+  ];
+  const manualInvites = [
+    { id: 'm1', linked_applicant_id: 'c3', candidate_name: 'Siti Aminah', applied_position: 'Operator', source: 'Referensi Internal', status: 'Responded', invite_date: '2026-03-12' }
+  ];
+  const invited = buildInvitedCandidatesViewRows({ manualInvites, applicants, stage1Leads: [] });
+  assert.equal(invited.length, 3);
+  assert.equal(invited.find(r => r.linkedApplicantId === 'c1')?.source, 'Jobstreet');
+  assert.equal(invited.find(r => r.linkedApplicantId === 'c2')?.source, 'Jobstreet');
+  assert.equal(invited.find(r => r.linkedApplicantId === 'c3')?.source, 'Referensi Internal');
+
+  const tracking = buildUnifiedTrackingRows({ applicants, invitedCandidates: manualInvites, interviews: [], employees: [], stage1Leads: [] });
+  assert.equal(tracking.find(r => r.id === 'app:c1')?.inviteSource, 'Jobstreet');
+  assert.equal(tracking.find(r => r.id === 'app:c2')?.inviteSource, 'Jobstreet');
+  assert.equal(tracking.find(r => r.id === 'app:c3')?.inviteSource, 'Referensi Internal');
+});
+
+test('same 16-digit NIK shares DISC and prior interviews across different positions without duplicate re-testing', () => {
+  const answers = Array.from({ length: 24 }, (_, idx) => ({ most: idx % 4, least: (idx + 2) % 4 }));
+  const sharedNik = '3516112304830004';
+  const app1 = {
+    id: 'pos-a',
+    full_name: 'Bayu Aditya',
+    nik: sharedNik,
+    position: 'CNC',
+    stage: 'disc_completed',
+    created_at: '2026-03-01T00:00:00Z',
+    disc_submissions: [{ id: 'disc-1', answers, completed_at: '2026-03-02T08:00:00Z' }]
+  };
+  const app2 = {
+    id: 'pos-b',
+    full_name: 'Bayu Aditya',
+    nik: sharedNik,
+    position: 'QA',
+    stage: 'application_submitted',
+    created_at: '2026-03-05T00:00:00Z',
+    disc_submissions: []
+  };
+  const allApplicants = [app1, app2];
+
+  const resolvedDisc = resolveSharedDiscForApplicant(app2, allApplicants);
+  assert.equal(resolvedDisc?.id, 'disc-1');
+  assert.equal(resolvedDisc?.answers?.length, 24);
+
+  const interviews = [
+    { id: 'int-1', applicant_id: 'pos-a', candidate_nik: sharedNik, interview_stage: 'HR 1', interview_date: '2026-03-03', decision: 'Recommended', pic_name: 'Samsul Hariyadi' },
+    { id: 'int-2', applicant_id: 'pos-a', candidate_nik: sharedNik, interview_stage: 'User 1', interview_date: '2026-03-04', decision: 'Recommended', pic_name: 'User Pic' }
+  ];
+  const sharedInts = resolveSharedInterviewsForApplicant(app2, allApplicants, interviews);
+  assert.equal(sharedInts.length, 2);
+
+  const progress = deriveCandidateProgress(app2, sharedInts, null, null, { applicants: allApplicants });
+  assert.equal(progress.label, 'User 1 Interview · Recommended');
+
+  const tracking = buildUnifiedTrackingRows({ applicants: allApplicants, interviews, employees: [], stage1Leads: [], invitedCandidates: [] });
+  const posBRow = tracking.find(r => r.id === 'app:pos-b');
+  assert.equal(posBRow?.hrTestDone, true);
+  assert.equal(posBRow?.hrTestDate, '2026-03-02');
+  assert.equal(posBRow?.hr1?.decision, 'Recommended');
+  assert.equal(posBRow?.user1?.decision, 'Recommended');
+
+  const summary = buildRecruitmentConclusionSummary({
+    positions: ['CNC', 'QA'],
+    cvScreenings: [],
+    invitedCandidates: [],
+    stage1Leads: [],
+    applicants: allApplicants,
+    interviews,
+    employees: []
+  });
+  const qa = summary.rows.find(r => r.position === 'QA');
+  assert.equal(qa?.hrTestCount, 1);
+  assert.equal(qa?.hrInterviewCount, 1);
+  assert.equal(qa?.userInterviewCount, 1);
+});
+
+test('Final Interview supports Holded option and normalizes hold variations cleanly', () => {
+  assert.ok(FINAL_INTERVIEW_DECISIONS.includes('Accepted'));
+  assert.ok(FINAL_INTERVIEW_DECISIONS.includes('Rejected'));
+  assert.ok(FINAL_INTERVIEW_DECISIONS.includes('Holded'));
+  assert.equal(normalizeInterviewDecision('holded'), 'Holded');
+  assert.equal(normalizeInterviewDecision('Ditunda'), 'Holded');
+
+  const progress = deriveCandidateProgress(
+    { id: 'a-hold', stage: 'stage4_pending', disc_submissions: [] },
+    [{ interview_stage: 'Final Interview', decision: 'Holded', created_at: '2026-03-07T00:00:00Z' }],
+    null
+  );
+  assert.equal(progress.label, 'Final Interview · Holded');
+  assert.equal(progress.tone, 'gold');
+});
+
+test('Tracking Decision defaults active stages to In Progress except terminal/hold/non-response outcomes', () => {
+  const tracking = buildUnifiedTrackingRows({
+    applicants: [
+      { id: 'app-form', full_name: 'Form Only', position: 'CNC', stage: 'application_submitted', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] },
+      { id: 'app-disc', full_name: 'Disc Done', position: 'QA', stage: 'disc_completed', created_at: '2026-03-01T00:00:00Z', disc_submissions: [{ completed_at: '2026-03-02T00:00:00Z' }] },
+      { id: 'app-hr1-rec', full_name: 'HR1 Rec', position: 'Staff', stage: 'stage4_pending', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] },
+      { id: 'app-not-rec', full_name: 'HR2 Not Rec', position: 'Staff', stage: 'stage4_pending', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] },
+      { id: 'app-hold', full_name: 'Final Holded', position: 'Operator', stage: 'stage4_pending', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] },
+      { id: 'app-acc', full_name: 'Final Accepted', position: 'Operator', stage: 'hired', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] },
+      { id: 'app-rej', full_name: 'Final Rejected', position: 'Operator', stage: 'rejected', created_at: '2026-03-01T00:00:00Z', disc_submissions: [] }
+    ],
+    interviews: [
+      { applicant_id: 'app-hr1-rec', interview_stage: 'HR 1', interview_date: '2026-03-03', decision: 'Recommended' },
+      { applicant_id: 'app-not-rec', interview_stage: 'HR 1', interview_date: '2026-03-03', decision: 'Recommended' },
+      { applicant_id: 'app-not-rec', interview_stage: 'HR 2', interview_date: '2026-03-04', decision: 'Not Recommended' },
+      { applicant_id: 'app-hold', interview_stage: 'Final Interview', interview_date: '2026-03-05', decision: 'Holded' },
+      { applicant_id: 'app-acc', interview_stage: 'Final Interview', interview_date: '2026-03-06', decision: 'Accepted' },
+      { applicant_id: 'app-rej', interview_stage: 'Final Interview', interview_date: '2026-03-06', decision: 'Rejected' }
+    ],
+    stage1Leads: [
+      { id: 'lead-pending', full_name: 'Lead Pending', position: 'Driver', recommendation: 'Pending', source: 'Glints', created_at: '2026-03-02T00:00:00Z' },
+      { id: 'lead-rec', full_name: 'Lead Recommended', position: 'Driver', recommendation: 'Recommended', source: 'Glints', created_at: '2026-03-02T00:00:00Z' },
+      { id: 'lead-not-rec', full_name: 'Lead Not Rec', position: 'Driver', recommendation: 'Not Recommended', source: 'Glints', created_at: '2026-03-02T00:00:00Z' }
+    ],
+    invitedCandidates: [
+      { id: 'inv-noresp', candidate_name: 'Invite No Resp', applied_position: 'Admin', source: 'Jobstreet', status: 'No Response', invite_date: '2026-03-01' },
+      { id: 'inv-resp', candidate_name: 'Invite Resp', applied_position: 'Admin', source: 'Jobstreet', status: 'Responded', invite_date: '2026-03-01' }
+    ],
+    employees: []
+  });
+
+  const byId = Object.fromEntries(tracking.map(r => [r.id, r]));
+  assert.equal(byId['app:app-form'].decision, 'In Progress');
+  assert.equal(byId['app:app-disc'].decision, 'In Progress');
+  assert.equal(byId['app:app-hr1-rec'].decision, 'In Progress');
+  assert.equal(byId['app:app-not-rec'].decision, 'Not Recommended');
+  assert.equal(byId['app:app-not-rec'].decisionDate, '2026-03-04');
+  assert.equal(byId['app:app-hold'].decision, 'Holded');
+  assert.equal(byId['app:app-hold'].decisionTone, 'gold');
+  assert.equal(byId['app:app-acc'].decision, 'Accepted');
+  assert.equal(byId['app:app-rej'].decision, 'Rejected');
+  assert.equal(byId['stage1:lead-pending'].decision, 'In Progress');
+  assert.equal(byId['stage1:lead-rec'].decision, 'In Progress');
+  assert.equal(byId['stage1:lead-not-rec'].decision, 'Not Recommended');
+  assert.equal(byId['inv:inv-noresp'].decision, 'No Response');
+  assert.equal(byId['inv:inv-resp'].decision, 'In Progress');
+});
+
+test('Tracking print markup uses Letter Landscape without redundant guide and Recruitment menu follows exact order', () => {
+  const printJs = fs.readFileSync('assets/js/print.js', 'utf8');
+  assert.ok(printJs.includes('size: letter landscape;'), 'print report must use letter landscape @page size');
+  assert.ok(!printJs.includes('Deduplication Policy'), 'redundant Deduplication Policy guide must be removed');
+  assert.ok(!printJs.includes('Page 1 ·'), 'Page 1 subtitle guide must be removed');
+  assert.ok(!printJs.includes('Page 2 ·'), 'Page 2 subtitle guide must be removed');
+
+  const indexHtml = fs.readFileSync('index.html', 'utf8');
+  const groupMatch = indexHtml.match(/<div id="group-recruitment"[\s\S]*?<\/div>\s*<\/div>/);
+  assert.ok(groupMatch, 'Recruitment sidebar group must exist');
+  const labels = [...groupMatch[0].matchAll(/<\/span>\s*([^<\n][^<\n]*?)\s*<\/(?:button|a)>/g)].map(m => m[1].replace(/&amp;/g, '&').trim());
+  assert.deepEqual(labels, [
+    'Invited',
+    'Lead Register',
+    'Candidate List',
+    'DISC Assessment',
+    'SPM Assessment',
+    'Interview',
+    'Tracking & Report',
+    'Application Print',
+    'Settings'
+  ]);
+});
+
 

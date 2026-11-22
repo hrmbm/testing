@@ -1,6 +1,6 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-13';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261121-hrga-workspace-13';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261121-hrga-workspace-13';
+import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-15';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261121-hrga-workspace-15';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261121-hrga-workspace-15';
 
 function formatKtpAddress(data={}){
   const tidyPart=v=>String(v||'').replace(/\s+/g,' ').replace(/^\s*[:：\-]+\s*/,'').replace(/[,;]+$/,'').trim();
@@ -949,8 +949,8 @@ async function runOcr(canvas,generation){
   ktpPhotoDataUrl=canvasToKtpDataUrl(canvas);
   setOcrProgress('Menyiapkan mesin OCR lokal…');
   const [{ recognizeWithPaddle }, { extractKtpText }] = await Promise.all([
-    import('./ocr-engine.js?v=20261121-hrga-workspace-13'),
-    import('./ktp-ocr.js?v=20261121-hrga-workspace-13')
+    import('./ocr-engine.js?v=20261121-hrga-workspace-15'),
+    import('./ktp-ocr.js?v=20261121-hrga-workspace-15')
   ]);
   let result;
   try{
