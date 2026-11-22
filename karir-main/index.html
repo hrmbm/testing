@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="pk-build" content="20261122-lowongan-v5">
+  <title>Portal Karir · Pengelola Lowongan</title>
+  <link rel="stylesheet" href="assets/css/app.css?v=20261122-lowongan-v5">
+  <link rel="stylesheet" href="assets/css/mitra-theme.css?v=20261122-lowongan-v5">
+</head>
+<body class="admin-page">
+  <div id="login-view" class="login-screen">
+    <div class="login-art">
+      <div class="brand-lockup">
+        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+        <span class="brand-copy">PORTAL REKRUTMEN<small>PT. MITRA BINAMANDIRI MAKMUR</small></span>
+      </div>
+      <div class="login-art-copy">
+        <span class="eyebrow">PORTAL KARIR</span>
+        <h1>Pengelola Lowongan</h1>
+      </div>
+      <div class="login-art-foot">MITRA BINAMANDIRI MAKMUR</div>
+    </div>
+    <div class="login-panel">
+      <div class="login-box">
+        <div class="brand-lockup dark">
+          <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+          <span class="brand-copy">PORTAL REKRUTMEN<small>PT. MITRA BINAMANDIRI MAKMUR</small></span>
+        </div>
+        <h2>Masuk Admin</h2>
+        <form id="login-form" autocomplete="on">
+          <label class="field-label" for="login-user">Username</label>
+          <input id="login-user" class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Username">
+          <label class="field-label" for="login-pin">PIN</label>
+          <input id="login-pin" class="input" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" minlength="4" maxlength="12" autocomplete="current-password" required placeholder="PIN">
+          <button class="btn btn-primary full" type="submit">Masuk</button>
+          <div id="login-error" class="form-error" role="alert"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="admin-shell" class="admin-shell funnel-shell hidden">
+    <aside class="sidebar funnel-sidebar" aria-label="Menu Navigasi Admin">
+      <div class="sidebar-brand">
+        <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+        <span><b>PORTAL KARIR</b><small>KONFIGURASI JARING</small></span>
+      </div>
+      <nav class="funnel-nav">
+        <button type="button" class="nav-item active" data-route="dashboard">
+          <span class="nav-icon" aria-hidden="true">▤</span>
+          <span>Dashboard</span>
+        </button>
+
+        <div class="funnel-nav-group">
+          <div class="sidebar-label">SETTING LOWONGAN <span>/apply</span></div>
+          <button type="button" class="nav-item nav-subitem" data-route="apply-fields">
+            <span class="nav-dot" aria-hidden="true"></span>
+            <span>Setting Urutan Field</span>
+          </button>
+          <button type="button" class="nav-item nav-subitem" data-route="apply-scoring">
+            <span class="nav-dot" aria-hidden="true"></span>
+            <span>Setting Skor</span>
+          </button>
+        </div>
+
+        <div class="funnel-nav-group">
+          <div class="sidebar-label">SETTING FORM <span>/form</span></div>
+          <button type="button" class="nav-item nav-subitem" data-route="form-fields">
+            <span class="nav-dot" aria-hidden="true"></span>
+            <span>Setting Urutan Field</span>
+          </button>
+        </div>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="logout-btn" class="logout-btn" type="button">
+          <span>Keluar</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="admin-main funnel-main">
+      <header class="admin-topbar vacancy-topbar">
+        <div class="topbar-brand">
+          <div class="topbar-logo-wrap mobile-only-logo">
+            <img class="brand-logo" src="assets/img/logo-mitra.png" alt="PT. Mitra Binamandiri Makmur">
+          </div>
+          <div>
+            <div id="page-eyebrow" class="eyebrow muted">PORTAL KARIR</div>
+            <h1 id="page-title" class="topbar-title">Dashboard</h1>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="profile-chip">
+            <span class="profile-avatar">HR</span>
+            <span><b id="admin-name">HR Admin</b></span>
+          </div>
+          <button id="mobile-logout-btn" class="btn btn-secondary logout-top-btn" type="button">Keluar</button>
+        </div>
+      </header>
+
+      <nav class="mobile-funnel-nav" aria-label="Menu Mobile Admin">
+        <div class="mobile-main-tabs" role="tablist">
+          <button type="button" class="mobile-tab active" data-mobile-group="dashboard">Dashboard</button>
+          <button type="button" class="mobile-tab" data-mobile-group="apply">Setting Lowongan</button>
+          <button type="button" class="mobile-tab" data-mobile-group="form">Setting Form</button>
+        </div>
+        <div id="mobile-subtabs-apply" class="mobile-subtabs hidden">
+          <button type="button" class="mobile-subtab" data-route="apply-fields">Setting Urutan Field</button>
+          <button type="button" class="mobile-subtab" data-route="apply-scoring">Setting Skor</button>
+        </div>
+        <div id="mobile-subtabs-form" class="mobile-subtabs hidden">
+          <button type="button" class="mobile-subtab" data-route="form-fields">Setting Urutan Field</button>
+        </div>
+      </nav>
+
+      <main id="admin-content" class="admin-content vacancy-content"></main>
+    </div>
+  </div>
+
+  <script type="module">
+    const BUILD = '20261122-lowongan-v5';
+    if ('caches' in window) {
+      try {
+        const names = await caches.keys();
+        await Promise.all(names
+          .filter(n => n.startsWith('portal-karir-app-') && n !== `portal-karir-app-assets-${BUILD}`)
+          .map(n => caches.delete(n)));
+      } catch {}
+    }
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.update().catch(() => {}))).catch(() => {});
+    }
+    await import(`./assets/js/admin.js?v=${BUILD}`);
+  </script>
+</body>
+</html>

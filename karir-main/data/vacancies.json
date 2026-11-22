@@ -1,0 +1,559 @@
+{
+  "vacancies": [
+    {
+      "id": "operator_spray_cat",
+      "name": "Operator Spray / Cat",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "sprayType",
+          "label": "Pernah nyepray apa?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Kayu",
+              "score": 35
+            },
+            {
+              "label": "Besi",
+              "score": 20
+            }
+          ]
+        },
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 35
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 15
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pekerjaanmu ketika nyepray",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Jenis material, proses, alat, dan pekerjaan yang biasa dilakukan",
+          "filledScore": 10,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "las",
+      "name": "Las",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "weldingType",
+          "label": "Pernah menggunakan las apa?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "SMAW",
+              "score": 20
+            },
+            {
+              "label": "GMAW",
+              "score": 35
+            },
+            {
+              "label": "GTAW",
+              "score": 35
+            }
+          ]
+        },
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 35
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 15
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pengalaman pengelasan",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Material dan pekerjaan yang pernah dikerjakan",
+          "filledScore": 10,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "operator_cnc",
+      "name": "Operator CNC",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "cncMachine",
+          "label": "Pernah mengoperasikan mesin CNC apa?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Jenis / merek / tipe mesin",
+          "filledScore": 25,
+          "options": []
+        },
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 45
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 15
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pekerjaan CNC yang dikuasai",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Mesin, setting, program, dan proses yang dikerjakan",
+          "filledScore": 10,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "operator_spindel_kayu",
+      "name": "Operator Spindel Kayu",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "spindleOperate",
+          "label": "Pernah mengoperasikan & menyeting mesin spindel kayu?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Ya",
+              "score": 40
+            },
+            {
+              "label": "Tidak",
+              "score": 0
+            }
+          ]
+        },
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 30
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 10
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan bagaimana pekerjaan spindel dilakukan",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Pengoperasian, setting, jenis produk, dan proses kerja",
+          "filledScore": 10,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "maintenance",
+      "name": "Maintenance",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "maintenanceSkill",
+          "label": "Bidang maintenance yang dikuasai?",
+          "type": "checkbox",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Listrik",
+              "score": 10
+            },
+            {
+              "label": "Perbaikan Mesin",
+              "score": 10
+            },
+            {
+              "label": "AC",
+              "score": 10
+            },
+            {
+              "label": "Las",
+              "score": 10
+            }
+          ]
+        },
+        {
+          "id": "woodIndustry",
+          "label": "Punya pengalaman maintenance di pabrik kayu / mebel / furniture?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Ya",
+              "score": 20
+            },
+            {
+              "label": "Tidak",
+              "score": 0
+            }
+          ]
+        },
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 1 tahun",
+              "score": 15
+            },
+            {
+              "label": "Kurang dari 1 tahun",
+              "score": 5
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pekerjaan maintenance yang dikuasai",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Mesin/peralatan yang ditangani dan jenis perbaikannya",
+          "filledScore": 5,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "operator_produksi",
+      "name": "Operator Produksi",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "companyType",
+          "label": "Jenis perusahaan tempat bekerja?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Mebel / Kayu / Furniture",
+              "score": 35
+            },
+            {
+              "label": "Perusahaan lain bukan Mebel / Kayu / Furniture",
+              "score": 15
+            }
+          ]
+        },
+        {
+          "id": "company",
+          "label": "Pengalaman di perusahaan mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 35
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 15
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pengalaman pekerjaan produksi",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Bagian produksi, mesin, target, atau proses yang dikerjakan",
+          "filledScore": 10,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "kepala_bagian_produksi",
+      "name": "Kepala Bagian Produksi",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 60
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 20
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pengalaman kerja yang relevan",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Uraikan tugas, alat, atau keahlian yang dikuasai",
+          "filledScore": 20,
+          "options": []
+        }
+      ]
+    },
+    {
+      "id": "ppic",
+      "name": "PPIC",
+      "active": true,
+      "primaryDistricts": [
+        "Pasuruan - Purwosari",
+        "Pasuruan - Purwodadi",
+        "Pasuruan - Sukorejo",
+        "Pasuruan - Pandaan",
+        "Pasuruan - Prigen"
+      ],
+      "primaryLocationScore": 20,
+      "otherLocationLabel": "Area selain lokasi utama",
+      "otherLocationScore": 10,
+      "questions": [
+        {
+          "id": "company",
+          "label": "Pengalamannya di mana?",
+          "type": "text",
+          "required": true,
+          "placeholder": "Nama perusahaan / tempat kerja",
+          "filledScore": 0,
+          "options": []
+        },
+        {
+          "id": "duration",
+          "label": "Berapa lama pengalaman?",
+          "type": "dropdown",
+          "required": true,
+          "placeholder": "",
+          "filledScore": 0,
+          "options": [
+            {
+              "label": "Lebih dari 6 bulan",
+              "score": 60
+            },
+            {
+              "label": "Kurang dari 6 bulan",
+              "score": 20
+            }
+          ]
+        },
+        {
+          "id": "explanation",
+          "label": "Jelaskan pengalaman kerja yang relevan",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Uraikan tugas, alat, atau keahlian yang dikuasai",
+          "filledScore": 20,
+          "options": []
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-11-22T09:00:00.000Z",
+  "customized": true
+}
