@@ -84,6 +84,25 @@ export function toIsoDate(value = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+export function addDaysIso(isoDate, days = 1) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || '').trim());
+  if (!m) return '';
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Number(days || 0)));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+export function resolveDefaultContractStartDate(record = {}, fallbackDate = new Date()) {
+  const sourceType = String(record?.sourceType || '').trim();
+  if (sourceType === 'final_interview') {
+    return toIsoDate(record?.contractStartDate || record?.workStartDate || fallbackDate);
+  }
+  const endIso = String(record?.contractEndDate || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(endIso)) {
+    return addDaysIso(endIso, 1);
+  }
+  return toIsoDate(record?.contractStartDate || record?.workStartDate || fallbackDate);
+}
+
 export function getExpiringContractWindow(referenceDate = new Date()) {
   const refIso = toIsoDate(referenceDate);
   const [yStr, mStr] = refIso.split('-');
@@ -815,8 +834,11 @@ export function buildPkwtPrintPackageHtml(renderedDocs = [], {
       width: 100%;
     }
     .pkwt-print-sheets .a4-page {
-      margin: 0 auto;
+      margin: 0 auto 18px auto;
       box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
+    }
+    .pkwt-print-sheets .a4-page:last-child {
+      margin-bottom: 0;
     }
     @media print {
       html, body {
@@ -831,7 +853,7 @@ export function buildPkwtPrintPackageHtml(renderedDocs = [], {
         display: block !important;
         gap: 0 !important;
       }
-      .pkwt-print-sheet {
+      .pkwt-print-sheet:not(:last-child) {
         break-after: page;
         page-break-after: always;
       }

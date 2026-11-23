@@ -116,6 +116,25 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
   const seq = String(merged.docSequence || '184').trim();
   const shortfall = Math.max(0, (Number(merged.currUmkAmount) || 0) - (Number(merged.cashWageAmount) || 0));
 
+  const isReholz = String(merged.companyId || '').trim() === 'comp-rml'
+    || String(merged.code || '').trim().toUpperCase() === 'RML'
+    || /radin\s+mitra\s+lestari|reholz/i.test(String(merged.companyName || ''));
+
+  const rawContact = String(merged.letterheadContact || '').trim();
+  const fallbackEmailMatch = rawContact.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  const kopEmail = String(
+    merged.letterheadEmail !== undefined
+      ? merged.letterheadEmail
+      : (isReholz ? '' : (fallbackEmailMatch ? fallbackEmailMatch[1] : 'mitra@mitrabina.com'))
+  ).trim();
+  const kopPhone = String(
+    merged.letterheadPhone !== undefined
+      ? merged.letterheadPhone
+      : (rawContact
+          ? rawContact.replace(/\s*·?\s*E-?mail\s*:\s*\S+/i, '').trim()
+          : (isReholz ? '(0343) 632 266' : 'Telp : 62–343–632266, 632366, Fax : 62–343–642127'))
+  ).trim();
+
   const vars = {
     no_pkwt: `${seq}/PKWT/${roman}/${signing.year}`,
     no_pb: `${seq}/PB/${roman}/${signing.year}`,
@@ -147,10 +166,15 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
     nama_perusahaan: merged.companyName || 'PT. MITRA BINAMANDIRI MAKMUR',
     nama_perusahaan_judul: merged.companyDisplayName || merged.companyName || 'PT. Mitra Binamandiri Makmur',
     alamat_kop_surat: merged.letterheadAddress || 'Ds. Randupitu, Kec. Gempol, Pasuruan – East Java, Indonesia',
+    kop_alamat_baris1: merged.letterheadAddressLine1 || merged.letterheadAddress || 'Ds. Randupitu, Kec. Gempol, Pasuruan – East Java, Indonesia',
+    kop_alamat_baris2: merged.letterheadAddressLine2 || '',
+    kop_telp: kopPhone,
+    kop_email: kopEmail,
+    logo_reholz_url: merged.reholzLogoUrl || './assets/img/logo-reholz-green.png',
     kontak_kop_surat: merged.letterheadContact || 'Telp : 62–343–632266, 632366, Fax : 62–343–642127 · E-mail : mitra@mitrabina.com',
     alamat_perusahaan_pkwt: merged.companyAddressPkwt || 'Jalan Raya Gunung Gangsir, Ds. Randu Pitu, Kec. Gempol, Kab. Pasuruan – Jawa Timur',
     alamat_perusahaan_pb: merged.companyAddressPb || 'Jalan Raya Gunung Gangsir, Desa Randupitu, RT.002 RW.005, Kec. Gempol - Kab. Pasuruan',
-    bidang_usaha_pkwt: merged.companyIndustryPkwt || 'industri mebel',
+    bidang_usaha_pkwt: merged.companyIndustryPkwt || (isReholz ? 'konstruksi' : 'industri mebel'),
     bidang_usaha_pb: merged.companyIndustryPb || 'industri furniture',
     nama_hrd: merged.hrName || 'Diana Anita Sari',
     nama_hrd_ttd: String(merged.hrName || 'Diana Anita Sari').trim().toUpperCase(),
@@ -180,6 +204,9 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
     no_ktp: Boolean(vars.no_ktp),
     departemen: Boolean(vars.departemen),
     catatan_tambahan: Boolean(vars.catatan_tambahan),
+    is_reholz: isReholz,
+    is_standard_kop: !isReholz,
+    kop_email: Boolean(vars.kop_email),
   };
 
   let out = templateHtml;

@@ -1,4 +1,5 @@
 import { $, esc } from './common.js?v=20261122-hrga-workspace-16';
+import { bindSafeModalClose } from './admin-modals.js?v=20261122-hrga-workspace-16';
 import { CONTRACT_DURATION_OPTIONS } from './workspace-logic.js?v=20261122-hrga-workspace-16';
 import {
   CONTRACT_DOCUMENTS,
@@ -10,6 +11,7 @@ import {
   formatContractCode,
   parseNumericCurrency,
   renderAgreementHtml,
+  resolveDefaultContractStartDate,
   toIsoDate
 } from './contract-logic.js?v=20261122-hrga-workspace-16';
 
@@ -22,7 +24,29 @@ function formatCurrencyDigits(raw = '') {
 }
 
 let cachedMasters = null;
+let cachedReholzLogoUrl = null;
 const cachedTemplates = new Map();
+
+async function loadReholzLogoUrl() {
+  if (cachedReholzLogoUrl) return cachedReholzLogoUrl;
+  const absUrl = new URL('./assets/img/logo-reholz-green.png', document.baseURI).href;
+  try {
+    const res = await fetch(absUrl, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Logo fetch failed');
+    const blob = await res.blob();
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || absUrl));
+      reader.onerror = () => reject(reader.error || new Error('Read error'));
+      reader.readAsDataURL(blob);
+    });
+    cachedReholzLogoUrl = dataUrl;
+    return cachedReholzLogoUrl;
+  } catch {
+    cachedReholzLogoUrl = absUrl;
+    return cachedReholzLogoUrl;
+  }
+}
 
 export function readSavedContractSettings() {
   try {
@@ -84,7 +108,7 @@ function decorateScreenPreview(html) {
         padding: 10px !important;
         overflow-x: hidden !important;
       }
-      .a4-page {
+      .a4-page:not(.pkwt-sheet) {
         width: 100% !important;
         max-width: 215.9mm !important;
         min-height: auto !important;
@@ -93,6 +117,14 @@ function decorateScreenPreview(html) {
         box-shadow: 0 2px 10px rgba(15, 23, 42, 0.12) !important;
         font-size: 10pt !important;
         line-height: 1.45 !important;
+      }
+      .pkwt-sheet {
+        zoom: 0.68;
+        margin: 0 auto 14px auto !important;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.16) !important;
+      }
+      .pkwt-sheet:last-child {
+        margin-bottom: 0 !important;
       }
       .a4-page table {
         max-width: 100% !important;
@@ -113,18 +145,24 @@ function scopeTemplateCssForPrintStage(rawCss = '') {
 function printDocumentsViaDomStage(renderedDocs, title = 'PKWT Agreement Package') {
   return new Promise(resolve => {
     const parser = new DOMParser();
+    const seenCss = new Set();
     const collectedStyles = [];
     const sheets = [];
 
-    renderedDocs.forEach((docHtml, idx) => {
+    renderedDocs.forEach(docHtml => {
       const parsed = parser.parseFromString(docHtml, 'text/html');
-      if (idx === 0) {
-        parsed.querySelectorAll('style').forEach(s => {
-          collectedStyles.push(scopeTemplateCssForPrintStage(s.textContent || ''));
-        });
-      }
-      const pageEl = parsed.querySelector('.a4-page');
-      sheets.push(`<div class="pkwt-print-sheet">${pageEl ? pageEl.outerHTML : (parsed.body?.innerHTML || docHtml)}</div>`);
+      parsed.querySelectorAll('style').forEach(s => {
+        const scoped = scopeTemplateCssForPrintStage(s.textContent || '');
+        if (scoped.trim() && !seenCss.has(scoped)) {
+          seenCss.add(scoped);
+          collectedStyles.push(scoped);
+        }
+      });
+      const pageEls = parsed.querySelectorAll('.a4-page');
+      const innerPages = pageEls.length
+        ? [...pageEls].map(el => el.outerHTML).join('\n')
+        : (parsed.body?.innerHTML || docHtml);
+      sheets.push(`<div class="pkwt-print-sheet">${innerPages}</div>`);
     });
 
     let stage = document.getElementById('pkwt-print-stage');
@@ -183,8 +221,9 @@ export async function openPkwtConfigModal({
   nextDocSequence = '',
   onAfterPrint = null
 } = {}) {
-  const [masters] = await Promise.all([
+  const [masters, reholzLogoUrl] = await Promise.all([
     loadCompanyMasters(),
+    loadReholzLogoUrl(),
     ...CONTRACT_DOCUMENTS.map(docMeta => loadContractTemplate(docMeta).catch(() => ''))
   ]);
 
@@ -302,9 +341,7 @@ export async function openPkwtConfigModal({
     const closeModal = () => modal.classList.add('hidden');
     $('#pkwt-modal-close', modal).addEventListener('click', closeModal);
     $('#pkwt-modal-cancel', modal).addEventListener('click', closeModal);
-    modal.addEventListener('click', event => {
-      if (event.target === modal) closeModal();
-    });
+    bindSafeModalClose(modal, closeModal, { closeOnBackdrop: true });
   }
 
   const form = $('#pkwt-config-form', modal);
@@ -332,7 +369,7 @@ export async function openPkwtConfigModal({
   companySelect.value = initialCompanyId;
   const activeMaster = () => masters.find(m => m.id === companySelect.value) || masters[0];
 
-  const startDate = toIsoDate(record.contractStartDate || record.workStartDate || new Date());
+  const startDate = resolveDefaultContractStartDate(record);
   const durMonths = Number(record.durationMonths) || 12;
 
   form.elements.docSequence.value = String(nextDocSequence || activeSettings.defaultDocSequence || '001');
@@ -450,7 +487,7 @@ export async function openPkwtConfigModal({
     try {
       const templateHtml = await loadContractTemplate(activeDoc);
       if (seq !== renderSeq) return;
-      const payload = buildAgreementPayload(config, currentMaster);
+      const payload = { ...buildAgreementPayload(config, currentMaster), reholzLogoUrl };
       const rendered = renderAgreementHtml(templateHtml, payload, currentMaster);
       previewFrame.srcdoc = decorateScreenPreview(rendered);
     } catch (err) {
@@ -524,7 +561,7 @@ export async function openPkwtConfigModal({
     }
 
     try {
-      const payload = buildAgreementPayload(config, currentMaster);
+      const payload = { ...buildAgreementPayload(config, currentMaster), reholzLogoUrl };
       const htmlList = await Promise.all(
         docsToPrint.map(async docMeta => {
           const tpl = await loadContractTemplate(docMeta);
@@ -643,6 +680,7 @@ export function openPostPrintEmployeeUpdateModal({
     const close = () => modal.classList.add('hidden');
     $('#pkwt-post-close', modal).addEventListener('click', close);
     $('#pkwt-post-skip', modal).addEventListener('click', close);
+    bindSafeModalClose(modal, close, { closeOnBackdrop: true });
   }
 
   const form = $('#pkwt-post-form', modal);

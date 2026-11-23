@@ -847,7 +847,9 @@ import {
   formatContractCode,
   computeNextDocSequence,
   buildContractUpdateRequestPayload,
-  applyContractCancellationRollback
+  applyContractCancellationRollback,
+  resolveDefaultContractStartDate,
+  addDaysIso
 } from '../assets/js/contract-logic.js';
 import {
   LEAD_IMPORT_HEADERS,
@@ -1037,8 +1039,72 @@ test('PKWT print is print-only with inline Sync to Employee Directory button and
   assert.equal(sync.historyEntry.contractNumber, '205/PKWT/XI/2026');
   assert.equal(sync.historyEntry.status, 'applied');
 
+  const pkwtTpl = fs.readFileSync('assets/contracts/01-pkwt.html', 'utf8');
+  assert.match(pkwtTpl, /8\.27in\s+12\.6in/, '01-pkwt.html must configure 8.27in x 12.6in paper size');
+  assert.ok(pkwtTpl.includes('Halaman 1 dari 3 halaman'), '01-pkwt.html must include Page 1 footer');
+  assert.ok(pkwtTpl.includes('Halaman 2 dari 3 halaman'), '01-pkwt.html must include Page 2 footer');
+  assert.ok(pkwtTpl.includes('Halaman 3 dari 3 halaman'), '01-pkwt.html must include Page 3 footer');
+  assert.equal((pkwtTpl.match(/Paraf_______/g) || []).length, 3, '01-pkwt.html must render Paraf footer on all 3 pages');
+
+  const masters = JSON.parse(fs.readFileSync('assets/contracts/company-masters.json', 'utf8'));
+  const mbmMaster = masters.find(m => m.id === 'comp-mbm');
+  const rmlMaster = masters.find(m => m.id === 'comp-rml');
+
+  const mbmPkwt = renderAgreementHtml(pkwtTpl, buildAgreementPayload({
+    docSequence: '184',
+    signingDate: '2026-11-02',
+    durationMonths: 6,
+    employeeName: 'Agus Nur Wahid',
+    employeePosition: 'Foreman Packing',
+    employeeAddress: 'Dusun III Sukajai',
+    cashWageAmount: 5500000
+  }, mbmMaster), mbmMaster);
+  assert.ok(mbmPkwt.includes('PT. MITRA BINAMANDIRI MAKMUR'));
+  assert.ok(mbmPkwt.includes('mitra@mitrabina.com'));
+  assert.ok(mbmPkwt.includes('industri mebel'));
+  assert.ok(!mbmPkwt.includes('MORE THAN WOOD'));
+  // Mitra page splits: 1.c is on Page 2, Pasal 8 is on Page 3
+  const mbmPages = mbmPkwt.split('HALAMAN ');
+  assert.ok(mbmPages[1].includes('1. HAK PIHAK KEDUA') && !mbmPages[1].includes('Ketentuan Undang – undang Ketenagakerjaan yang berlaku'));
+  assert.ok(mbmPages[2].includes('start="3"') && mbmPages[2].includes('PASAL 7') && !mbmPages[2].includes('PASAL 8'));
+  assert.ok(mbmPages[3].includes('PASAL 8') && mbmPages[3].includes('PASAL 9') && mbmPages[3].includes('PASAL 10'));
+
+  const rmlPkwt = renderAgreementHtml(pkwtTpl, buildAgreementPayload({
+    docSequence: '183',
+    signingDate: '2026-11-22',
+    durationMonths: 6,
+    employeeName: 'Ergi Syahrial Putra',
+    employeePosition: 'Site Supervisor',
+    employeeAddress: 'Pekayon Rt 09 Rw 08',
+    cashWageAmount: 5500000
+  }, rmlMaster), rmlMaster);
+  assert.ok(fs.existsSync('assets/img/logo-reholz-green.png'), 'Original ReHolz green logo asset must exist');
+  assert.ok(!pkwtTpl.includes('<svg'), '01-pkwt.html must use original ReHolz PNG asset instead of rewritten SVG');
+  assert.ok(rmlPkwt.includes('PT. RADIN MITRA LESTARI'));
+  assert.ok(rmlPkwt.includes('logo-reholz-green.png'));
+  assert.ok(rmlPkwt.includes('Jl. Raya Gununggangsir - Pandaan No. 25 RT.02 RW.05, Randupitu'));
+  assert.ok(rmlPkwt.includes('(0343) 632 266'));
+  assert.ok(rmlPkwt.includes('konstruksi'));
+  // ReHolz page splits: 1.c on Page 1, Pasal 8 on Page 2, Pasal 9 starts Page 3
+  const rmlPages = rmlPkwt.split('HALAMAN ');
+  assert.ok(rmlPages[1].includes('Ketentuan Undang – undang Ketenagakerjaan yang berlaku'));
+  assert.ok(rmlPages[2].includes('PASAL 7') && rmlPages[2].includes('PASAL 8'));
+  assert.ok(rmlPages[3].includes('PASAL 9') && !rmlPages[3].includes('PASAL 8'));
+
+  assert.equal(addDaysIso('2026-11-30', 1), '2026-12-01');
+  assert.equal(
+    resolveDefaultContractStartDate({ sourceType: 'expiring_contract', contractStartDate: '2025-12-01', contractEndDate: '2026-11-30' }),
+    '2026-12-01',
+    'Expiring employee default start date must be contractEndDate + 1 day'
+  );
+  assert.equal(
+    resolveDefaultContractStartDate({ sourceType: 'final_interview', contractStartDate: '2026-12-05', workStartDate: '2026-12-05', contractEndDate: '2027-12-04' }),
+    '2026-12-05',
+    'Final Interview default start date must use workStartDate / contractStartDate'
+  );
+  assert.ok(contractModalJs.includes('bindSafeModalClose'), 'PKWT modal must guard against closing on text drag-selection');
+
   for (const tpl of [
-    'assets/contracts/01-pkwt.html',
     'assets/contracts/02-pb-pembayaran-upah.html',
     'assets/contracts/03-pb-pembayaran-upah-lembur.html',
     'assets/contracts/04-pb-penyelesaian-upah.html',
@@ -1153,7 +1219,9 @@ test('parseDiscImportRows, Tracking XLSX export formatters, Recruitment Settings
 
   assert.equal(fs.existsSync('karir-main'), false, 'Legacy /karir-main directory must be removed');
   assert.equal(fs.existsSync('HRIS-MBM-HTML-Kit (1)'), false, 'Legacy HRIS kit folder must be removed');
-  assert.equal(fs.existsSync('public'), false, 'Unused public folder must be removed');
+  if (fs.existsSync('public')) {
+    assert.ok(fs.existsSync('public/assets/aistudio'), 'Public folder may only exist when holding system-managed attachments');
+  }
 });
 
 
