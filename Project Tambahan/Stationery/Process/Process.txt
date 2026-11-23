@@ -1,0 +1,22 @@
+Ini adalah data asli dan contoh processing selama 2 bulan terakhir meskipun yang menginput kadang salah, tapi bisa dipakai acuan
+Hal yang tidak boleh terjadi adalah stock minus seperti salah satu contoh di file ini karena human erorr waktu stock opname
+
+Sesuaikan dengan nama Departemen / Sloc yang sesungguhnya yaitu :
+HR GA
+INVENTORY & GUDANG
+PURCHASING
+PPC INDOOR
+PPC OUTDOOR
+MAINTENANCE
+QC INDOOR
+QC OUTDOOR
+PRODUKSI INDOOR
+PRODUKSI OUTDOOR
+R & D
+F & A
+MARKETING SERVICE
+RADIN MITRA LESTARI
+FOTOCOPY
+SECURITY
+
+

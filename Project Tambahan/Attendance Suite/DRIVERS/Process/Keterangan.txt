@@ -1,0 +1,8 @@
+Rumus ini belum sempurna, berantakan dan dia ambilnya kadang asal
+Maka dibutuhkan aplikasi ini untuk mengurangi kesalahan input dari manusia
+Kita akan normalisasi dari konsistensi format, nama karyawan, serta NIK dengan dasar dari Employee Directory
+
+Admin akan menginput secara manual Jadwal Driver Harian, dia membantu tim mana (Support, Indoor, Outdoor, Radin, Lainnya)
+Nantinya info itu akan nyambung ke bagian Time Checksheet, dan laporan
+
+Lalu akan diproses engine dan menghasilkan output

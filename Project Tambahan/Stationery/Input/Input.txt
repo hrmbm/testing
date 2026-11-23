@@ -1,0 +1,3 @@
+Input adalah Sheet Barang Masuk dan Barang Keluar
+Selama belum diotomasi, input ini masih dilakukan oleh admin yang bertugas secara manual
+Namun Antar mukanya harus simpel agar yang menginput lebih mudah (seperti SAP kalau / sedikit semi excel)

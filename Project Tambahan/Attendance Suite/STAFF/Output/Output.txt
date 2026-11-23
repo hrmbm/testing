@@ -1,0 +1,3 @@
+Output yang di print PDF disini adalah 
+- Absensi Per periode periode tanggal 6 bulan lalu sampai 5 bulan berjalan 
+- Tabel juga abisa di export menjadi XLSX

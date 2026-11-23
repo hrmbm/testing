@@ -1,0 +1,2 @@
+Ini adalah data karyawan real saat ini dan yang ada di aplikasi saat ini, hanya gambaran saja
+dan ini adalah patokan dari nama, NIK dan hal lain yang jika ditempat lain salah, maka ini adalah patokannya
