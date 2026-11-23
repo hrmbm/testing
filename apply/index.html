@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="pk-build" content="20261122-hrga-workspace-16"><meta name="theme-color" content="#0D5C6B"><title>Application Portal | HR&amp;GA Workspace</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="preconnect" href="https://osjikdsebniwnzancsjl.supabase.co" crossorigin><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"><link rel="stylesheet" href="../assets/css/app.css?v=20261122-hrga-workspace-16"><link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261122-hrga-workspace-16"></head><body class="candidate-page apply-page">
+  <meta name="pk-build" content="20261123-hrga-workspace-17"><meta name="theme-color" content="#0D5C6B"><title>Application Portal | HR&amp;GA Workspace</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="preconnect" href="https://osjikdsebniwnzancsjl.supabase.co" crossorigin><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"><link rel="stylesheet" href="../assets/css/app.css?v=20261123-hrga-workspace-17"><link rel="stylesheet" href="../assets/css/mitra-theme.css?v=20261123-hrga-workspace-17"></head><body class="candidate-page apply-page">
   <header class="candidate-topbar">
     <div class="candidate-topbar-inner">
       <div class="candidate-topbar-brand">
@@ -67,21 +67,24 @@
         </div>
       </div>
     </div>
-  </div><script type="module">
+  </div>  <script type="module">
   import {
     DISTRICTS_BY_CITY,
     DEFAULT_VACANCIES,
+    DEFAULT_RECRUITMENT_SCORING_CONFIG,
     normalizeVacancyList,
+    normalizeRecruitmentScoringConfig,
     calculateCandidateScore,
     buildStage1WhatsAppUrl
-  } from '../assets/js/vacancy-logic.js?v=20261122-hrga-workspace-16';
+  } from '../assets/js/vacancy-logic.js?v=20261123-hrga-workspace-17';
   import {
     DEFAULT_APPLY_SCHEMA,
     normalizeApplySchema
-  } from '../assets/js/form-schema.js?v=20261122-hrga-workspace-16';
+  } from '../assets/js/form-schema.js?v=20261123-hrga-workspace-17';
 
-  const BUILD = '20261122-hrga-workspace-16';
+  const BUILD = '20261123-hrga-workspace-17';
   const DEMO_RECRUITMENT_KEY = 'hrga_demo_recruitment_v1';
+  const DEMO_STAGE1_LEADS_KEY = 'hrga_demo_stage1_leads_v1';
   const isDemoMode = (() => {
     try { return new URLSearchParams(location.search).get('demo') === '1'; }
     catch { return false; }
@@ -92,6 +95,7 @@
   let current = 0;
   let configuredVacancies = normalizeVacancyList(DEFAULT_VACANCIES);
   let applySchema = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
+  let scoringConfig = normalizeRecruitmentScoringConfig(DEFAULT_RECRUITMENT_SCORING_CONFIG);
   const $ = id => document.getElementById(id);
 
   function escHtml(v) {
@@ -111,14 +115,28 @@
     }
   }
 
+  function saveDemoStage1Lead(record) {
+    try {
+      const existing = JSON.parse(localStorage.getItem(DEMO_STAGE1_LEADS_KEY) || '[]');
+      const next = [record, ...(Array.isArray(existing) ? existing : [])];
+      localStorage.setItem(DEMO_STAGE1_LEADS_KEY, JSON.stringify(next));
+    } catch {}
+  }
+
   async function loadRecruitmentConfig() {
     if (isDemoMode) {
       const demoCfg = readDemoRecruitmentConfig();
-      if (demoCfg?.vacancies?.length) {
-        configuredVacancies = normalizeVacancyList(demoCfg.vacancies);
+      const rawVac = demoCfg?.job_vacancies_config || demoCfg?.vacancies;
+      const rawSchema = demoCfg?.apply_form_schema || demoCfg?.applySchema;
+      const rawScoring = demoCfg?.recruitment_scoring_config || demoCfg?.scoringConfig;
+      if (Array.isArray(rawVac) && rawVac.length) {
+        configuredVacancies = normalizeVacancyList(rawVac);
       }
-      if (demoCfg?.applySchema) {
-        applySchema = normalizeApplySchema(demoCfg.applySchema);
+      if (rawSchema && typeof rawSchema === 'object') {
+        applySchema = normalizeApplySchema(rawSchema);
+      }
+      if (rawScoring && typeof rawScoring === 'object') {
+        scoringConfig = normalizeRecruitmentScoringConfig(rawScoring);
       }
       renderStep1Fields();
       applyUrlPrefill();
@@ -131,7 +149,7 @@
         const { data, error } = await supabase
           .from('portal_settings')
           .select('key,value')
-          .in('key', ['job_vacancies_config', 'apply_form_schema', 'application_positions']);
+          .in('key', ['job_vacancies_config', 'apply_form_schema', 'application_positions', 'recruitment_scoring_config']);
         if (error) throw error;
         const map = Object.fromEntries((data || []).map(row => [row.key, row.value]));
         if (Array.isArray(map.job_vacancies_config) && map.job_vacancies_config.length) {
@@ -142,16 +160,27 @@
         if (map.apply_form_schema && typeof map.apply_form_schema === 'object') {
           applySchema = normalizeApplySchema(map.apply_form_schema);
         }
+        if (map.recruitment_scoring_config && typeof map.recruitment_scoring_config === 'object') {
+          scoringConfig = normalizeRecruitmentScoringConfig(map.recruitment_scoring_config);
+        }
       } else {
         const fallback = readDemoRecruitmentConfig();
-        if (fallback?.vacancies?.length) configuredVacancies = normalizeVacancyList(fallback.vacancies);
-        if (fallback?.applySchema) applySchema = normalizeApplySchema(fallback.applySchema);
+        const rawVac = fallback?.job_vacancies_config || fallback?.vacancies;
+        const rawSchema = fallback?.apply_form_schema || fallback?.applySchema;
+        const rawScoring = fallback?.recruitment_scoring_config || fallback?.scoringConfig;
+        if (Array.isArray(rawVac) && rawVac.length) configuredVacancies = normalizeVacancyList(rawVac);
+        if (rawSchema) applySchema = normalizeApplySchema(rawSchema);
+        if (rawScoring) scoringConfig = normalizeRecruitmentScoringConfig(rawScoring);
       }
     } catch (error) {
       console.warn('Recruitment config menggunakan konfigurasi lokal:', error);
       const fallback = readDemoRecruitmentConfig();
-      if (fallback?.vacancies?.length) configuredVacancies = normalizeVacancyList(fallback.vacancies);
-      if (fallback?.applySchema) applySchema = normalizeApplySchema(fallback.applySchema);
+      const rawVac = fallback?.job_vacancies_config || fallback?.vacancies;
+      const rawSchema = fallback?.apply_form_schema || fallback?.applySchema;
+      const rawScoring = fallback?.recruitment_scoring_config || fallback?.scoringConfig;
+      if (Array.isArray(rawVac) && rawVac.length) configuredVacancies = normalizeVacancyList(rawVac);
+      if (rawSchema) applySchema = normalizeApplySchema(rawSchema);
+      if (rawScoring) scoringConfig = normalizeRecruitmentScoringConfig(rawScoring);
     }
 
     renderStep1Fields();
@@ -573,7 +602,7 @@
       const customFields = collectStep1CustomFields();
 
       const scoring = vacancy
-        ? calculateCandidateScore(vacancy, cityVal, districtVal, vacancyDetails)
+        ? calculateCandidateScore(vacancy, cityVal, districtVal, vacancyDetails, scoringConfig)
         : null;
 
       const experiencePayload = {
@@ -584,6 +613,17 @@
       };
 
       const id = crypto.randomUUID();
+      const baseRecord = {
+        position: positionName,
+        full_name: $('name')?.value.trim() || '',
+        city: cityVal,
+        district: districtVal,
+        whatsapp: $('whatsapp')?.value.trim() || '',
+        experience_details: experiencePayload,
+        cv_filename: file.name,
+        status: 'received'
+      };
+
       if (!isDemoMode) {
         const { supabase, isConfigured } = await import(`../assets/js/supabase.js?v=${BUILD}`);
         if (!isConfigured || !supabase) throw new Error('Server belum terhubung. Silakan coba kembali nanti.');
@@ -594,27 +634,25 @@
           .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
         if (uploadError) throw uploadError;
 
-        const baseRecord = {
-          position: positionName,
-          full_name: $('name')?.value.trim() || '',
-          city: cityVal,
-          district: districtVal,
-          whatsapp: $('whatsapp')?.value.trim() || '',
-          experience_details: experiencePayload,
-          cv_path: path,
-          cv_filename: file.name,
-          status: 'received'
-        };
-
+        const fullRecord = { ...baseRecord, cv_path: path };
         let { error: insertError } = await supabase.from('candidate_stage1_applications').insert({
-          ...baseRecord,
+          ...fullRecord,
           ...(infoSource ? { source: infoSource } : {}),
           ...(scoring ? { recommendation: scoring.recommended ? 'Recommended' : 'Pending' } : {})
         });
         if (insertError) {
-          ({ error: insertError } = await supabase.from('candidate_stage1_applications').insert(baseRecord));
+          ({ error: insertError } = await supabase.from('candidate_stage1_applications').insert(fullRecord));
         }
         if (insertError) throw insertError;
+      } else {
+        saveDemoStage1Lead({
+          id,
+          ...baseRecord,
+          source: infoSource,
+          recommendation: scoring ? (scoring.recommended ? 'Recommended' : 'Pending') : 'Pending',
+          cv_path: `demo-cv/${id}/${file.name}`,
+          created_at: new Date().toISOString()
+        });
       }
 
       const whatsappUrl = buildStage1WhatsAppUrl({
@@ -626,7 +664,7 @@
         customFields
       }, vacancy, applySchema, id);
 
-      showResult(whatsappUrl);
+      showResult(whatsappUrl, scoring);
     } catch (err) {
       showError(err.message || 'File gagal diproses.');
       $('submitBtn').disabled = false;
@@ -636,14 +674,24 @@
     }
   });
 
-  function showResult(whatsappUrl) {
+  function showResult(whatsappUrl, scoring) {
+    const showWaButton = !scoringConfig.requireQualificationForWa || !scoring || Boolean(scoring.recommended);
     $('formArea').classList.add('hidden');
     $('resultArea').classList.remove('hidden');
     $('resultSymbol').textContent = '✓';
     $('resultTitle').textContent = 'Lamaran Berhasil Terkirim';
-    $('resultStatus').textContent = 'WAJIB KONFIRMASI WA';
-    $('waLink').href = whatsappUrl;
-    $('waLink').textContent = 'Konfirmasi WhatsApp HR';
+    if (showWaButton) {
+      $('resultStatus').textContent = 'WAJIB KONFIRMASI WA';
+      $('resultStatus').className = 'status-required';
+      $('waLink').classList.remove('hidden');
+      $('waLink').href = whatsappUrl;
+      $('waLink').textContent = 'Konfirmasi WhatsApp HR';
+    } else {
+      $('resultStatus').textContent = scoringConfig.nonQualifiedMessage;
+      $('resultStatus').className = 'status-saved-only';
+      $('waLink').classList.add('hidden');
+      $('waLink').removeAttribute('href');
+    }
   }
 
   await loadRecruitmentConfig();

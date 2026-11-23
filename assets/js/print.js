@@ -4,11 +4,12 @@ import {
   REHOLZ_TEMPLATE_URL,
   REHOLZ_MASTER_REVISION,
   CV_BUCKET
-} from './config.js?v=20261122-hrga-workspace-16';
-import { supabase } from './supabase.js?v=20261122-hrga-workspace-16';
-import { computeDisc } from './disc-engine.js?v=20261122-hrga-workspace-16';
-import { esc } from './common.js?v=20261122-hrga-workspace-16';
-import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261122-hrga-workspace-16';
+} from './config.js?v=20261123-hrga-workspace-17';
+import { supabase } from './supabase.js?v=20261123-hrga-workspace-17';
+import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-17';
+import { esc } from './common.js?v=20261123-hrga-workspace-17';
+import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261123-hrga-workspace-17';
+import { buildApplicationPdfTitle } from './vacancy-logic.js?v=20261123-hrga-workspace-17';
 
 const MASTER_HTML_MEMORY = new Map();
 let pdfjsLoaderPromise = null;
@@ -799,6 +800,14 @@ export async function printApplication(record, options = {}) {
     if (!doc.querySelector('#applicationForm')) throw new Error('Active print template does not contain #applicationForm.');
     sanitizePrintDocument(doc);
     fillMaster(doc, record.application_data || {}, record, brandKey);
+    const pdfTitle = buildApplicationPdfTitle(record);
+    doc.title = pdfTitle;
+    let titleEl = doc.head.querySelector('title');
+    if (!titleEl) {
+      titleEl = doc.createElement('title');
+      doc.head.prepend(titleEl);
+    }
+    titleEl.textContent = pdfTitle;
     doc.body.classList.add('combined-print');
 
     let cvPages = [];
@@ -927,6 +936,7 @@ export async function printApplication(record, options = {}) {
     tab.document.open();
     tab.document.write('<!doctype html>' + doc.documentElement.outerHTML);
     tab.document.close();
+    tab.document.title = pdfTitle;
     fitMasterDocument(tab.document);
     tab.focus();
   } catch (error) {

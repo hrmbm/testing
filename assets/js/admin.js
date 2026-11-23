@@ -1,10 +1,10 @@
-import { supabase, isConfigured } from './supabase.js?v=20261122-hrga-workspace-16';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261122-hrga-workspace-16';
-import { $, $$, esc, idDate } from './common.js?v=20261122-hrga-workspace-16';
-import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261122-hrga-workspace-16';
-import { computeDisc } from './disc-engine.js?v=20261122-hrga-workspace-16';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261122-hrga-workspace-16';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261122-hrga-workspace-16';
+import { supabase, isConfigured } from './supabase.js?v=20261123-hrga-workspace-17';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261123-hrga-workspace-17';
+import { $, $$, esc, idDate } from './common.js?v=20261123-hrga-workspace-17';
+import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261123-hrga-workspace-17';
+import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-17';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261123-hrga-workspace-17';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261123-hrga-workspace-17';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -42,7 +42,7 @@ import {
   parseDiscImportRows,
   buildTrackingExportRows,
   buildConclusionExportRows
-} from './workspace-logic.js?v=20261122-hrga-workspace-16';
+} from './workspace-logic.js?v=20261123-hrga-workspace-17';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -54,7 +54,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261122-hrga-workspace-16';
+} from './admin-modals.js?v=20261123-hrga-workspace-17';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -65,12 +65,12 @@ import {
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261122-hrga-workspace-16';
+} from './contract-logic.js?v=20261123-hrga-workspace-17';
 import {
   openPkwtConfigModal,
   readSavedContractSettings,
   writeSavedContractSettings
-} from './contract-modal.js?v=20261122-hrga-workspace-16';
+} from './contract-modal.js?v=20261123-hrga-workspace-17';
 import {
   DISTRICTS_BY_CITY,
   APPLY_INFO_SOURCES,
@@ -78,13 +78,15 @@ import {
   QUESTION_TYPES,
   RECOMMENDATION_THRESHOLD,
   DEFAULT_VACANCIES,
+  DEFAULT_RECRUITMENT_SCORING_CONFIG,
   normalizeVacancy,
   normalizeVacancyList,
+  normalizeRecruitmentScoringConfig,
   extractActivePositionNames,
   normalizeDistrictToken,
   calculateVacancyMaxScore,
   buildShareUrl
-} from './vacancy-logic.js?v=20261122-hrga-workspace-16';
+} from './vacancy-logic.js?v=20261123-hrga-workspace-17';
 import {
   APPLY_CUSTOM_FIELD_TYPES,
   FORM_CUSTOM_FIELD_TYPES,
@@ -97,7 +99,22 @@ import {
   STAGE2_SECTION_META,
   normalizeApplySchema,
   normalizeStage2Schema
-} from './form-schema.js?v=20261122-hrga-workspace-16';
+} from './form-schema.js?v=20261123-hrga-workspace-17';
+import {
+  renderAttendanceUploadView,
+  renderAttendanceCalendarView,
+  renderStaffHolidayView,
+  renderEmployeeExtensionsView,
+  renderStaffManagementView,
+  renderStaffReportsView,
+  renderDriverScheduleView,
+  renderDriverManagementView,
+  renderDriverReportsView,
+  renderStationeryInputView,
+  renderStationeryStockView,
+  renderStationeryReportsView,
+  renderOpsSettingsView
+} from './ops-views.js?v=20261123-hrga-workspace-17';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -153,7 +170,10 @@ const SESSION_PROFILE_KEY = 'hrga_session_profile_v1';
 const PRINTED_CONTRACTS_KEY = 'hrga_printed_contracts_v1';
 const DEMO_CONTRACT_HISTORY_KEY = 'hrga_contract_history_demo_v1';
 const DEMO_RECRUITMENT_SETTINGS_KEY = 'hrga_demo_recruitment_v1';
-const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'systemImport']);
+const DEMO_STAGE1_LEADS_KEY = 'hrga_demo_stage1_leads_v1';
+const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'opsSettings', 'systemImport']);
+let employeeSubTab = 'directory';
+let lastEmployeeDelta = null;
 
 function loadPrintedContractsMap() {
   try {
@@ -186,10 +206,12 @@ const TITLES = {
   print: 'Application Print',
   settings: 'Template & OCR Settings',
   recruitmentSettings: 'Recruitment Settings',
+  opsSettings: 'Operations & Formulas',
   userManagement: 'User Management',
   contractSettings: 'Contract Settings',
   systemImport: 'Data Import',
   attendanceSuite: 'Attendance Suite',
+  attendanceUpload: 'Attendance Upload Center',
   attendanceCalendar: 'Calendar Settings',
   attendanceStaffHoliday: 'Conditional Holiday Schedule',
   attendanceStaffManagement: 'Staff Attendance Management',
@@ -197,6 +219,9 @@ const TITLES = {
   attendanceDriverSchedule: 'Manual Driver Schedule',
   attendanceDriverManagement: 'Driver Attendance Management',
   attendanceDriverReports: 'Driver Reports',
+  stationeryInput: 'Stationery Stock Movement',
+  stationeryStock: 'Master Stock ATK',
+  stationeryReports: 'Stationery Consumption & Purchase Plan',
   vehicleManagement: 'Vehicle Management',
   vehicleDatabase: 'Vehicle Database',
   vehicleExpenses: 'Vehicle Expenses',
@@ -225,7 +250,14 @@ function seedDemoWorkspaceData() {
   const ly = laterMDate.getUTCFullYear();
   const lm = laterMDate.getUTCMonth() + 1;
 
+  let storedLeads = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DEMO_STAGE1_LEADS_KEY) || '[]');
+    if (Array.isArray(parsed)) storedLeads = parsed;
+  } catch {}
+
   stage1Leads = [
+    ...storedLeads,
     {
       id: 'lead-demo-1',
       full_name: 'Rizky Pratama',
@@ -233,6 +265,9 @@ function seedDemoWorkspaceData() {
       source: 'Jobstreet',
       whatsapp: '081234560011',
       recommendation: 'Recommended',
+      experience_details: {
+        _scoring: { totalScore: 85, maxScore: 100, percentageScore: 85, threshold: 60, scoringMode: 'percentage', recommended: true }
+      },
       created_at: new Date().toISOString()
     }
   ];
@@ -583,17 +618,17 @@ async function fetchStage1Safe() {
   stage1HasSourceCol = true;
   stage1HasRecommendationCol = true;
   let res = await supabase.from('candidate_stage1_applications')
-    .select('id,full_name,position,source,whatsapp,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
+    .select('id,full_name,position,source,whatsapp,experience_details,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
     .order('created_at', { ascending: false }).limit(500);
   if (res.error && isMissingSchemaError(res.error)) {
     stage1HasSourceCol = false;
     res = await supabase.from('candidate_stage1_applications')
-      .select('id,full_name,position,whatsapp,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
+      .select('id,full_name,position,whatsapp,experience_details,cv_path,cv_filename,recommendation,recommendation_notes,status,created_at')
       .order('created_at', { ascending: false }).limit(500);
     if (res.error && isMissingSchemaError(res.error)) {
       stage1HasRecommendationCol = false;
       res = await supabase.from('candidate_stage1_applications')
-        .select('id,full_name,position,whatsapp,cv_path,cv_filename,status,created_at')
+        .select('id,full_name,position,whatsapp,experience_details,cv_path,cv_filename,status,created_at')
         .order('created_at', { ascending: false }).limit(500);
     }
   }
@@ -912,8 +947,28 @@ function renderDashboard() {
 /* ============================================================================
  * LEAD REGISTER (stage1) — Connected live status synced with Candidate List
  * ============================================================================ */
+function getLeadScoreDisplay(row) {
+  const sc = row?.experience_details?._scoring;
+  if (!sc || typeof sc !== 'object' || sc.totalScore === undefined) {
+    return {
+      html: '<span class="status-pill muted">—</span>',
+      searchText: ''
+    };
+  }
+  const pts = Number(sc.totalScore || 0);
+  const maxPts = Number(sc.maxScore || 0);
+  const pct = Number(sc.percentageScore ?? (maxPts > 0 ? Math.round((pts / maxPts) * 100) : 0));
+  const qualified = Boolean(sc.recommended);
+  const badgeTone = qualified ? 'green' : 'gold';
+  const badgeLabel = qualified ? 'Qualified' : 'Below Min';
+  return {
+    html: `<div class="score-cell-stack"><span><b>${esc(pts)}</b>/${esc(maxPts)} (${esc(pct)}%)</span><span class="status-pill ${badgeTone}">${badgeLabel}</span></div>`,
+    searchText: `${pts} ${maxPts} ${pct}% ${badgeLabel}`
+  };
+}
+
 function stage1RowsHtml(rows) {
-  if (!rows.length) return emptyRow(6, 'No lead records yet');
+  if (!rows.length) return emptyRow(7, 'No lead records yet');
   return rows.map(row => {
     const unified = resolveLeadUnifiedStatus(row, {
       applicants,
@@ -921,11 +976,13 @@ function stage1RowsHtml(rows) {
       employees,
       invitedCandidates
     });
+    const scoreDisplay = getLeadScoreDisplay(row);
     return `<tr>
       <td><b>${esc(row.full_name)}</b></td>
       <td>${esc(row.position || '-')}</td>
       <td>${esc(row.source || '-')}</td>
       <td>${esc(row.whatsapp || '-')}</td>
+      <td data-stage1-score="${esc(row.id)}">${scoreDisplay.html}</td>
       <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '-'}</td>
       <td data-stage1-status="${esc(row.id)}"><span class="status-pill ${unified.tone}">${esc(unified.label)}</span></td>
     </tr>`;
@@ -937,15 +994,16 @@ function renderStage1() {
   const paint = query => {
     const filtered = rows.filter(row => {
       const unified = resolveLeadUnifiedStatus(row, { applicants, interviews, employees, invitedCandidates });
-      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${unified.label}`.toLowerCase().includes(query);
+      const scoreDisplay = getLeadScoreDisplay(row);
+      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${scoreDisplay.searchText} ${unified.label}`.toLowerCase().includes(query);
     });
     $('#stage1-rows').innerHTML = stage1RowsHtml(filtered);
     bindStage1Actions(rows);
   };
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
-    `<section class="panel table-panel">${tableToolbar('Search name / position / source / WhatsApp / status…', 'Lead Register')}
+    `<section class="panel table-panel">${tableToolbar('Search name / position / source / score / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>CV</th><th>STATUS</th></tr></thead>
+        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>SCORE</th><th>CV</th><th>STATUS</th></tr></thead>
         <tbody id="stage1-rows">${stage1RowsHtml(rows)}</tbody>
       </table></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
@@ -2110,11 +2168,38 @@ function renderEmployees() {
   const migrationWarn = employeesExtendedMissing
     ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Extended Employee Directory columns are not migrated yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
     : '';
+  const subTabsHtml = `
+    <div class="ops-subtab-bar" role="tablist" aria-label="Employee Directory Modes">
+      <button type="button" class="tab-btn ${employeeSubTab === 'directory' ? 'active' : ''}" data-emp-subtab="directory">Employee Directory (16 Kolom)</button>
+      <button type="button" class="tab-btn ${employeeSubTab === 'delta' ? 'active' : ''}" data-emp-subtab="delta">Snapshot Delta Check</button>
+      <button type="button" class="tab-btn ${employeeSubTab === 'cuti' ? 'active' : ''}" data-emp-subtab="cuti">Saldo Cuti &amp; Import Cuti.xlsx</button>
+    </div>
+  `;
+
+  if (employeeSubTab !== 'directory') {
+    content.innerHTML = header('Employee Directory', '', '<button id="add-employee" class="btn btn-secondary">+ Add Employee</button>') +
+      subTabsHtml + '<div id="emp-ext-host"></div>';
+    $$('[data-emp-subtab]').forEach(b => b.addEventListener('click', () => {
+      employeeSubTab = b.dataset.empSubtab || 'directory';
+      renderEmployees();
+    }));
+    $('#add-employee')?.addEventListener('click', () => openEmployeeEditor(null, null));
+    renderEmployeeExtensionsView($('#emp-ext-host'), employeeSubTab, {
+      isDemoMode,
+      supabase,
+      profile: currentAdminProfile,
+      getEmployees: () => employees,
+      getLastDelta: () => lastEmployeeDelta,
+      setLastDelta: d => { lastEmployeeDelta = d; }
+    });
+    return;
+  }
+
   content.innerHTML = header('Employee Directory', '',
     '<button id="add-employee" class="btn btn-secondary">+ Add Employee</button>' +
     '<button id="upload-employees" class="btn btn-secondary">Upload XLSX / CSV ↑</button>' +
     '<button id="export-employees" class="btn btn-primary">Download XLSX ↓</button>'
-  ) + migrationWarn + `
+  ) + migrationWarn + subTabsHtml + `
     <section class="panel table-panel">${tableToolbar('Search name / NIK / department / position…', 'Employee Directory')}
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
@@ -2123,6 +2208,11 @@ function renderEmployees() {
         </table>
       </div>
     </section>`;
+
+  $$('[data-emp-subtab]').forEach(b => b.addEventListener('click', () => {
+    employeeSubTab = b.dataset.empSubtab || 'directory';
+    renderEmployees();
+  }));
 
   bindSearch('#table-search', query => {
     const filtered = employees.filter(e => {
@@ -3396,7 +3486,8 @@ function renderSystemImport() {
  * SYSTEM SETTINGS -> RECRUITMENT SETTINGS (/apply & /form Configuration)
  * ============================================================================ */
 let recruitActiveTab = 'overview';
-let recruitVacancies = [];
+let recruitVacancies = normalizeVacancyList(DEFAULT_VACANCIES);
+let recruitScoringConfig = normalizeRecruitmentScoringConfig(DEFAULT_RECRUITMENT_SCORING_CONFIG);
 let recruitApplySchema = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
 let recruitFormSchema = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
 let recruitDraftApply = null;
@@ -3545,6 +3636,7 @@ async function loadRecruitmentConfig(force = false) {
   if (isDemoMode || !supabase) {
     const stored = readDemoRecruitmentStore();
     recruitVacancies = normalizeVacancyList(Array.isArray(stored.job_vacancies_config) && stored.job_vacancies_config.length ? stored.job_vacancies_config : DEFAULT_VACANCIES);
+    recruitScoringConfig = normalizeRecruitmentScoringConfig(stored.recruitment_scoring_config || DEFAULT_RECRUITMENT_SCORING_CONFIG);
     recruitApplySchema = normalizeApplySchema(stored.apply_form_schema || DEFAULT_APPLY_SCHEMA);
     const demoForm = stored.stage2_form_schema || (Array.isArray(stored.application_positions) && stored.application_positions.length
       ? { ...structuredClone(DEFAULT_STAGE2_SCHEMA), positions: stored.application_positions }
@@ -3559,12 +3651,13 @@ async function loadRecruitmentConfig(force = false) {
   const { data, error } = await supabase
     .from('portal_settings')
     .select('key,value')
-    .in('key', ['job_vacancies_config', 'apply_form_schema', 'stage2_form_schema', 'application_positions']);
+    .in('key', ['job_vacancies_config', 'recruitment_scoring_config', 'apply_form_schema', 'stage2_form_schema', 'application_positions']);
   if (error) throw error;
 
   const settingsMap = Object.fromEntries((data || []).map(row => [row.key, row.value]));
   const sbVacancies = Array.isArray(settingsMap.job_vacancies_config) ? settingsMap.job_vacancies_config : [];
   recruitVacancies = normalizeVacancyList(sbVacancies.length ? sbVacancies : DEFAULT_VACANCIES);
+  recruitScoringConfig = normalizeRecruitmentScoringConfig(settingsMap.recruitment_scoring_config || DEFAULT_RECRUITMENT_SCORING_CONFIG);
   recruitApplySchema = normalizeApplySchema(settingsMap.apply_form_schema || DEFAULT_APPLY_SCHEMA);
 
   const sbFormPositions = Array.isArray(settingsMap.application_positions)
@@ -3578,6 +3671,22 @@ async function loadRecruitmentConfig(force = false) {
   recruitDraftApply = structuredClone(recruitApplySchema);
   recruitDraftForm = structuredClone(recruitFormSchema);
   recruitConfigLoaded = true;
+}
+
+async function persistRecruitScoringConfig(nextScoring) {
+  const clean = normalizeRecruitmentScoringConfig(nextScoring);
+  if (isDemoMode || !supabase) {
+    writeDemoRecruitmentStore({ recruitment_scoring_config: clean });
+  } else {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('portal_settings').upsert(
+      [{ key: 'recruitment_scoring_config', value: clean, updated_at: now }],
+      { onConflict: 'key' }
+    );
+    if (error) throw error;
+  }
+  recruitScoringConfig = clean;
+  return clean;
 }
 
 async function persistRecruitVacancies(nextList) {
@@ -4123,15 +4232,18 @@ function renderRecruitVacanciesTab(host) {
       )
     : recruitVacancies;
   const activeCount = recruitVacancies.filter(v => v.active !== false).length;
+  const gModeLabel = recruitScoringConfig.scoringMode === 'points' ? 'pts' : '%';
 
   const desktopRows = filtered.length
     ? filtered.map(v => {
         const maxScore = calculateVacancyMaxScore(v);
+        const effMode = v.minScoreMode !== 'inherit' ? (v.minScoreMode === 'points' ? 'pts' : '%') : gModeLabel;
+        const effMin = v.minScore !== null && v.minScore !== undefined ? v.minScore : recruitScoringConfig.defaultMinScore;
         return `
         <tr data-vacancy-id="${esc(v.id)}">
           <td class="col-pos">
             <div class="pos-name-title">${esc(v.name)}</div>
-            <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts</div>
+            <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts · Min ${esc(effMin)}${effMode}</div>
           </td>
           <td class="col-loc">${renderRecruitDistrictSummary(v.primaryDistricts)}</td>
           <td class="col-score">${esc(v.primaryLocationScore)}</td>
@@ -4151,10 +4263,41 @@ function renderRecruitVacanciesTab(host) {
     : '<tr><td colspan="7" class="table-empty">No vacancies match your search.</td></tr>';
 
   host.innerHTML = `
+    <div class="card ops-card" style="margin-bottom:16px">
+      <div class="ops-head">
+        <div>
+          <h3>Global Qualification Threshold &amp; WhatsApp Gate (/apply)</h3>
+          <p class="ops-sub">Jika kandidat memenuhi skor minimal, tombol Konfirmasi WhatsApp akan tampil. Jika di bawah skor minimal, lamaran tetap tersimpan di database tanpa tombol WA.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="recruit-save-scoring">Save Threshold Rules</button>
+      </div>
+      <div class="ops-form-grid">
+        <label class="ops-field">
+          <span>Default Minimum Score</span>
+          <input id="recruit-def-min" type="number" step="0.5" min="0" class="input" value="${esc(recruitScoringConfig.defaultMinScore)}">
+        </label>
+        <label class="ops-field">
+          <span>Scoring Basis</span>
+          <select id="recruit-def-mode" class="input">
+            <option value="percentage" ${recruitScoringConfig.scoringMode === 'percentage' ? 'selected' : ''}>Percentage (% of Max Score)</option>
+            <option value="points" ${recruitScoringConfig.scoringMode === 'points' ? 'selected' : ''}>Raw Points</option>
+          </select>
+        </label>
+        <label class="ops-check">
+          <input id="recruit-req-wa" type="checkbox" ${recruitScoringConfig.requireQualificationForWa ? 'checked' : ''}>
+          <span>Hide WhatsApp CTA if below minimum score</span>
+        </label>
+        <label class="ops-field" style="grid-column:1 / -1">
+          <span>Non-Qualified Confirmation Message (/apply)</span>
+          <input id="recruit-nonqual-msg" type="text" class="input" value="${esc(recruitScoringConfig.nonQualifiedMessage)}">
+        </label>
+      </div>
+    </div>
+
     <div class="vacancy-toolbar">
       <div class="vacancy-toolbar-meta">
         <h2>/apply Vacancies &amp; Scoring Rules</h2>
-        <span class="vacancy-count">${recruitVacancies.length} position(s) · ${activeCount} active · Recommended threshold ≥ ${RECOMMENDATION_THRESHOLD} pts</span>
+        <span class="vacancy-count">${recruitVacancies.length} position(s) · ${activeCount} active · Global min threshold ≥ ${esc(recruitScoringConfig.defaultMinScore)} ${gModeLabel}</span>
       </div>
       <div class="vacancy-toolbar-actions">
         <input id="vacancy-search" class="vacancy-search" type="search" value="${esc(recruitSearchQuery)}" placeholder="Search position, district, question…">
@@ -4181,6 +4324,21 @@ function renderRecruitVacanciesTab(host) {
       </div>
     </section>
   `;
+
+  $('#recruit-save-scoring', host).addEventListener('click', async () => {
+    try {
+      await persistRecruitScoringConfig({
+        defaultMinScore: $('#recruit-def-min', host).value,
+        scoringMode: $('#recruit-def-mode', host).value,
+        requireQualificationForWa: $('#recruit-req-wa', host).checked,
+        nonQualifiedMessage: $('#recruit-nonqual-msg', host).value
+      });
+      renderRecruitVacanciesTab(host);
+      say(`Threshold updated: min ${recruitScoringConfig.defaultMinScore}${recruitScoringConfig.scoringMode === 'points' ? ' pts' : '%'}.`);
+    } catch (err) {
+      say(err.message || 'Failed to save scoring configuration.');
+    }
+  });
 
   $('#vacancy-search', host).addEventListener('input', event => {
     recruitSearchQuery = event.target.value;
@@ -4516,6 +4674,18 @@ function openRecruitVacancyModal(id, host) {
                     <span>Active (Show in candidate vacancy dropdown)</span>
                   </label>
                 </div>
+                <div class="v-field">
+                  <label for="v-min-score">Min Qualification Override (Blank = Global Default)</label>
+                  <input id="v-min-score" class="input" type="number" step="0.5" min="0" placeholder="Inherit global">
+                </div>
+                <div class="v-field">
+                  <label for="v-min-mode">Threshold Mode</label>
+                  <select id="v-min-mode" class="select">
+                    <option value="inherit">Inherit Global Setting</option>
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="points">Raw Points</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -4642,6 +4812,9 @@ function openRecruitVacancyModal(id, host) {
     syncRecruitQuestionsFromDom(backdrop);
     recruitDraftVacancy.name = $('#v-name', backdrop).value.trim();
     recruitDraftVacancy.active = $('#v-active', backdrop).checked;
+    const minScoreStr = $('#v-min-score', backdrop).value.trim();
+    recruitDraftVacancy.minScore = minScoreStr === '' ? null : Number(minScoreStr);
+    recruitDraftVacancy.minScoreMode = $('#v-min-mode', backdrop).value || 'inherit';
     recruitDraftVacancy.primaryLocationScore = Number($('#v-primary-score', backdrop).value || 0);
     recruitDraftVacancy.otherLocationLabel = $('#v-other-label', backdrop).value.trim() || 'Area selain lokasi utama';
     recruitDraftVacancy.otherLocationScore = Number($('#v-other-score', backdrop).value || 0);
@@ -4741,6 +4914,8 @@ function openRecruitVacancyModal(id, host) {
   $('#v-modal-title', backdrop).textContent = source ? `Edit Vacancy: ${source.name}` : 'Add New Vacancy';
   $('#v-name', backdrop).value = recruitDraftVacancy.name;
   $('#v-active', backdrop).checked = recruitDraftVacancy.active !== false;
+  $('#v-min-score', backdrop).value = recruitDraftVacancy.minScore ?? '';
+  $('#v-min-mode', backdrop).value = recruitDraftVacancy.minScoreMode || 'inherit';
   $('#v-primary-score', backdrop).value = recruitDraftVacancy.primaryLocationScore ?? 20;
   $('#v-other-label', backdrop).value = recruitDraftVacancy.otherLocationLabel || 'Area selain lokasi utama';
   $('#v-other-score', backdrop).value = recruitDraftVacancy.otherLocationScore ?? 10;
@@ -5854,6 +6029,15 @@ async function loadView(view, forceRefresh = false) {
     }
   }
 
+  const opsCtx = {
+    isDemoMode,
+    supabase,
+    profile: currentAdminProfile,
+    getEmployees: () => employees,
+    getLastDelta: () => lastEmployeeDelta,
+    setLastDelta: d => { lastEmployeeDelta = d; }
+  };
+
   try {
     if (dataViews.has(view)) await refreshData(forceRefresh);
     if (view === 'dashboard') renderDashboard();
@@ -5867,6 +6051,18 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'contracts') await renderContractsView();
     else if (view === 'contractSettings') await renderContractSettings();
     else if (view === 'recruitmentSettings') await renderRecruitmentSettings(forceRefresh);
+    else if (view === 'opsSettings') await renderOpsSettingsView(content, opsCtx);
+    else if (view === 'attendanceUpload') await renderAttendanceUploadView(content, opsCtx);
+    else if (view === 'attendanceCalendar') await renderAttendanceCalendarView(content, opsCtx);
+    else if (view === 'attendanceStaffHoliday') await renderStaffHolidayView(content, opsCtx);
+    else if (view === 'attendanceStaffManagement') await renderStaffManagementView(content, opsCtx);
+    else if (view === 'attendanceStaffReports') await renderStaffReportsView(content, opsCtx);
+    else if (view === 'attendanceDriverSchedule') await renderDriverScheduleView(content, opsCtx);
+    else if (view === 'attendanceDriverManagement') await renderDriverManagementView(content, opsCtx);
+    else if (view === 'attendanceDriverReports') await renderDriverReportsView(content, opsCtx);
+    else if (view === 'stationeryInput') await renderStationeryInputView(content, opsCtx);
+    else if (view === 'stationeryStock') await renderStationeryStockView(content, opsCtx);
+    else if (view === 'stationeryReports') await renderStationeryReportsView(content, opsCtx);
     else if (view === 'systemImport') renderSystemImport();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();

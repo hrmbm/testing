@@ -73,6 +73,39 @@ function makeQuestion(id, label, type, extra = {}) {
 
 export const RECOMMENDATION_THRESHOLD = 60;
 
+export const DEFAULT_RECRUITMENT_SCORING_CONFIG = {
+  defaultMinScore: RECOMMENDATION_THRESHOLD,
+  scoringMode: 'percentage', // 'percentage' | 'points'
+  requireQualificationForWa: true,
+  nonQualifiedMessage: 'Data Anda telah tersimpan di database HR untuk dipertimbangkan sesuai kebutuhan perusahaan.'
+};
+
+export function normalizeRecruitmentScoringConfig(raw = {}) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const mode = src.scoringMode === 'points' ? 'points' : 'percentage';
+  const rawMin = Number(src.defaultMinScore);
+  const defaultMinScore = Number.isFinite(rawMin)
+    ? Math.max(0, mode === 'percentage' ? Math.min(100, rawMin) : rawMin)
+    : RECOMMENDATION_THRESHOLD;
+  return {
+    defaultMinScore: Math.round(defaultMinScore * 100) / 100,
+    scoringMode: mode,
+    requireQualificationForWa: src.requireQualificationForWa !== false,
+    nonQualifiedMessage: String(src.nonQualifiedMessage || '').trim() || DEFAULT_RECRUITMENT_SCORING_CONFIG.nonQualifiedMessage
+  };
+}
+
+export function buildApplicationPdfTitle(record = {}) {
+  const app = (record && typeof record.application_data === 'object' && record.application_data) || {};
+  const rawName = String(record?.full_name || app.nama || '').trim();
+  const rawPos = String(record?.position || app.posisi || '').trim();
+  const clean = s => s.replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const name = clean(rawName);
+  const pos = clean(rawPos);
+  if (name && pos) return `${name} - ${pos}`;
+  return name || pos || 'Formulir Lamaran Kerja';
+}
+
 export const DEFAULT_PRIMARY_DISTRICTS = ['Pasuruan - Purwosari', 'Pasuruan - Purwodadi', 'Pasuruan - Sukorejo', 'Pasuruan - Pandaan', 'Pasuruan - Prigen'];
 
 export const DEFAULT_VACANCIES = [
@@ -350,10 +383,18 @@ export function normalizeVacancy(raw = {}, index = 0) {
     seenIds.add(qid);
   }
 
+  const rawMinScore = raw.minScore;
+  const minScore = rawMinScore === '' || rawMinScore === null || rawMinScore === undefined
+    ? null
+    : (Number.isFinite(Number(rawMinScore)) ? Math.max(0, Math.round(Number(rawMinScore) * 100) / 100) : null);
+  const minScoreMode = ['percentage', 'points'].includes(raw.minScoreMode) ? raw.minScoreMode : 'inherit';
+
   return {
     id,
     name,
     active: raw.active !== false,
+    minScore,
+    minScoreMode,
     primaryDistricts,
     primaryLocationScore: toNumberScore(raw.primaryLocationScore, 0),
     otherLocationLabel: String(raw.otherLocationLabel || 'Area selain lokasi utama').trim() || 'Area selain lokasi utama',
@@ -509,8 +550,9 @@ export function calculateVacancyMaxScore(vacancy) {
   return Math.round((maxLocationScore + maxQuestionScore) * 100) / 100;
 }
 
-export function calculateCandidateScore(vacancy, city = '', district = '', answers = {}) {
+export function calculateCandidateScore(vacancy, city = '', district = '', answers = {}, globalScoringConfig = null) {
   const v = normalizeVacancy(vacancy || {});
+  const cfg = normalizeRecruitmentScoringConfig(globalScoringConfig || {});
   const isPrimary = isPrimaryDistrictMatch(v.primaryDistricts, city, district);
   const locationType = isPrimary ? 'Lokasi Utama' : 'Lokasi Lain';
   const locationScore = isPrimary ? v.primaryLocationScore : v.otherLocationScore;
@@ -560,8 +602,12 @@ export function calculateCandidateScore(vacancy, city = '', district = '', answe
   const percentageScore = maxScore > 0
     ? Math.max(0, Math.round((totalScore / maxScore) * 10000) / 100)
     : 0;
-  const threshold = RECOMMENDATION_THRESHOLD;
-  const recommended = maxScore > 0 && percentageScore >= threshold;
+  const activeMode = v.minScoreMode !== 'inherit' ? v.minScoreMode : cfg.scoringMode;
+  const threshold = v.minScore !== null && v.minScore !== undefined ? v.minScore : cfg.defaultMinScore;
+  const effectiveScore = activeMode === 'points' ? totalScore : percentageScore;
+  const recommended = activeMode === 'points'
+    ? effectiveScore >= threshold
+    : (maxScore > 0 && percentageScore >= threshold);
   const recommendation = recommended ? 'Direkomendasikan' : 'Belum Ditentukan';
 
   return {
@@ -572,6 +618,7 @@ export function calculateCandidateScore(vacancy, city = '', district = '', answe
     maxScore,
     percentageScore,
     threshold,
+    scoringMode: activeMode,
     recommended,
     recommendation,
     questionBreakdown

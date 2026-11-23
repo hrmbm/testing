@@ -16,6 +16,11 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/vendor/xlsx.mjs', (_req, res) => {
+  res.type('application/javascript');
+  res.sendFile(path.join(__dirname, 'node_modules', 'xlsx', 'xlsx.mjs'));
+});
+
 app.use((req, res, next) => {
   const blocked = ['/server.js', '/package.json', '/package-lock.json'];
   if (blocked.includes(req.path)) {
