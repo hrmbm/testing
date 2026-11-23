@@ -1,10 +1,10 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-15';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261121-hrga-workspace-15';
-import { $, $$, esc, idDate } from './common.js?v=20261121-hrga-workspace-15';
-import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261121-hrga-workspace-15';
-import { computeDisc } from './disc-engine.js?v=20261121-hrga-workspace-15';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261121-hrga-workspace-15';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261121-hrga-workspace-15';
+import { supabase, isConfigured } from './supabase.js?v=20261122-hrga-workspace-16';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261122-hrga-workspace-16';
+import { $, $$, esc, idDate } from './common.js?v=20261122-hrga-workspace-16';
+import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261122-hrga-workspace-16';
+import { computeDisc } from './disc-engine.js?v=20261122-hrga-workspace-16';
+import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261122-hrga-workspace-16';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261122-hrga-workspace-16';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -36,8 +36,13 @@ import {
   parseLeadImportRows,
   CANDIDATE_IMPORT_HEADERS,
   CANDIDATE_IMPORT_SAMPLE_ROW,
-  parseCandidateImportRows
-} from './workspace-logic.js?v=20261121-hrga-workspace-15';
+  parseCandidateImportRows,
+  DISC_IMPORT_HEADERS,
+  DISC_IMPORT_SAMPLE_ROW,
+  parseDiscImportRows,
+  buildTrackingExportRows,
+  buildConclusionExportRows
+} from './workspace-logic.js?v=20261122-hrga-workspace-16';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -49,7 +54,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261121-hrga-workspace-15';
+} from './admin-modals.js?v=20261122-hrga-workspace-16';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -57,16 +62,42 @@ import {
   determineRequiredContractDocuments,
   parseNumericCurrency,
   computeNextDocSequence,
-  buildContractUpdateRequestPayload,
+  buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261121-hrga-workspace-15';
+} from './contract-logic.js?v=20261122-hrga-workspace-16';
 import {
   openPkwtConfigModal,
-  openPostPrintEmployeeUpdateModal,
   readSavedContractSettings,
   writeSavedContractSettings
-} from './contract-modal.js?v=20261121-hrga-workspace-15';
+} from './contract-modal.js?v=20261122-hrga-workspace-16';
+import {
+  DISTRICTS_BY_CITY,
+  APPLY_INFO_SOURCES,
+  FORM_INFO_SOURCES,
+  QUESTION_TYPES,
+  RECOMMENDATION_THRESHOLD,
+  DEFAULT_VACANCIES,
+  normalizeVacancy,
+  normalizeVacancyList,
+  extractActivePositionNames,
+  normalizeDistrictToken,
+  calculateVacancyMaxScore,
+  buildShareUrl
+} from './vacancy-logic.js?v=20261122-hrga-workspace-16';
+import {
+  APPLY_CUSTOM_FIELD_TYPES,
+  FORM_CUSTOM_FIELD_TYPES,
+  DEFAULT_APPLY_SCHEMA,
+  DEFAULT_STAGE2_SCHEMA,
+  MANDATORY_APPLY_IDS,
+  MANDATORY_STAGE2_FIELDS,
+  MANDATORY_STAGE2_SECTIONS,
+  STEP_SECTION_DEFAULTS,
+  STAGE2_SECTION_META,
+  normalizeApplySchema,
+  normalizeStage2Schema
+} from './form-schema.js?v=20261122-hrga-workspace-16';
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -82,7 +113,6 @@ let invitedCandidates = [];
 let cvScreenings = [];
 let portalUsers = [];
 let contractSettings = readSavedContractSettings();
-let contractRequests = [];
 let contractHistory = [];
 let contractTablesMissing = false;
 let interviewsTableMissing = false;
@@ -120,9 +150,28 @@ const DATA_CACHE_TTL_MS = 120000;
 const SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
 const SIDEBAR_STATE_KEY = 'hrga_sidebar_collapse_v1';
 const SESSION_PROFILE_KEY = 'hrga_session_profile_v1';
-const DEMO_CONTRACT_REQUESTS_KEY = 'hrga_contract_requests_demo_v1';
+const PRINTED_CONTRACTS_KEY = 'hrga_printed_contracts_v1';
 const DEMO_CONTRACT_HISTORY_KEY = 'hrga_contract_history_demo_v1';
-const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'systemImport']);
+const DEMO_RECRUITMENT_SETTINGS_KEY = 'hrga_demo_recruitment_v1';
+const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'systemImport']);
+
+function loadPrintedContractsMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PRINTED_CONTRACTS_KEY) || '{}');
+    if (raw && typeof raw === 'object') {
+      return new Map(Object.entries(raw));
+    }
+  } catch {}
+  return new Map();
+}
+
+function savePrintedContractsMap() {
+  try {
+    localStorage.setItem(PRINTED_CONTRACTS_KEY, JSON.stringify(Object.fromEntries(printedContractsMap.entries())));
+  } catch {}
+}
+
+let printedContractsMap = loadPrintedContractsMap();
 
 const TITLES = {
   dashboard: 'Dashboard',
@@ -135,7 +184,8 @@ const TITLES = {
   employees: 'Employee Directory',
   contracts: 'Contracts',
   print: 'Application Print',
-  settings: 'Recruitment Settings',
+  settings: 'Template & OCR Settings',
+  recruitmentSettings: 'Recruitment Settings',
   userManagement: 'User Management',
   contractSettings: 'Contract Settings',
   systemImport: 'Data Import',
@@ -353,10 +403,6 @@ function seedDemoWorkspaceData() {
     }
   ];
   contractSettings = readSavedContractSettings();
-  try {
-    const reqRaw = JSON.parse(localStorage.getItem(DEMO_CONTRACT_REQUESTS_KEY) || '[]');
-    contractRequests = Array.isArray(reqRaw) ? reqRaw : [];
-  } catch { contractRequests = []; }
   try {
     const histRaw = JSON.parse(localStorage.getItem(DEMO_CONTRACT_HISTORY_KEY) || '[]');
     contractHistory = Array.isArray(histRaw) ? histRaw : [];
@@ -681,22 +727,19 @@ async function fetchAndCacheFreshSnapshot() {
     invitedCandidates = invRows;
     cvScreenings = scrRows;
     lastDataFetchedAt = Date.now();
-    await Promise.all([
-      cacheSet('workspace_snapshot', {
-        applicants,
-        employees,
-        stage1Leads,
-        interviews,
-        invitedCandidates,
-        cvScreenings,
-        interviewsTableMissing,
-        invitedTableMissing,
-        cvScreeningsTableMissing,
-        stage1HasRecommendationCol,
-        employeesExtendedMissing
-      }),
-      loadContractWorkspaceState(true)
-    ]);
+    void cacheSet('workspace_snapshot', {
+      applicants,
+      employees,
+      stage1Leads,
+      interviews,
+      invitedCandidates,
+      cvScreenings,
+      interviewsTableMissing,
+      invitedTableMissing,
+      cvScreeningsTableMissing,
+      stage1HasRecommendationCol,
+      employeesExtendedMissing
+    }).catch(() => {});
   })().finally(() => {
     inflightRefreshPromise = null;
   });
@@ -738,7 +781,6 @@ async function refreshData(force = false) {
   if (!force && !lastDataFetchedAt) {
     const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
     if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
-      await loadContractWorkspaceState(false);
       if (cached.stale || (Date.now() - cached.savedAt) >= DATA_CACHE_TTL_MS) {
         triggerBackgroundRevalidate();
       }
@@ -784,7 +826,7 @@ function renderDashboard() {
     applicants,
     stage1Leads,
     invitedCandidates,
-    contractRequests,
+    contractRequests: [],
     isRootAdmin: isRootAdminAccount(currentAdminProfile)
   });
   const totalAttentionCount = attentionItems.reduce((sum, item) => sum + item.count, 0);
@@ -1943,6 +1985,7 @@ function renderTrackingView() {
 
   content.innerHTML = header('Tracking & Report', '',
     '<button class="btn btn-secondary" id="refresh-tracking">Refresh ↻</button>' +
+    '<button type="button" class="btn btn-secondary" id="export-tracking">Export XLSX ↓</button>' +
     '<button type="button" class="btn btn-primary" id="print-tracking">Print Report ↗</button>'
   ) +
     `<section class="panel table-panel">${tableToolbar('Search name / position / source / status…', 'Tracking & Report')}
@@ -1958,6 +2001,55 @@ function renderTrackingView() {
       </div></section>`;
 
   $('#refresh-tracking')?.addEventListener('click', () => loadView('tracking', true));
+  $('#export-tracking')?.addEventListener('click', async () => {
+    const button = $('#export-tracking');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Preparing XLSX…';
+    }
+    try {
+      const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const positions = await loadPositionList().catch(() => stage2PositionsCache);
+      const summary = buildRecruitmentConclusionSummary({
+        positions,
+        cvScreenings,
+        invitedCandidates,
+        stage1Leads,
+        applicants,
+        interviews,
+        employees
+      });
+      const trackingRowsData = buildTrackingExportRows(activeFilteredRows);
+      const summaryRowsData = buildConclusionExportRows(summary);
+      const workbook = XLSX.utils.book_new();
+      const trackingSheet = XLSX.utils.json_to_sheet(
+        trackingRowsData.length ? trackingRowsData : [{ No: '', 'Candidate Name': 'No records matching filter' }]
+      );
+      const summarySheet = XLSX.utils.json_to_sheet(
+        summaryRowsData.length ? summaryRowsData : [{ No: '', Position: 'No summary rows' }]
+      );
+      trackingSheet['!cols'] = [
+        { wch: 6 }, { wch: 24 }, { wch: 20 }, { wch: 18 }, { wch: 15 }, { wch: 14 }, { wch: 14 },
+        { wch: 15 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 22 },
+        { wch: 22 }, { wch: 16 }, { wch: 24 }, { wch: 14 }, { wch: 14 }
+      ];
+      summarySheet['!cols'] = [
+        { wch: 8 }, { wch: 24 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
+        { wch: 14 }, { wch: 15 }, { wch: 15 }, { wch: 12 }
+      ];
+      XLSX.utils.book_append_sheet(workbook, trackingSheet, 'Tracking');
+      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+      XLSX.writeFile(workbook, `Tracking_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      say(`Exported ${trackingRowsData.length} tracking row(s) to XLSX.`);
+    } catch (err) {
+      say(err.message || 'Failed to export Tracking & Report XLSX.');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Export XLSX ↓';
+      }
+    }
+  });
   $('#print-tracking')?.addEventListener('click', async () => {
     try {
       const query = $('#table-search')?.value?.trim() || '';
@@ -2200,63 +2292,6 @@ function writeLocalJson(key, value) {
   } catch {}
 }
 
-function mapDbRequestToLocal(row = {}) {
-  return {
-    id: row.id,
-    status: row.status || 'pending',
-    requestedAt: row.created_at || row.requested_at || new Date().toISOString(),
-    requestedBy: row.requested_by_name || row.requestedBy || 'HR Admin',
-    reviewedAt: row.reviewed_at || row.reviewedAt || null,
-    reviewedBy: row.reviewed_by_name || row.reviewedBy || null,
-    employeeId: row.employee_id ?? row.employeeId ?? null,
-    applicantId: row.applicant_id ?? row.applicantId ?? null,
-    interviewId: row.interview_id ?? row.interviewId ?? null,
-    fullName: row.full_name ?? row.fullName ?? '',
-    employeeNik: row.employee_nik ?? row.employeeNik ?? '',
-    ktpNik: row.ktp_nik ?? row.ktpNik ?? '',
-    department: row.department ?? '',
-    position: row.position ?? '',
-    address: row.address ?? '',
-    phone: row.phone ?? '',
-    employmentStatus: row.employment_status ?? row.employmentStatus ?? 'KONTRAK',
-    contractStartDate: row.contract_start_date ?? row.contractStartDate ?? '',
-    contractEndDate: row.contract_end_date ?? row.contractEndDate ?? '',
-    durationMonths: Number(row.duration_months ?? row.durationMonths ?? 12) || 12,
-    docSequence: row.doc_sequence ?? row.docSequence ?? '',
-    contractNumber: row.contract_number ?? row.contractNumber ?? '',
-    salary: Number(row.salary ?? 0) || 0,
-    previousSnapshot: row.previous_snapshot ?? row.previousSnapshot ?? null
-  };
-}
-
-function mapLocalRequestToDb(req) {
-  return {
-    status: req.status || 'pending',
-    requested_by: currentUserId || null,
-    requested_by_name: req.requestedBy || 'HR Admin',
-    reviewed_by_name: req.reviewedBy || null,
-    reviewed_at: req.reviewedAt || null,
-    employee_id: req.employeeId || null,
-    applicant_id: req.applicantId || null,
-    interview_id: req.interviewId || null,
-    full_name: req.fullName || '',
-    employee_nik: req.employeeNik || '',
-    ktp_nik: req.ktpNik || '',
-    department: req.department || '',
-    position: req.position || '',
-    address: req.address || '',
-    phone: req.phone || '',
-    employment_status: req.employmentStatus || 'KONTRAK',
-    contract_start_date: req.contractStartDate || null,
-    contract_end_date: req.contractEndDate || null,
-    duration_months: req.durationMonths || 12,
-    doc_sequence: req.docSequence || '',
-    contract_number: req.contractNumber || '',
-    salary: req.salary || 0,
-    previous_snapshot: req.previousSnapshot || {}
-  };
-}
-
 function mapDbHistoryToLocal(row = {}) {
   return {
     id: row.id,
@@ -2285,19 +2320,15 @@ function mapDbHistoryToLocal(row = {}) {
 async function loadContractWorkspaceState(force = false) {
   if (isDemoMode || !supabase) {
     contractSettings = readSavedContractSettings();
-    const storedReq = readLocalJson(DEMO_CONTRACT_REQUESTS_KEY, []);
     const storedHist = readLocalJson(DEMO_CONTRACT_HISTORY_KEY, []);
-    if (Array.isArray(storedReq)) contractRequests = storedReq;
     if (Array.isArray(storedHist)) contractHistory = storedHist;
     return;
   }
-  if (!force && contractSettings && (contractRequests.length || contractHistory.length)) return;
+  if (!force && contractSettings && contractHistory.length) return;
   try {
-    const [settingsRes, reqSettingRes, histSettingRes, reqTableRes, histTableRes] = await Promise.all([
+    const [settingsRes, histSettingRes, histTableRes] = await Promise.all([
       supabase.from('portal_settings').select('value').eq('key', 'contract_settings').maybeSingle(),
-      supabase.from('portal_settings').select('value').eq('key', 'contract_update_requests').maybeSingle(),
       supabase.from('portal_settings').select('value').eq('key', 'contract_history').maybeSingle(),
-      supabase.from('contract_update_requests').select('*').order('created_at', { ascending: false }).limit(200),
       supabase.from('contract_history').select('*').order('created_at', { ascending: false }).limit(200)
     ]);
 
@@ -2308,13 +2339,11 @@ async function loadContractWorkspaceState(force = false) {
       contractSettings = readSavedContractSettings();
     }
 
-    if (reqTableRes.error || histTableRes.error) {
+    if (histTableRes.error) {
       contractTablesMissing = true;
-      contractRequests = Array.isArray(reqSettingRes?.data?.value) ? reqSettingRes.data.value : [];
       contractHistory = Array.isArray(histSettingRes?.data?.value) ? histSettingRes.data.value : [];
     } else {
       contractTablesMissing = false;
-      contractRequests = (reqTableRes.data || []).map(mapDbRequestToLocal);
       contractHistory = (histTableRes.data || []).map(mapDbHistoryToLocal);
     }
   } catch {
@@ -2334,19 +2363,6 @@ async function saveContractSettingsState(nextSettings) {
   if (error) throw error;
 }
 
-async function saveContractRequestsFallback() {
-  if (isDemoMode || !supabase) {
-    writeLocalJson(DEMO_CONTRACT_REQUESTS_KEY, contractRequests);
-    return;
-  }
-  const { error } = await supabase.from('portal_settings').upsert({
-    key: 'contract_update_requests',
-    value: contractRequests,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'key' });
-  if (error) throw error;
-}
-
 async function saveContractHistoryFallback() {
   if (isDemoMode || !supabase) {
     writeLocalJson(DEMO_CONTRACT_HISTORY_KEY, contractHistory);
@@ -2360,57 +2376,39 @@ async function saveContractHistoryFallback() {
   if (error) throw error;
 }
 
-async function submitContractUpdateRequest(req) {
-  if (isDemoMode || !supabase || contractTablesMissing) {
-    contractRequests = [req, ...contractRequests.filter(r => r.id !== req.id)];
-    await saveContractRequestsFallback();
-    return req;
+async function syncPrintedContractToDirectory(queueKey) {
+  const printed = printedContractsMap.get(queueKey);
+  if (!printed) {
+    throw new Error('Print the PKWT contract first before syncing to Employee Directory.');
   }
-  const { data, error } = await supabase.from('contract_update_requests')
-    .insert(mapLocalRequestToDb(req))
-    .select('*')
-    .single();
-  if (error) {
-    if (isMissingSchemaError(error)) {
-      contractTablesMissing = true;
-      contractRequests = [req, ...contractRequests];
-      await saveContractRequestsFallback();
-      return req;
-    }
-    throw error;
-  }
-  const saved = mapDbRequestToLocal(data);
-  contractRequests = [saved, ...contractRequests.filter(r => r.id !== saved.id)];
-  return saved;
-}
 
-async function approveContractRequest(requestId) {
-  if (!isRootAdminAccount(currentAdminProfile)) {
-    throw new Error('Only Administrator / Root Admin can approve employee contract updates.');
-  }
-  const req = contractRequests.find(r => r.id === requestId);
-  if (!req) throw new Error('Update request not found.');
-  if (req.status !== 'pending') throw new Error('This update request has already been processed.');
-
+  const queue = buildContractWorkspaceQueue({ employees, interviews, applicants });
+  const rec = queue.rows.find(r => r.queueKey === queueKey) || printed.record || {};
+  const currentEmployee = (rec.employeeId && employees.find(e => e.id === rec.employeeId)) ||
+    (rec.applicantId && employees.find(e => e.applicant_id === rec.applicantId)) ||
+    (rec.employeeNik && employees.find(e =>
+      String(e.employee_no || '').trim().toUpperCase() === String(rec.employeeNik || '').trim().toUpperCase()
+    )) ||
+    null;
+  const currentInterview = (rec.interviewId && interviews.find(i => i.id === rec.interviewId)) || null;
   const nowIso = new Date().toISOString();
-  const baseNotes = req.contractNumber ? `Contract No. ${req.contractNumber}` : '';
+
+  const sync = buildDirectContractSyncPayloads({
+    record: { ...rec, queueKey },
+    config: printed.config || {},
+    payload: printed.payload || {},
+    currentEmployee,
+    currentInterview,
+    appliedBy: currentAdminProfile?.displayName || 'HR Admin',
+    appliedAt: nowIso
+  });
+
   const empFields = {
-    applicant_id: req.applicantId || null,
-    employee_no: req.employeeNik,
-    full_name: req.fullName,
-    department: req.department || '',
-    position: req.position || '',
-    employment_status: req.employmentStatus || 'KONTRAK',
-    contract_start_date: req.contractStartDate || null,
-    contract_end_date: req.contractEndDate || null,
-    address: req.address || '',
-    ktp_nik: req.ktpNik || '',
-    phone: req.phone || '',
-    salary: req.salary || 0,
+    ...sync.employeePayload,
     updated_at: nowIso
   };
 
-  let targetEmployeeId = req.employeeId || null;
+  let targetEmployeeId = currentEmployee?.id || rec.employeeId || null;
   let createdEmployeeId = null;
 
   if (isDemoMode || !supabase) {
@@ -2419,7 +2417,7 @@ async function approveContractRequest(requestId) {
       if (idx >= 0) employees[idx] = { ...employees[idx], ...empFields };
     } else {
       const byNikIdx = employees.findIndex(e =>
-        String(e.employee_no || '').trim().toUpperCase() === String(req.employeeNik || '').trim().toUpperCase()
+        String(e.employee_no || '').trim().toUpperCase() === String(empFields.employee_no || '').trim().toUpperCase()
       );
       if (byNikIdx >= 0) {
         targetEmployeeId = employees[byNikIdx].id;
@@ -2427,31 +2425,15 @@ async function approveContractRequest(requestId) {
       } else {
         targetEmployeeId = `emp-demo-${Date.now()}`;
         createdEmployeeId = targetEmployeeId;
-        employees.unshift({
-          id: targetEmployeeId,
-          join_date: req.contractStartDate || nowIso.slice(0, 10),
-          notes: baseNotes,
-          ...empFields
-        });
+        employees.unshift({ id: targetEmployeeId, ...empFields });
       }
     }
-    if (req.interviewId) {
-      const iIdx = interviews.findIndex(i => i.id === req.interviewId);
-      if (iIdx >= 0) {
-        interviews[iIdx] = {
-          ...interviews[iIdx],
-          contract_number: req.contractNumber,
-          contract_start_date: req.contractStartDate,
-          contract_end_date: req.contractEndDate,
-          contract_duration_months: req.durationMonths,
-          salary: req.salary,
-          official_position: req.position,
-          assigned_nik: req.employeeNik
-        };
-      }
+    if (sync.interviewPatch?.id) {
+      const iIdx = interviews.findIndex(i => i.id === sync.interviewPatch.id);
+      if (iIdx >= 0) interviews[iIdx] = { ...interviews[iIdx], ...sync.interviewPatch };
     }
-    if (req.applicantId) {
-      const aIdx = applicants.findIndex(a => a.id === req.applicantId);
+    if (sync.applicantId) {
+      const aIdx = applicants.findIndex(a => a.id === sync.applicantId);
       if (aIdx >= 0) applicants[aIdx] = { ...applicants[aIdx], stage: 'hired' };
     }
   } else {
@@ -2460,96 +2442,54 @@ async function approveContractRequest(requestId) {
       if (error) throw error;
     } else {
       const existingByNik = employees.find(e =>
-        String(e.employee_no || '').trim().toUpperCase() === String(req.employeeNik || '').trim().toUpperCase()
+        String(e.employee_no || '').trim().toUpperCase() === String(empFields.employee_no || '').trim().toUpperCase()
       );
-      const upsertBody = {
-        ...empFields,
-        join_date: existingByNik?.join_date || req.contractStartDate || nowIso.slice(0, 10),
-        notes: existingByNik?.notes || baseNotes
-      };
       const { data: upserted, error } = await supabase.from('employees')
-        .upsert(upsertBody, { onConflict: 'employee_no' })
+        .upsert(empFields, { onConflict: 'employee_no' })
         .select('id')
         .single();
       if (error) throw error;
       targetEmployeeId = upserted?.id || existingByNik?.id || null;
       if (!existingByNik && targetEmployeeId) createdEmployeeId = targetEmployeeId;
     }
-    if (req.interviewId) {
-      await supabase.from('candidate_interviews').update({
-        contract_number: req.contractNumber,
-        contract_start_date: req.contractStartDate,
-        contract_end_date: req.contractEndDate,
-        contract_duration_months: req.durationMonths,
-        salary: req.salary,
-        official_position: req.position,
-        assigned_nik: req.employeeNik,
-        updated_at: nowIso
-      }).eq('id', req.interviewId);
+    if (sync.interviewPatch?.id) {
+      const patchBody = { ...sync.interviewPatch };
+      delete patchBody.id;
+      await supabase.from('candidate_interviews').update(patchBody).eq('id', sync.interviewPatch.id);
     }
-    if (req.applicantId) {
+    if (sync.applicantId) {
       await supabase.from('applicants')
         .update({ stage: 'hired', updated_at: nowIso })
-        .eq('id', req.applicantId);
+        .eq('id', sync.applicantId);
     }
   }
 
-  req.status = 'approved';
-  req.reviewedAt = nowIso;
-  req.reviewedBy = currentAdminProfile?.displayName || 'Administrator';
-  req.employeeId = targetEmployeeId;
-
   const historyEntry = {
-    id: `chist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    requestId: req.id,
+    ...sync.historyEntry,
     employeeId: targetEmployeeId,
-    createdEmployeeId,
-    applicantId: req.applicantId || null,
-    interviewId: req.interviewId || null,
-    fullName: req.fullName,
-    employeeNik: req.employeeNik,
-    position: req.position,
-    contractNumber: req.contractNumber,
-    docSequence: req.docSequence,
-    contractStartDate: req.contractStartDate,
-    contractEndDate: req.contractEndDate,
-    salary: req.salary,
-    status: 'applied',
-    previousSnapshot: req.previousSnapshot || {},
-    appliedBy: currentAdminProfile?.displayName || 'Administrator',
-    appliedAt: nowIso
+    createdEmployeeId
   };
 
   if (isDemoMode || !supabase || contractTablesMissing) {
     contractHistory = [historyEntry, ...contractHistory];
-    await saveContractRequestsFallback();
     await saveContractHistoryFallback();
   } else {
-    await supabase.from('contract_update_requests').update({
-      status: 'approved',
-      employee_id: targetEmployeeId,
-      reviewed_by: currentUserId || null,
-      reviewed_by_name: req.reviewedBy,
-      reviewed_at: nowIso,
-      updated_at: nowIso
-    }).eq('id', req.id);
-
     const { data: hData, error: hErr } = await supabase.from('contract_history').insert({
-      request_id: req.id,
+      request_id: null,
       employee_id: targetEmployeeId,
       created_employee_id: createdEmployeeId,
-      applicant_id: req.applicantId || null,
-      interview_id: req.interviewId || null,
-      full_name: req.fullName,
-      employee_nik: req.employeeNik,
-      position: req.position,
-      contract_number: req.contractNumber,
-      doc_sequence: req.docSequence,
-      contract_start_date: req.contractStartDate || null,
-      contract_end_date: req.contractEndDate || null,
-      salary: req.salary || 0,
+      applicant_id: historyEntry.applicantId || null,
+      interview_id: historyEntry.interviewId || null,
+      full_name: historyEntry.fullName,
+      employee_nik: historyEntry.employeeNik,
+      position: historyEntry.position,
+      contract_number: historyEntry.contractNumber,
+      doc_sequence: historyEntry.docSequence,
+      contract_start_date: historyEntry.contractStartDate || null,
+      contract_end_date: historyEntry.contractEndDate || null,
+      salary: historyEntry.salary || 0,
       status: 'applied',
-      previous_snapshot: req.previousSnapshot || {},
+      previous_snapshot: historyEntry.previousSnapshot || {},
       applied_by: currentUserId || null,
       applied_by_name: historyEntry.appliedBy
     }).select('*').single();
@@ -2557,7 +2497,6 @@ async function approveContractRequest(requestId) {
     if (hErr && isMissingSchemaError(hErr)) {
       contractTablesMissing = true;
       contractHistory = [historyEntry, ...contractHistory];
-      await saveContractRequestsFallback();
       await saveContractHistoryFallback();
     } else if (hErr) {
       throw hErr;
@@ -2566,35 +2505,10 @@ async function approveContractRequest(requestId) {
     }
   }
 
-  const numericSeq = Number(String(req.docSequence || '').replace(/\D/g, '')) || 0;
-  if (numericSeq > (Number(contractSettings.lastDocSequence) || 0)) {
-    await saveContractSettingsState({ lastDocSequence: numericSeq });
-  }
+  printedContractsMap.set(queueKey, { ...printed, syncedAt: nowIso });
+  savePrintedContractsMap();
   invalidateDataCache();
-}
-
-async function rejectContractRequest(requestId) {
-  if (!isRootAdminAccount(currentAdminProfile)) {
-    throw new Error('Only Administrator / Root Admin can reject contract updates.');
-  }
-  const req = contractRequests.find(r => r.id === requestId);
-  if (!req) return;
-  const nowIso = new Date().toISOString();
-  req.status = 'rejected';
-  req.reviewedAt = nowIso;
-  req.reviewedBy = currentAdminProfile?.displayName || 'Administrator';
-  if (isDemoMode || !supabase || contractTablesMissing) {
-    await saveContractRequestsFallback();
-  } else {
-    const { error } = await supabase.from('contract_update_requests').update({
-      status: 'rejected',
-      reviewed_by: currentUserId || null,
-      reviewed_by_name: req.reviewedBy,
-      reviewed_at: nowIso,
-      updated_at: nowIso
-    }).eq('id', req.id);
-    if (error) throw error;
-  }
+  return historyEntry;
 }
 
 async function cancelAppliedContract(historyId) {
@@ -2663,6 +2577,7 @@ function buildContractRecordFromInterview(intv, cand = null) {
     (intv.assigned_nik && employees.find(e => String(e.employee_no || '').trim().toUpperCase() === String(intv.assigned_nik || '').trim().toUpperCase())) ||
     null;
   return {
+    queueKey: intv?.id ? `intv:${intv.id}` : '',
     sourceType: 'final_interview',
     employeeId: emp?.id || null,
     applicantId: intv.applicant_id || null,
@@ -2686,7 +2601,7 @@ function buildContractRecordFromInterview(intv, cand = null) {
 function openPkwtForRecord(record) {
   const nextDocSequence = computeNextDocSequence({
     contractHistory,
-    contractRequests,
+    contractRequests: [],
     interviews,
     lastDocSequence: contractSettings?.lastDocSequence || 0
   });
@@ -2701,43 +2616,22 @@ function openPkwtForRecord(record) {
         await saveContractSettingsState({ lastDocSequence: printedSeqNum }).catch(() => {});
       }
 
-      const currentEmployee = (rec.employeeId && employees.find(e => e.id === rec.employeeId)) ||
-        (rec.applicantId && employees.find(e => e.applicant_id === rec.applicantId)) ||
-        (rec.employeeNik && employees.find(e =>
-          String(e.employee_no || '').trim().toUpperCase() === String(rec.employeeNik || '').trim().toUpperCase()
-        )) ||
-        null;
-      const currentInterview = (rec.interviewId && interviews.find(i => i.id === rec.interviewId)) || null;
-      const isRoot = isRootAdminAccount(currentAdminProfile);
+      const queueKey = rec.queueKey ||
+        (rec.employeeId ? `emp:${rec.employeeId}` : rec.interviewId ? `intv:${rec.interviewId}` : `name:${rec.fullName}`);
 
-      openPostPrintEmployeeUpdateModal({
-        record: rec,
-        config,
-        payload,
-        currentEmployee,
-        isRootAdmin: isRoot,
-        onSubmitUpdate: async ({ overrides, approveImmediately }) => {
-          const req = buildContractUpdateRequestPayload({
-            record: rec,
-            config,
-            payload,
-            currentEmployee,
-            currentInterview,
-            requestedBy: currentAdminProfile?.displayName || 'HR Admin',
-            overrides
-          });
-          const savedReq = await submitContractUpdateRequest(req);
-          if (approveImmediately && isRoot) {
-            await approveContractRequest(savedReq.id);
-            say(`Approved & updated Employee Directory for ${savedReq.fullName}.`);
-          } else {
-            say(`Contract update submitted for Root Admin approval (${savedReq.fullName}).`);
-          }
-          if (activeView === 'contracts') renderContractsView();
-          else if (activeView === 'employees') renderEmployees();
-          else if (activeView === 'interview') renderInterviewView();
-        }
-      });
+      if (queueKey) {
+        printedContractsMap.set(queueKey, {
+          queueKey,
+          record: rec,
+          config,
+          payload,
+          printedAt: new Date().toISOString()
+        });
+        savePrintedContractsMap();
+      }
+
+      say(`Contract printed for ${rec.fullName || 'employee'}. Use "Sync to Employee Directory" beside their name when ready.`);
+      if (activeView === 'contracts') await renderContractsView();
     }
   }).catch(err => say(err.message || 'Unable to open PKWT configuration.'));
 }
@@ -2747,53 +2641,12 @@ function formatIdrShort(amount) {
   return n > 0 ? `Rp ${n.toLocaleString('id-ID')}` : 'Not Set';
 }
 
-function renderContractsView() {
+async function renderContractsView() {
+  await loadContractWorkspaceState(false);
   const queue = buildContractWorkspaceQueue({ employees, interviews, applicants });
   const activeUmk = getActiveUmkThreshold();
-  const isRoot = isRootAdminAccount(currentAdminProfile);
-  const pendingRequests = contractRequests.filter(r => r.status === 'pending');
   let currentFilter = 'all';
   let currentQuery = '';
-
-  const approvalSectionHtml = isRoot && pendingRequests.length
-    ? `<section class="panel approval-panel" aria-label="Pending Employee Contract Updates">
-        <div class="panel-head">
-          <h3>Pending Employee Data Updates (Post-Print Approval)</h3>
-          <span class="status-pill gold">${pendingRequests.length} pending</span>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>EMPLOYEE</th>
-                <th>EMPLOYEE NIK</th>
-                <th>CONTRACT NO.</th>
-                <th>PERIOD</th>
-                <th>SALARY</th>
-                <th>SUBMITTED BY</th>
-                <th>ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${pendingRequests.map(req => `<tr>
-                <td><b>${esc(req.fullName)}</b><small class="table-subline">${esc(req.position || '—')}</small></td>
-                <td style="font-family:var(--font-mono)">${esc(req.employeeNik || '—')}</td>
-                <td style="font-family:var(--font-mono)">${esc(req.contractNumber || formatContractCode(req.docSequence, req.contractStartDate))}</td>
-                <td>${esc(formatDmyDash(req.contractStartDate))} → ${esc(formatDmyDash(req.contractEndDate))}</td>
-                <td><b>${esc(formatIdrShort(req.salary))}</b></td>
-                <td>${esc(req.requestedBy || 'HR Admin')}</td>
-                <td>${isRoot
-                  ? `<div class="row-actions">
-                      <button type="button" class="btn btn-primary btn-xs" data-approve-creq="${esc(req.id)}">Approve &amp; Update</button>
-                      <button type="button" class="icon-btn danger" data-reject-creq="${esc(req.id)}">Reject</button>
-                    </div>`
-                  : '<span class="status-pill gold">Pending Root Admin Approval</span>'}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </section>`
-    : '';
 
   const rowsHtml = list => {
     if (!list.length) return emptyRow(6, 'No expiring contracts (2-month window) or Final Interview passed candidates');
@@ -2808,10 +2661,19 @@ function renderContractsView() {
       const wageBadge = row.salary > 0
         ? `<span class="status-pill ${rule.meetsUmk ? 'green' : 'gold'}">${rule.meetsUmk ? 'PKWT Only (1 Doc)' : 'PKWT + 4 PB (5 Docs)'}</span>`
         : `<span class="status-pill gray">Set Salary in PKWT</span>`;
+      const printedEntry = printedContractsMap.get(row.queueKey);
+      const syncInlineHtml = printedEntry
+        ? (printedEntry.syncedAt
+            ? '<span class="status-pill green contracts-synced-pill">Synced</span>'
+            : `<button type="button" class="btn btn-primary btn-xs contracts-sync-btn" data-sync-employee="${esc(row.queueKey)}">Sync to Employee Directory</button>`)
+        : '';
 
       return `<tr class="${row.priorityGroup === 1 ? 'contract-priority-row ' : ''}contract-row-clickable" data-contract-row="${esc(row.queueKey)}">
         <td>
-          <b>${esc(row.fullName)}</b>
+          <div class="contracts-name-row">
+            <b>${esc(row.fullName)}</b>
+            ${syncInlineHtml}
+          </div>
           <small class="table-subline">${esc(row.employeeNik || 'No NIK assigned')}</small>
         </td>
         <td>
@@ -2859,10 +2721,26 @@ function renderContractsView() {
         if (rec) openPkwtForRecord(rec);
       });
     });
+    $$('[data-sync-employee]').forEach(btn => {
+      btn.addEventListener('click', async event => {
+        event.stopPropagation();
+        const qKey = btn.dataset.syncEmployee;
+        btn.disabled = true;
+        btn.textContent = 'Syncing…';
+        try {
+          const entry = await syncPrintedContractToDirectory(qKey);
+          say(`${entry.fullName} synced to Employee Directory.`);
+          await renderContractsView();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Sync to Employee Directory';
+          say(err.message || 'Failed to sync contract to Employee Directory.');
+        }
+      });
+    });
   };
 
   content.innerHTML = header('Contracts', '', '<button class="btn btn-secondary" id="refresh-contracts">Refresh ↻</button>') +
-    approvalSectionHtml +
     `<section class="panel table-panel">
       <div class="table-toolbar contracts-toolbar">
         <div class="contracts-filter-tabs" role="tablist" aria-label="Filter contracts">
@@ -2892,37 +2770,6 @@ function renderContractsView() {
     </section>`;
 
   $('#refresh-contracts')?.addEventListener('click', () => loadView('contracts', true));
-  $$('[data-approve-creq]').forEach(btn => btn.addEventListener('click', async () => {
-    const id = btn.dataset.approveCreq;
-    btn.disabled = true;
-    btn.textContent = 'Approving…';
-    try {
-      await approveContractRequest(id);
-      say('Employee Directory updated and contract archived in history.');
-      renderContractsView();
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = 'Approve & Update';
-      say(err.message || 'Failed to approve update.');
-    }
-  }));
-  $$('[data-reject-creq]').forEach(btn => btn.addEventListener('click', async () => {
-    const id = btn.dataset.rejectCreq;
-    const ok = await openConfirmDialog({
-      title: 'Reject Contract Update',
-      message: 'Reject this post-print employee update request?',
-      confirmLabel: 'Reject',
-      danger: true
-    });
-    if (!ok) return;
-    try {
-      await rejectContractRequest(id);
-      say('Contract update request rejected.');
-      renderContractsView();
-    } catch (err) {
-      say(err.message || 'Failed to reject request.');
-    }
-  }));
   $$('[data-contract-tab]').forEach(tab => {
     tab.addEventListener('click', () => {
       currentFilter = tab.dataset.contractTab || 'all';
@@ -3244,6 +3091,29 @@ function renderSystemImport() {
         <div id="import-lead-error" class="form-error" role="alert"></div>
       </div>
     </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>DISC Assessment Import</h3>
+        <span class="status-pill blue">XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${DISC_IMPORT_HEADERS.slice(0, 8).map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+          <span class="import-schema-chip">… Q24_P / Q24_K (${DISC_IMPORT_HEADERS.length} cols)</span>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-disc-xlsx">Download XLSX Template ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-disc-csv">Download CSV Template ↓</button>
+        </div>
+        <div class="import-drop-row">
+          <input id="import-disc-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-disc-submit" disabled>Import DISC Results</button>
+        </div>
+        <div id="import-disc-preview" class="upload-preview-box hidden"></div>
+        <div id="import-disc-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
   </div>`;
 
   $('#dl-cand-xlsx').addEventListener('click', () =>
@@ -3257,6 +3127,12 @@ function renderSystemImport() {
   );
   $('#dl-lead-csv').addEventListener('click', () =>
     downloadCsvFile(LEAD_IMPORT_HEADERS, LEAD_IMPORT_SAMPLE_ROW, 'Template_Lead_Register.csv')
+  );
+  $('#dl-disc-xlsx').addEventListener('click', () =>
+    downloadSpreadsheetTemplateXlsx(DISC_IMPORT_HEADERS, DISC_IMPORT_SAMPLE_ROW, 'DISC Assessment', 'Template_DISC_Assessment.xlsx')
+  );
+  $('#dl-disc-csv').addEventListener('click', () =>
+    downloadCsvFile(DISC_IMPORT_HEADERS, DISC_IMPORT_SAMPLE_ROW, 'Template_DISC_Assessment.csv')
   );
 
   let parsedCandidates = [];
@@ -3394,6 +3270,2083 @@ function renderSystemImport() {
     } finally {
       leadSubmit.disabled = true;
       leadSubmit.textContent = 'Import Leads';
+    }
+  });
+
+  let parsedDiscRows = [];
+  const discFile = $('#import-disc-file');
+  const discSubmit = $('#import-disc-submit');
+  const discPreview = $('#import-disc-preview');
+  const discError = $('#import-disc-error');
+
+  discFile.addEventListener('change', async () => {
+    parsedDiscRows = [];
+    discSubmit.disabled = true;
+    discError.textContent = '';
+    discPreview.classList.add('hidden');
+    const file = discFile.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readSpreadsheetFileObjects(file);
+      const { rows, errors } = parseDiscImportRows(raw);
+      if (errors.length) discError.textContent = errors.slice(0, 3).join(' ');
+      if (!rows.length) {
+        if (!discError.textContent) discError.textContent = 'No valid DISC assessment rows found.';
+        return;
+      }
+      parsedDiscRows = rows;
+      discSubmit.disabled = false;
+      discPreview.classList.remove('hidden');
+      discPreview.innerHTML = `<b>${rows.length} DISC row(s) ready</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => {
+        const matched = applicants.find(a => String(a.nik || '').replace(/\D/g, '') === r.nik);
+        return `<div>• <b>${esc(matched?.full_name || r.full_name || r.nik)}</b> (${esc(r.nik)}) — Dominant ${esc(r.result?.hurufDominan || '-')} ${matched ? '<span class="status-pill green">Matched</span>' : '<span class="status-pill gold">NIK not found</span>'}</div>`;
+      }).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
+    } catch (err) {
+      discError.textContent = err.message || 'Failed to parse DISC file.';
+    }
+  });
+
+  discSubmit.addEventListener('click', async () => {
+    if (!parsedDiscRows.length) return;
+    discSubmit.disabled = true;
+    discSubmit.textContent = 'Importing…';
+    discError.textContent = '';
+    try {
+      const appByNik = new Map();
+      applicants.forEach(a => {
+        const digits = String(a.nik || '').replace(/\D/g, '');
+        if (digits && !appByNik.has(digits)) appByNik.set(digits, a);
+      });
+
+      const unmatched = [];
+      const matchedPairs = [];
+      const nowIso = new Date().toISOString();
+
+      parsedDiscRows.forEach(row => {
+        const matchedApp = appByNik.get(row.nik);
+        if (!matchedApp) {
+          unmatched.push(row.nik);
+          return;
+        }
+        matchedPairs.push({ row, app: matchedApp });
+      });
+
+      if (unmatched.length) {
+        discError.textContent = `Unmatched NIK (${unmatched.length}): ${unmatched.slice(0, 4).join(', ')}${unmatched.length > 4 ? '…' : ''}`;
+      }
+      if (!matchedPairs.length) {
+        throw new Error('None of the uploaded NIKs match existing candidates in Candidate List.');
+      }
+
+      if (isDemoMode || !supabase) {
+        const pairByAppId = new Map(matchedPairs.map(p => [p.app.id, p.row]));
+        applicants = applicants.map(a => {
+          const imported = pairByAppId.get(a.id);
+          if (!imported) return a;
+          return {
+            ...a,
+            stage: a.stage === 'application_submitted' ? 'disc_completed' : a.stage,
+            disc_submissions: [{
+              id: `disc-imp-${Date.now()}`,
+              applicant_id: a.id,
+              answers: imported.answers,
+              completed_at: nowIso
+            }]
+          };
+        });
+      } else {
+        const upsertRows = matchedPairs.map(({ row, app }) => ({
+          applicant_id: app.id,
+          answers: row.answers,
+          completed_at: nowIso
+        }));
+        for (let i = 0; i < upsertRows.length; i += 100) {
+          const batch = upsertRows.slice(i, i + 100);
+          const { error } = await supabase.from('disc_submissions').upsert(batch, { onConflict: 'applicant_id' });
+          if (error) throw error;
+        }
+        const promoteIds = matchedPairs
+          .map(p => p.app)
+          .filter(a => a.stage === 'application_submitted')
+          .map(a => a.id);
+        if (promoteIds.length) {
+          await supabase.from('applicants')
+            .update({ stage: 'disc_completed', updated_at: nowIso })
+            .in('id', promoteIds);
+        }
+        invalidateDataCache();
+        await fetchAndCacheFreshSnapshot();
+      }
+
+      const importedCount = matchedPairs.length;
+      parsedDiscRows = [];
+      discFile.value = '';
+      discPreview.classList.add('hidden');
+      say(`Imported ${importedCount} DISC assessment(s)${unmatched.length ? ` (${unmatched.length} unmatched NIK skipped)` : ''}.`);
+    } catch (err) {
+      discError.textContent = err.message || 'Failed to import DISC assessment results.';
+    } finally {
+      discSubmit.disabled = true;
+      discSubmit.textContent = 'Import DISC Results';
+    }
+  });
+}
+
+/* ============================================================================
+ * SYSTEM SETTINGS -> RECRUITMENT SETTINGS (/apply & /form Configuration)
+ * ============================================================================ */
+let recruitActiveTab = 'overview';
+let recruitVacancies = [];
+let recruitApplySchema = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
+let recruitFormSchema = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
+let recruitDraftApply = null;
+let recruitDraftForm = null;
+let recruitActiveFormSecTab = 'personal';
+let recruitSourceFilter = '';
+let recruitSearchQuery = '';
+let recruitEditingVacancyId = null;
+let recruitDraftVacancy = null;
+let recruitPickerCityFilter = 'All';
+let recruitPickerSearch = '';
+let recruitConfigLoaded = false;
+
+const RECRUIT_Q_TYPE_LABELS = {
+  dropdown: 'Dropdown (Choices + Score)',
+  radio: 'Radio Choice (Single + Score)',
+  checkbox: 'Checkbox (Multi-Select + Score)',
+  text: 'Short Text',
+  textarea: 'Long Text (Paragraph)',
+  number: 'Number'
+};
+const RECRUIT_APPLY_TYPE_LABELS = {
+  system_position: 'Position Dropdown (/apply)',
+  system_source: 'Information Source Dropdown',
+  system_location: 'City / Regency & District',
+  tel: 'Phone / WhatsApp',
+  dropdown: 'Dropdown (Select)',
+  radio: 'Radio Buttons',
+  checkbox: 'Multiple Checkboxes',
+  text: 'Short Text',
+  textarea: 'Long Text (Paragraph)',
+  number: 'Number',
+  date: 'Date'
+};
+const RECRUIT_FORM_TYPE_LABELS = {
+  system_form_position: 'Position Dropdown (/form)',
+  system_form_source: 'Information Source Dropdown',
+  system_region_province: 'Region · Province (Candidate Mobile Lookup)',
+  system_region_regency: 'Region · City / Regency (Candidate Mobile Lookup)',
+  system_region_district: 'Region · District (Candidate Mobile Lookup)',
+  system_region_village: 'Region · Village (Candidate Mobile Lookup)',
+  system_domicile: 'Domicile Toggle & Address',
+  system_siblings_repeater: 'Siblings List (Dynamic)',
+  system_spouse_group: 'Spouse Group (When Married)',
+  system_children_repeater: 'Children List (Dynamic)',
+  system_education_repeater: 'Education Level & History',
+  system_languages_repeater: 'Foreign Languages List (Dynamic)',
+  system_work_repeater: 'Work Experience List (Dynamic)',
+  currency: 'IDR Currency Amount',
+  email: 'Email',
+  tel: 'Phone / WhatsApp',
+  dropdown: 'Dropdown (Select)',
+  select: 'Dropdown (Select)',
+  radio: 'Radio Choice',
+  checkbox: 'Checkbox (Multi)',
+  text: 'Short Text',
+  textarea: 'Long Text (Paragraph)',
+  number: 'Number',
+  date: 'Date'
+};
+const RECRUIT_FORM_CHOICE_TYPES = new Set(['select', 'radio', 'checkbox']);
+const RECRUIT_FORM_GROUP_SYSTEM_TYPES = new Set([
+  'system_siblings_repeater',
+  'system_spouse_group',
+  'system_children_repeater',
+  'system_languages_repeater',
+  'system_work_repeater',
+  'system_domicile'
+]);
+const RECRUIT_FORM_NO_PH_TYPES = new Set([
+  'radio', 'checkbox', 'date', 'select',
+  'system_form_position', 'system_form_source',
+  'system_region_province', 'system_region_regency', 'system_region_district', 'system_region_village',
+  'system_domicile', 'system_siblings_repeater', 'system_spouse_group',
+  'system_children_repeater', 'system_education_repeater', 'system_languages_repeater', 'system_work_repeater'
+]);
+const RECRUIT_STEP_GROUP_TITLES = [
+  { step: 0, title: 'Step 1 · Identity' },
+  { step: 1, title: 'Step 2 · Family & Education' },
+  { step: 2, title: 'Step 3 · Skills & Work History' },
+  { step: 3, title: 'Step 4 · Additional Information' }
+];
+const RECRUIT_FORM_FIELD_TYPE_OPTIONS = [
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text (Paragraph)' },
+  { value: 'number', label: 'Number' },
+  { value: 'date', label: 'Date' },
+  { value: 'select', label: 'Dropdown (Select)' },
+  { value: 'radio', label: 'Radio Choice' },
+  { value: 'checkbox', label: 'Checkbox (Multi)' },
+  { value: 'currency', label: 'IDR Currency' },
+  { value: 'tel', label: 'Phone / WhatsApp' },
+  { value: 'email', label: 'Email' }
+];
+const RECRUIT_APPLY_FIELD_TYPE_OPTIONS = [
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text (Paragraph)' },
+  { value: 'number', label: 'Number' },
+  { value: 'date', label: 'Date' },
+  { value: 'dropdown', label: 'Dropdown (Select)' },
+  { value: 'radio', label: 'Radio Choice' },
+  { value: 'checkbox', label: 'Checkbox (Multi)' },
+  { value: 'tel', label: 'Phone / WhatsApp' }
+];
+
+async function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.append(area);
+  area.select();
+  document.execCommand('copy');
+  area.remove();
+}
+
+function readDemoRecruitmentStore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEMO_RECRUITMENT_SETTINGS_KEY) || 'null');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDemoRecruitmentStore(patch) {
+  const prev = readDemoRecruitmentStore();
+  try {
+    localStorage.setItem(DEMO_RECRUITMENT_SETTINGS_KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch {}
+}
+
+function getRecruitApplySources() {
+  const srcField = recruitApplySchema.fields.find(f => f.id === 'infoSource');
+  return Array.isArray(srcField?.options) && srcField.options.length
+    ? srcField.options
+    : [...APPLY_INFO_SOURCES];
+}
+
+async function loadRecruitmentConfig(force = false) {
+  if (recruitConfigLoaded && !force) return;
+  if (isDemoMode || !supabase) {
+    const stored = readDemoRecruitmentStore();
+    recruitVacancies = normalizeVacancyList(Array.isArray(stored.job_vacancies_config) && stored.job_vacancies_config.length ? stored.job_vacancies_config : DEFAULT_VACANCIES);
+    recruitApplySchema = normalizeApplySchema(stored.apply_form_schema || DEFAULT_APPLY_SCHEMA);
+    const demoForm = stored.stage2_form_schema || (Array.isArray(stored.application_positions) && stored.application_positions.length
+      ? { ...structuredClone(DEFAULT_STAGE2_SCHEMA), positions: stored.application_positions }
+      : DEFAULT_STAGE2_SCHEMA);
+    recruitFormSchema = normalizeStage2Schema(demoForm);
+    recruitDraftApply = structuredClone(recruitApplySchema);
+    recruitDraftForm = structuredClone(recruitFormSchema);
+    recruitConfigLoaded = true;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('portal_settings')
+    .select('key,value')
+    .in('key', ['job_vacancies_config', 'apply_form_schema', 'stage2_form_schema', 'application_positions']);
+  if (error) throw error;
+
+  const settingsMap = Object.fromEntries((data || []).map(row => [row.key, row.value]));
+  const sbVacancies = Array.isArray(settingsMap.job_vacancies_config) ? settingsMap.job_vacancies_config : [];
+  recruitVacancies = normalizeVacancyList(sbVacancies.length ? sbVacancies : DEFAULT_VACANCIES);
+  recruitApplySchema = normalizeApplySchema(settingsMap.apply_form_schema || DEFAULT_APPLY_SCHEMA);
+
+  const sbFormPositions = Array.isArray(settingsMap.application_positions)
+    ? settingsMap.application_positions.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim())
+    : [];
+  let baseForm = settingsMap.stage2_form_schema || structuredClone(DEFAULT_STAGE2_SCHEMA);
+  if (!settingsMap.stage2_form_schema && sbFormPositions.length) {
+    baseForm = { ...baseForm, positions: sbFormPositions };
+  }
+  recruitFormSchema = normalizeStage2Schema(baseForm);
+  recruitDraftApply = structuredClone(recruitApplySchema);
+  recruitDraftForm = structuredClone(recruitFormSchema);
+  recruitConfigLoaded = true;
+}
+
+async function persistRecruitVacancies(nextList) {
+  const clean = normalizeVacancyList(nextList);
+  if (!clean.length) throw new Error('At least one vacancy is required.');
+  if (!extractActivePositionNames(clean).length) {
+    throw new Error('At least one vacancy must stay Active for /apply.');
+  }
+  if (isDemoMode || !supabase) {
+    writeDemoRecruitmentStore({ job_vacancies_config: clean });
+  } else {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('portal_settings').upsert(
+      [{ key: 'job_vacancies_config', value: clean, updated_at: now }],
+      { onConflict: 'key' }
+    );
+    if (error) throw error;
+  }
+  recruitVacancies = clean;
+}
+
+async function persistRecruitApplySchema(nextSchema) {
+  const clean = normalizeApplySchema(nextSchema);
+  if (isDemoMode || !supabase) {
+    writeDemoRecruitmentStore({ apply_form_schema: clean });
+  } else {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('portal_settings').upsert(
+      [{ key: 'apply_form_schema', value: clean, updated_at: now }],
+      { onConflict: 'key' }
+    );
+    if (error) throw error;
+  }
+  recruitApplySchema = clean;
+  recruitDraftApply = structuredClone(clean);
+}
+
+async function persistRecruitFormSchema(nextSchema) {
+  const clean = normalizeStage2Schema(nextSchema);
+  if (!clean.positions.length) throw new Error('At least one /form position option is required.');
+  if (!clean.infoSources.length) throw new Error('At least one /form information source is required.');
+
+  if (isDemoMode || !supabase) {
+    writeDemoRecruitmentStore({
+      application_positions: clean.positions,
+      stage2_form_schema: clean
+    });
+  } else {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('portal_settings').upsert(
+      [
+        { key: 'application_positions', value: clean.positions, updated_at: now },
+        { key: 'stage2_form_schema', value: clean, updated_at: now }
+      ],
+      { onConflict: 'key' }
+    );
+    if (error) throw error;
+  }
+  recruitFormSchema = clean;
+  recruitDraftForm = structuredClone(clean);
+  stage2PositionsCache = [...clean.positions];
+}
+
+async function renderRecruitmentSettings(force = false) {
+  await loadRecruitmentConfig(force);
+  const tabs = [
+    { id: 'overview', label: 'Overview & Share Links' },
+    { id: 'apply-fields', label: '/apply Fields & Order' },
+    { id: 'apply-scoring', label: '/apply Vacancies & Scoring' },
+    { id: 'form-fields', label: '/form Fields & Sections' }
+  ];
+
+  content.innerHTML = `
+    <div class="recruit-settings-tabs" role="tablist" aria-label="Recruitment Settings Sections">
+      ${tabs.map(t => `<button type="button" class="recruit-tab-btn ${recruitActiveTab === t.id ? 'is-active' : ''}" data-recruit-tab="${esc(t.id)}" role="tab" aria-selected="${recruitActiveTab === t.id}">${esc(t.label)}</button>`).join('')}
+    </div>
+    <div id="recruit-tab-host"></div>
+  `;
+
+  $$('[data-recruit-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      recruitActiveTab = btn.dataset.recruitTab || 'overview';
+      $$('[data-recruit-tab]').forEach(t => {
+        const active = t.dataset.recruitTab === recruitActiveTab;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      renderRecruitTabBody();
+    });
+  });
+
+  renderRecruitTabBody();
+}
+
+function renderRecruitTabBody() {
+  const host = $('#recruit-tab-host');
+  if (!host) return;
+  if (recruitActiveTab === 'apply-fields') renderRecruitApplyFieldsTab(host);
+  else if (recruitActiveTab === 'apply-scoring') renderRecruitVacanciesTab(host);
+  else if (recruitActiveTab === 'form-fields') renderRecruitFormFieldsTab(host);
+  else renderRecruitOverviewTab(host);
+}
+
+function renderRecruitOverviewTab(host) {
+  const activeVacancies = recruitVacancies.filter(v => v.active !== false);
+  const applyVisibleCount = recruitApplySchema.fields.filter(f => f.enabled !== false).length;
+  const applyCustomCount = recruitApplySchema.fields.filter(f => !f.system).length;
+  const formPosCount = recruitFormSchema.positions.length;
+  const formSourceCount = recruitFormSchema.infoSources.length;
+
+  let formFieldCount = 0;
+  let enabledSectionCount = 0;
+  for (const meta of STAGE2_SECTION_META) {
+    const sec = recruitFormSchema.sections?.[meta.id];
+    const isEnabled = MANDATORY_STAGE2_SECTIONS.has(meta.id) || sec?.enabled !== false;
+    if (!isEnabled) continue;
+    enabledSectionCount += 1;
+    formFieldCount += (sec?.fields || []).filter(f => f.enabled !== false).length;
+  }
+
+  const applyBaseUrl = new URL('apply/', location.href).href;
+  const formBaseUrl = new URL('form/', location.href).href;
+  const sources = getRecruitApplySources();
+  const formSources = recruitFormSchema.infoSources.length ? recruitFormSchema.infoSources : [...FORM_INFO_SOURCES];
+  const formShareUrl = buildShareUrl(formBaseUrl, '', recruitSourceFilter && formSources.includes(recruitSourceFilter) ? recruitSourceFilter : '');
+
+  const shareRows = activeVacancies.length
+    ? activeVacancies.map(v => {
+        const shareUrl = buildShareUrl(applyBaseUrl, v.name, recruitSourceFilter);
+        return `
+          <div class="funnel-share-row">
+            <div>
+              <div class="funnel-share-title">${esc(v.name)}</div>
+              <div class="funnel-share-meta">${v.primaryDistricts.length} primary districts (${v.primaryLocationScore} pts) · ${v.questions.length} question(s)</div>
+            </div>
+            <div class="funnel-share-url">${esc(shareUrl)}</div>
+            <div class="funnel-share-btns">
+              <button type="button" class="btn btn-secondary btn-xs" data-dash-copy="${esc(shareUrl)}">Copy</button>
+              <a class="btn btn-primary btn-xs" href="${esc(shareUrl)}" target="_blank" rel="noopener noreferrer">Open</a>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="funnel-share-row"><span class="loc-empty">No active /apply vacancies configured yet.</span></div>';
+
+  host.innerHTML = `
+    <div class="vacancy-toolbar">
+      <div class="vacancy-toolbar-meta">
+        <h2>Recruitment Portal Overview</h2>
+        <span class="vacancy-count">Synced to /apply and /form candidate portals</span>
+      </div>
+      <div class="vacancy-toolbar-actions">
+        <button type="button" class="btn btn-secondary" id="recruit-goto-scoring">Manage Vacancies &amp; Scoring</button>
+        <button type="button" class="btn btn-primary" id="recruit-goto-form">Configure /form Sections</button>
+      </div>
+    </div>
+
+    <section class="funnel-kpi-grid" aria-label="Portal Configuration Summary">
+      <div class="funnel-kpi-card">
+        <span class="funnel-kpi-label">Active Vacancies (/apply)</span>
+        <b class="funnel-kpi-value">${activeVacancies.length}</b>
+        <span class="funnel-kpi-meta">${recruitVacancies.length} total configured</span>
+      </div>
+      <div class="funnel-kpi-card">
+        <span class="funnel-kpi-label">Visible Fields (/apply)</span>
+        <b class="funnel-kpi-value">${applyVisibleCount}</b>
+        <span class="funnel-kpi-meta">${applyCustomCount} custom field(s)</span>
+      </div>
+      <div class="funnel-kpi-card">
+        <span class="funnel-kpi-label">Positions (/form)</span>
+        <b class="funnel-kpi-value">${formPosCount}</b>
+        <span class="funnel-kpi-meta">${formSourceCount} info source(s)</span>
+      </div>
+      <div class="funnel-kpi-card">
+        <span class="funnel-kpi-label">Visible Fields (/form)</span>
+        <b class="funnel-kpi-value">${formFieldCount}</b>
+        <span class="funnel-kpi-meta">${enabledSectionCount} of ${STAGE2_SECTION_META.length} active sections</span>
+      </div>
+    </section>
+
+    <section class="funnel-dash-section">
+      <div class="funnel-dash-head">
+        <h3>Shareable Candidate Portal Links (/apply &amp; /form)</h3>
+        <div class="funnel-dash-head-actions">
+          <select id="dash-source-filter" class="select" aria-label="Filter Share Link Source">
+            <option value="">All Sources (No Tag)</option>
+            ${sources.map(src => `<option value="${esc(src)}" ${recruitSourceFilter === src ? 'selected' : ''}>Source: ${esc(src)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-secondary btn-xs" id="dash-copy-form-link">Copy /form Link</button>
+          <a class="btn btn-secondary btn-xs" href="${esc(formShareUrl)}" target="_blank" rel="noopener noreferrer">Open /form</a>
+        </div>
+      </div>
+      <div class="funnel-share-list">${shareRows}</div>
+    </section>
+  `;
+
+  $('#recruit-goto-scoring', host)?.addEventListener('click', () => {
+    recruitActiveTab = 'apply-scoring';
+    renderRecruitmentSettings(false);
+  });
+  $('#recruit-goto-form', host)?.addEventListener('click', () => {
+    recruitActiveTab = 'form-fields';
+    renderRecruitmentSettings(false);
+  });
+  $('#dash-source-filter', host)?.addEventListener('change', event => {
+    recruitSourceFilter = event.target.value;
+    renderRecruitOverviewTab(host);
+  });
+  $('#dash-copy-form-link', host)?.addEventListener('click', async () => {
+    try {
+      await copyToClipboard(formShareUrl);
+      say('/form link copied to clipboard.');
+    } catch {
+      say('Failed to copy link.');
+    }
+  });
+  $$('[data-dash-copy]', host).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await copyToClipboard(btn.dataset.dashCopy || '');
+        say('Vacancy share link copied.');
+      } catch {
+        say('Failed to copy link.');
+      }
+    });
+  });
+}
+
+function syncRecruitApplyDraftFromDom(host) {
+  if (!recruitDraftApply) return;
+  $$('.schema-field-card[data-apply-idx]', host).forEach(card => {
+    const idx = Number(card.dataset.applyIdx);
+    const field = recruitDraftApply.fields[idx];
+    if (!field) return;
+
+    const labelEl = card.querySelector('[data-apply-prop="label"]');
+    if (labelEl) field.label = labelEl.value.trim() || field.label;
+
+    const phEl = card.querySelector('[data-apply-prop="placeholder"]');
+    if (phEl) field.placeholder = phEl.value.trim();
+
+    if (!field.system) {
+      const typeEl = card.querySelector('[data-apply-prop="type"]');
+      if (typeEl && APPLY_CUSTOM_FIELD_TYPES.some(t => t.value === typeEl.value)) {
+        field.type = typeEl.value;
+      }
+    }
+
+    const reqEl = card.querySelector('[data-apply-prop="required"]');
+    const enEl = card.querySelector('[data-apply-prop="enabled"]');
+    if (MANDATORY_APPLY_IDS.has(field.id)) {
+      field.enabled = true;
+      field.required = true;
+    } else {
+      if (enEl) field.enabled = enEl.checked;
+      if (reqEl) field.required = field.enabled ? reqEl.checked : false;
+    }
+
+    const optInputs = card.querySelectorAll('.schema-option-input');
+    if (optInputs.length || field.type === 'system_source' || ['dropdown', 'radio', 'checkbox'].includes(field.type)) {
+      field.options = [...optInputs].map(el => el.value.trim()).filter(Boolean);
+    }
+  });
+}
+
+function renderRecruitApplyFieldsTab(host) {
+  if (!recruitDraftApply) recruitDraftApply = structuredClone(recruitApplySchema);
+  const list = recruitDraftApply.fields;
+
+  const cardsHtml = list.map((field, idx) => {
+    const mandatory = MANDATORY_APPLY_IDS.has(field.id);
+    const hasOptions = field.type === 'system_source' || ['dropdown', 'radio', 'checkbox'].includes(field.type);
+    const typeControl = field.system
+      ? `<input class="input" value="${esc(RECRUIT_APPLY_TYPE_LABELS[field.type] || field.type)}" disabled>`
+      : `<select class="select" data-apply-prop="type">
+          ${RECRUIT_APPLY_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}" ${field.type === t.value ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+        </select>`;
+    const showPlaceholder = field.type !== 'system_location' && field.type !== 'checkbox' && field.type !== 'radio';
+
+    return `
+      <div class="schema-field-card" data-apply-idx="${idx}">
+        <div class="schema-field-top">
+          <div class="schema-field-ident">
+            <span class="schema-order-num">#${idx + 1}</span>
+            <span class="schema-field-badge ${field.system ? '' : 'custom'}">${field.system ? 'System' : 'Custom'}</span>
+            ${mandatory ? '<span class="schema-field-lock">Core Required</span>' : ''}
+          </div>
+          <div class="schema-row-btns">
+            <button type="button" class="icon-btn" data-apply-move="-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+            <button type="button" class="icon-btn" data-apply-move="1" ${idx === list.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+            ${field.system ? '' : '<button type="button" class="icon-btn danger-action" data-apply-del>Delete</button>'}
+          </div>
+        </div>
+
+        <div class="schema-field-grid ${showPlaceholder ? '' : 'schema-field-grid-3'}">
+          <div class="v-field">
+            <label>Field Label</label>
+            <input class="input" data-apply-prop="label" value="${esc(field.label)}">
+          </div>
+          ${showPlaceholder ? `
+            <div class="v-field">
+              <label>Placeholder</label>
+              <input class="input" data-apply-prop="placeholder" value="${esc(field.placeholder || '')}">
+            </div>
+          ` : ''}
+          <div class="v-field">
+            <label>Input Type</label>
+            ${typeControl}
+          </div>
+          <div class="schema-check-group">
+            <label><input type="checkbox" data-apply-prop="required" ${field.required !== false ? 'checked' : ''} ${mandatory ? 'disabled' : ''}> Required</label>
+            <label><input type="checkbox" data-apply-prop="enabled" ${field.enabled !== false ? 'checked' : ''} ${mandatory ? 'disabled' : ''}> Visible</label>
+          </div>
+        </div>
+
+        ${hasOptions ? `
+          <div class="schema-options-wrap">
+            <span class="schema-options-label">Choice Options (${esc(field.label)})</span>
+            <div class="schema-option-chips">
+              ${(field.options || []).map((opt, optIdx) => `
+                <div class="schema-option-item">
+                  <input class="input schema-option-input" value="${esc(opt)}" placeholder="Option label">
+                  <button type="button" class="q-option-del" data-apply-del-opt="${optIdx}" aria-label="Remove option">&times;</button>
+                </div>
+              `).join('')}
+            </div>
+            <div class="schema-add-bar" style="margin-bottom:0">
+              <input class="input" data-apply-new-opt placeholder="Add new option...">
+              <button type="button" class="btn btn-secondary btn-xs" data-apply-add-opt>+ Add</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="vacancy-toolbar">
+      <div class="vacancy-toolbar-meta">
+        <h2>/apply Step 1 Field Order &amp; Schema</h2>
+        <span class="vacancy-count">${list.filter(f => f.enabled !== false).length} visible · ${list.length} total</span>
+      </div>
+      <div class="vacancy-toolbar-actions">
+        <button type="button" class="btn btn-secondary" id="apply-reset-btn">Reset Default</button>
+        <button type="button" class="btn btn-primary" id="apply-save-btn">Save Changes</button>
+      </div>
+    </div>
+
+    <div class="schema-panel">
+      <div class="schema-field-list">${cardsHtml}</div>
+    </div>
+
+    <div class="schema-panel">
+      <div class="schema-panel-head">
+        <h3>Add Custom Field to Step 1 (/apply)</h3>
+      </div>
+      <div class="schema-add-bar" style="margin-bottom:0">
+        <input id="apply-new-label" class="input" placeholder="Example: Age / Previous factory employer?">
+        <select id="apply-new-type" class="select" style="max-width:220px">
+          ${RECRUIT_APPLY_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn-secondary" id="apply-add-custom">+ Add Field</button>
+      </div>
+    </div>
+  `;
+
+  $$('[data-apply-prop="required"]', host).forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        const card = cb.closest('[data-apply-idx]');
+        const enCb = card?.querySelector('[data-apply-prop="enabled"]');
+        if (enCb && !enCb.checked) enCb.checked = true;
+      }
+    });
+  });
+
+  $$('[data-apply-prop="enabled"]', host).forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (!cb.checked) {
+        const card = cb.closest('[data-apply-idx]');
+        const reqCb = card?.querySelector('[data-apply-prop="required"]');
+        if (reqCb) reqCb.checked = false;
+      }
+    });
+  });
+
+  $$('[data-apply-move]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitApplyDraftFromDom(host);
+      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
+      const target = idx + Number(btn.dataset.applyMove);
+      if (target < 0 || target >= recruitDraftApply.fields.length) return;
+      [recruitDraftApply.fields[idx], recruitDraftApply.fields[target]] = [recruitDraftApply.fields[target], recruitDraftApply.fields[idx]];
+      renderRecruitApplyFieldsTab(host);
+    });
+  });
+
+  $$('[data-apply-del]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitApplyDraftFromDom(host);
+      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
+      recruitDraftApply.fields.splice(idx, 1);
+      renderRecruitApplyFieldsTab(host);
+    });
+  });
+
+  $$('.schema-field-card[data-apply-idx] [data-apply-prop="type"]', host).forEach(sel => {
+    sel.addEventListener('change', () => {
+      syncRecruitApplyDraftFromDom(host);
+      const idx = Number(sel.closest('[data-apply-idx]').dataset.applyIdx);
+      const field = recruitDraftApply.fields[idx];
+      if (field && ['dropdown', 'radio', 'checkbox'].includes(field.type) && !field.options?.length) {
+        field.options = ['Option 1', 'Option 2'];
+      }
+      renderRecruitApplyFieldsTab(host);
+    });
+  });
+
+  $$('[data-apply-add-opt]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitApplyDraftFromDom(host);
+      const card = btn.closest('[data-apply-idx]');
+      const idx = Number(card.dataset.applyIdx);
+      const input = card.querySelector('[data-apply-new-opt]');
+      const val = input.value.trim();
+      if (!val) return;
+      if (!recruitDraftApply.fields[idx].options.includes(val)) {
+        recruitDraftApply.fields[idx].options.push(val);
+      }
+      renderRecruitApplyFieldsTab(host);
+    });
+  });
+
+  $$('[data-apply-new-opt]', host).forEach(input => {
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      input.closest('.schema-add-bar')?.querySelector('[data-apply-add-opt]')?.click();
+    });
+  });
+
+  $$('[data-apply-del-opt]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitApplyDraftFromDom(host);
+      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
+      const optIdx = Number(btn.dataset.applyDelOpt);
+      recruitDraftApply.fields[idx].options.splice(optIdx, 1);
+      renderRecruitApplyFieldsTab(host);
+    });
+  });
+
+  $('#apply-add-custom', host).addEventListener('click', () => {
+    syncRecruitApplyDraftFromDom(host);
+    const labelInput = $('#apply-new-label', host);
+    const typeSelect = $('#apply-new-type', host);
+    const label = labelInput.value.trim();
+    if (!label) {
+      say('Enter a field label first.');
+      labelInput.focus();
+      return;
+    }
+    const type = typeSelect.value;
+    recruitDraftApply.fields.push({
+      id: `custom_${Date.now().toString(36)}`,
+      label,
+      type,
+      required: false,
+      enabled: true,
+      system: false,
+      placeholder: '',
+      options: ['dropdown', 'radio', 'checkbox'].includes(type) ? ['Option 1', 'Option 2'] : []
+    });
+    renderRecruitApplyFieldsTab(host);
+  });
+
+  $('#apply-new-label', host).addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#apply-add-custom', host).click();
+  });
+
+  $('#apply-reset-btn', host).addEventListener('click', () => {
+    recruitDraftApply = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
+    renderRecruitApplyFieldsTab(host);
+    say('Reset /apply draft to defaults (unsaved).');
+  });
+
+  $('#apply-save-btn', host).addEventListener('click', async () => {
+    syncRecruitApplyDraftFromDom(host);
+    const btn = $('#apply-save-btn', host);
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await persistRecruitApplySchema(recruitDraftApply);
+      renderRecruitApplyFieldsTab(host);
+      say('/apply field configuration saved.');
+    } catch (error) {
+      say(error.message || 'Failed to save /apply field configuration.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+    }
+  });
+}
+
+function renderRecruitQuestionSummary(questions = []) {
+  if (!questions.length) {
+    return '<span class="loc-empty">No position-specific questions</span>';
+  }
+  return `<ul class="q-summary-list">${questions.map((q, idx) => {
+    const typeLabel = RECRUIT_Q_TYPE_LABELS[q.type] || q.type;
+    let scoreText = '';
+    if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
+      const opts = (q.options || []).map(o => `${esc(o.label)} (${o.score})`).join(' · ');
+      scoreText = opts || 'No options configured';
+    } else {
+      scoreText = q.filledScore ? `Filled score: ${q.filledScore} pts` : 'Unscored text response';
+    }
+    return `
+      <li class="q-summary-item">
+        <div class="q-summary-head">
+          <b>${idx + 1}. ${esc(q.label)}</b>
+          <span class="q-summary-type">${esc(typeLabel)}</span>
+        </div>
+        <div class="q-summary-scores">${scoreText}</div>
+      </li>
+    `;
+  }).join('')}</ul>`;
+}
+
+function renderRecruitDistrictSummary(list = []) {
+  if (!list.length) return '<span class="loc-empty">None specified</span>';
+  return `<div class="loc-district-list">${list.map(d => esc(d)).join(', ')}</div>`;
+}
+
+function renderRecruitVacanciesTab(host) {
+  const term = recruitSearchQuery.trim().toLowerCase();
+  const filtered = term
+    ? recruitVacancies.filter(v =>
+        v.name.toLowerCase().includes(term) ||
+        v.primaryDistricts.some(d => d.toLowerCase().includes(term)) ||
+        v.questions.some(q => q.label.toLowerCase().includes(term))
+      )
+    : recruitVacancies;
+  const activeCount = recruitVacancies.filter(v => v.active !== false).length;
+
+  const desktopRows = filtered.length
+    ? filtered.map(v => {
+        const maxScore = calculateVacancyMaxScore(v);
+        return `
+        <tr data-vacancy-id="${esc(v.id)}">
+          <td class="col-pos">
+            <div class="pos-name-title">${esc(v.name)}</div>
+            <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts</div>
+          </td>
+          <td class="col-loc">${renderRecruitDistrictSummary(v.primaryDistricts)}</td>
+          <td class="col-score">${esc(v.primaryLocationScore)}</td>
+          <td class="col-other">${esc(v.otherLocationLabel)}</td>
+          <td class="col-score">${esc(v.otherLocationScore)}</td>
+          <td class="col-questions">${renderRecruitQuestionSummary(v.questions)}</td>
+          <td class="col-actions">
+            <div class="vacancy-row-actions">
+              <button type="button" class="icon-btn primary-action" data-vac-action="edit" data-id="${esc(v.id)}">Edit</button>
+              <button type="button" class="icon-btn" data-vac-action="share" data-id="${esc(v.id)}">Share</button>
+              <button type="button" class="icon-btn" data-vac-action="duplicate" data-id="${esc(v.id)}">Duplicate</button>
+              <button type="button" class="icon-btn danger" data-vac-action="delete" data-id="${esc(v.id)}">Delete</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="table-empty">No vacancies match your search.</td></tr>';
+
+  host.innerHTML = `
+    <div class="vacancy-toolbar">
+      <div class="vacancy-toolbar-meta">
+        <h2>/apply Vacancies &amp; Scoring Rules</h2>
+        <span class="vacancy-count">${recruitVacancies.length} position(s) · ${activeCount} active · Recommended threshold ≥ ${RECOMMENDATION_THRESHOLD} pts</span>
+      </div>
+      <div class="vacancy-toolbar-actions">
+        <input id="vacancy-search" class="vacancy-search" type="search" value="${esc(recruitSearchQuery)}" placeholder="Search position, district, question…">
+        <button id="add-vacancy-btn" class="btn btn-primary" type="button">+ Add Vacancy</button>
+      </div>
+    </div>
+
+    <section class="panel table-panel">
+      <div class="table-wrap">
+        <table class="data-table vacancy-table">
+          <thead>
+            <tr>
+              <th>POSITION</th>
+              <th>PRIMARY DISTRICTS</th>
+              <th>SCORE</th>
+              <th>OTHER LOCATION</th>
+              <th>SCORE</th>
+              <th>QUESTIONS &amp; WEIGHTS</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>${desktopRows}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+
+  $('#vacancy-search', host).addEventListener('input', event => {
+    recruitSearchQuery = event.target.value;
+    renderRecruitVacanciesTab(host);
+    const input = $('#vacancy-search', host);
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  });
+
+  $('#add-vacancy-btn', host).addEventListener('click', () => openRecruitVacancyModal(null, host));
+
+  $$('[data-vac-action]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const action = btn.dataset.vacAction;
+      if (action === 'edit') openRecruitVacancyModal(id, host);
+      else if (action === 'duplicate') duplicateRecruitVacancy(id, host);
+      else if (action === 'delete') deleteRecruitVacancy(id, host);
+      else if (action === 'share') openRecruitShareModal(id);
+    });
+  });
+}
+
+async function duplicateRecruitVacancy(id, host) {
+  const source = recruitVacancies.find(v => v.id === id);
+  if (!source) return;
+  let copyName = `${source.name} (Copy)`;
+  let suffix = 2;
+  while (recruitVacancies.some(v => v.name.toLowerCase() === copyName.toLowerCase())) {
+    copyName = `${source.name} (Copy ${suffix++})`;
+  }
+  const copy = normalizeVacancy({
+    ...structuredClone(source),
+    id: '',
+    name: copyName
+  }, recruitVacancies.length);
+
+  try {
+    await persistRecruitVacancies([...recruitVacancies, copy]);
+    renderRecruitVacanciesTab(host);
+    say(`Vacancy "${copy.name}" created.`);
+  } catch (error) {
+    say(error.message || 'Failed to duplicate vacancy.');
+  }
+}
+
+async function deleteRecruitVacancy(id, host) {
+  const target = recruitVacancies.find(v => v.id === id);
+  if (!target) return;
+  if (recruitVacancies.length <= 1) {
+    say('At least one vacancy must remain configured.');
+    return;
+  }
+  const remaining = recruitVacancies.filter(v => v.id !== id);
+  if (!extractActivePositionNames(remaining).length) {
+    say('Cannot delete the only Active vacancy.');
+    return;
+  }
+  const ok = await openConfirmDialog({
+    title: 'Delete Vacancy',
+    message: `Remove "${target.name}" from /apply vacancy list and scoring rules?`,
+    confirmLabel: 'Delete',
+    danger: true
+  });
+  if (!ok) return;
+  try {
+    await persistRecruitVacancies(remaining);
+    renderRecruitVacanciesTab(host);
+    say(`Vacancy "${target.name}" deleted.`);
+  } catch (error) {
+    say(error.message || 'Failed to delete vacancy.');
+  }
+}
+
+function getRecruitCatalogDistrictTokens() {
+  const tokens = [];
+  for (const [city, districts] of Object.entries(DISTRICTS_BY_CITY)) {
+    for (const d of districts) {
+      tokens.push({ city, district: d, token: normalizeDistrictToken(city, d) });
+    }
+  }
+  return tokens;
+}
+
+function renderRecruitDistrictPicker(modal) {
+  if (!modal || !recruitDraftVacancy) return;
+  const listEl = $('#district-picker-list', modal);
+  const search = recruitPickerSearch.trim().toLowerCase();
+
+  const items = getRecruitCatalogDistrictTokens().filter(item => {
+    if (recruitPickerCityFilter !== 'All' && item.city !== recruitPickerCityFilter) return false;
+    if (search && !item.token.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  listEl.innerHTML = items.length
+    ? items.map(item => {
+        const checked = recruitDraftVacancy.primaryDistricts.includes(item.token);
+        return `
+          <label class="district-chip">
+            <input type="checkbox" value="${esc(item.token)}" ${checked ? 'checked' : ''}>
+            <span>${esc(item.token)}</span>
+          </label>
+        `;
+      }).join('')
+    : '<div class="loc-empty" style="grid-column:1/-1;padding:8px">No matching districts found.</div>';
+
+  $$('input[type="checkbox"]', listEl).forEach(cb => {
+    cb.addEventListener('change', () => {
+      const token = cb.value;
+      if (cb.checked) {
+        if (!recruitDraftVacancy.primaryDistricts.includes(token)) {
+          recruitDraftVacancy.primaryDistricts.push(token);
+        }
+      } else {
+        recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== token);
+      }
+      renderRecruitSelectedDistrictTags(modal);
+    });
+  });
+
+  renderRecruitSelectedDistrictTags(modal);
+}
+
+function renderRecruitSelectedDistrictTags(modal) {
+  if (!modal || !recruitDraftVacancy) return;
+  const tagsEl = $('#district-selected-tags', modal);
+  tagsEl.innerHTML = recruitDraftVacancy.primaryDistricts.map(token => `
+    <span class="district-selected-tag">
+      ${esc(token)}
+      <button type="button" data-remove-district="${esc(token)}" aria-label="Remove ${esc(token)}">&times;</button>
+    </span>
+  `).join('');
+
+  $$('[data-remove-district]', tagsEl).forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = btn.dataset.removeDistrict;
+      recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== val);
+      renderRecruitDistrictPicker(modal);
+    });
+  });
+}
+
+function syncRecruitQuestionsFromDom(modal) {
+  if (!modal || !recruitDraftVacancy) return;
+  const items = $$('.q-builder-item', modal);
+  if (!items.length) return;
+
+  recruitDraftVacancy.questions = items.map((itemEl, idx) => {
+    const existing = recruitDraftVacancy.questions[idx] || {};
+    const label = itemEl.querySelector('[data-q-prop="label"]')?.value || '';
+    const type = itemEl.querySelector('[data-q-prop="type"]')?.value || 'text';
+    const required = itemEl.querySelector('[data-q-prop="required"]')?.checked !== false;
+    const placeholder = itemEl.querySelector('[data-q-prop="placeholder"]')?.value || '';
+    const filledScore = Number(itemEl.querySelector('[data-q-prop="filledScore"]')?.value || 0);
+    const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(type);
+
+    const options = hasOptions
+      ? $$('.q-option-row', itemEl).map(row => ({
+          label: row.querySelector('[data-opt-label]')?.value || '',
+          score: Number(row.querySelector('[data-opt-score]')?.value || 0)
+        }))
+      : [];
+
+    return {
+      id: existing.id || `q_${idx + 1}`,
+      label,
+      type,
+      required,
+      placeholder,
+      filledScore: Number.isFinite(filledScore) ? filledScore : 0,
+      options
+    };
+  });
+}
+
+function renderRecruitQuestionBuilder(modal) {
+  if (!modal || !recruitDraftVacancy) return;
+  const bodyEl = $('.vacancy-modal-body', modal);
+  const prevScrollTop = bodyEl ? bodyEl.scrollTop : 0;
+  const host = $('#q-builder-list', modal);
+
+  if (!recruitDraftVacancy.questions.length) {
+    host.innerHTML = '<div class="loc-empty" style="padding:10px 0">No questions added. Click "+ Add Question" to add position-specific screening prompts.</div>';
+    return;
+  }
+
+  host.innerHTML = recruitDraftVacancy.questions.map((q, idx) => {
+    const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(q.type);
+    const optionRows = (q.options || []).map((opt, optIdx) => `
+      <div class="q-option-row" data-opt-index="${optIdx}">
+        <input class="input" data-opt-label value="${esc(opt.label)}" placeholder="Answer ${String.fromCharCode(65 + (optIdx % 26))}">
+        <input class="input" data-opt-score type="number" step="0.5" value="${esc(opt.score)}" placeholder="Score">
+        <button type="button" class="q-option-del" data-del-opt="${optIdx}" aria-label="Remove choice">&times;</button>
+      </div>
+    `).join('');
+
+    return `
+      <div class="q-builder-item" data-q-index="${idx}">
+        <div class="q-builder-top">
+          <span class="q-builder-index">Question ${idx + 1}</span>
+          <div class="q-builder-controls">
+            <button type="button" class="icon-btn" data-move-q="-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+            <button type="button" class="icon-btn" data-move-q="1" ${idx === recruitDraftVacancy.questions.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+            <button type="button" class="icon-btn danger-action" data-del-q>Delete</button>
+          </div>
+        </div>
+
+        <div class="q-builder-fields">
+          <div class="v-field">
+            <label>Question Prompt (Shown to Indonesian Candidate)</label>
+            <input class="input" data-q-prop="label" value="${esc(q.label)}" placeholder="Example: Pernah nyepray apa?">
+          </div>
+          <div class="v-field">
+            <label>Input Type</label>
+            <select class="select" data-q-prop="type">
+              ${QUESTION_TYPES.map(t => `<option value="${esc(t.value)}" ${q.type === t.value ? 'selected' : ''}>${esc(RECRUIT_Q_TYPE_LABELS[t.value] || t.label)}</option>`).join('')}
+            </select>
+          </div>
+          <label class="v-check-inline">
+            <input type="checkbox" data-q-prop="required" ${q.required !== false ? 'checked' : ''}>
+            <span>Required</span>
+          </label>
+        </div>
+
+        ${hasOptions ? `
+          <div class="q-options-box">
+            <div class="q-options-head"><span>Choice Label</span><span>Score</span><span></span></div>
+            ${optionRows}
+            <button type="button" class="btn btn-secondary btn-xs" data-add-opt style="margin-top:4px">+ Add Option</button>
+          </div>
+        ` : `
+          <div class="q-nonoption-box">
+            <div class="v-field">
+              <label>Input Placeholder</label>
+              <input class="input" data-q-prop="placeholder" value="${esc(q.placeholder || '')}" placeholder="Example: Factory name or task description">
+            </div>
+            <div class="v-field">
+              <label>Score If Filled</label>
+              <input class="input" data-q-prop="filledScore" type="number" step="0.5" value="${esc(q.filledScore ?? 0)}">
+            </div>
+          </div>
+        `}
+      </div>
+    `;
+  }).join('');
+
+  $$('.q-builder-item', host).forEach((itemEl, idx) => {
+    itemEl.querySelector('[data-q-prop="type"]').addEventListener('change', event => {
+      syncRecruitQuestionsFromDom(modal);
+      const nextType = event.target.value;
+      const target = recruitDraftVacancy.questions[idx];
+      target.type = nextType;
+      if (['dropdown', 'radio', 'checkbox'].includes(nextType) && !target.options.length) {
+        target.options = [
+          { label: 'Option A', score: 10 },
+          { label: 'Option B', score: 5 }
+        ];
+      }
+      renderRecruitQuestionBuilder(modal);
+    });
+
+    itemEl.querySelector('[data-del-q]').addEventListener('click', () => {
+      syncRecruitQuestionsFromDom(modal);
+      recruitDraftVacancy.questions.splice(idx, 1);
+      renderRecruitQuestionBuilder(modal);
+    });
+
+    itemEl.querySelectorAll('[data-move-q]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncRecruitQuestionsFromDom(modal);
+        const swapIdx = idx + Number(btn.dataset.moveQ);
+        if (swapIdx < 0 || swapIdx >= recruitDraftVacancy.questions.length) return;
+        [recruitDraftVacancy.questions[idx], recruitDraftVacancy.questions[swapIdx]] = [
+          recruitDraftVacancy.questions[swapIdx],
+          recruitDraftVacancy.questions[idx]
+        ];
+        renderRecruitQuestionBuilder(modal);
+      });
+    });
+
+    itemEl.querySelector('[data-add-opt]')?.addEventListener('click', () => {
+      syncRecruitQuestionsFromDom(modal);
+      const target = recruitDraftVacancy.questions[idx];
+      const nextLetter = String.fromCharCode(65 + ((target.options?.length || 0) % 26));
+      target.options.push({ label: `Option ${nextLetter}`, score: 0 });
+      renderRecruitQuestionBuilder(modal);
+    });
+
+    itemEl.querySelectorAll('[data-del-opt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncRecruitQuestionsFromDom(modal);
+        recruitDraftVacancy.questions[idx].options.splice(Number(btn.dataset.delOpt), 1);
+        renderRecruitQuestionBuilder(modal);
+      });
+    });
+  });
+
+  if (bodyEl) bodyEl.scrollTop = prevScrollTop;
+}
+
+function openRecruitVacancyModal(id, host) {
+  let backdrop = $('#vacancy-modal');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'vacancy-modal';
+    backdrop.className = 'modal-backdrop hidden';
+    backdrop.innerHTML = `
+      <div class="employee-modal-card vacancy-modal-card" role="dialog" aria-modal="true" aria-labelledby="v-modal-title">
+        <div class="employee-modal-head">
+          <div>
+            <small id="v-modal-kicker">VACANCY &amp; SCORING (/apply)</small>
+            <h2 id="v-modal-title">Edit Vacancy</h2>
+          </div>
+          <button type="button" class="modal-close" id="v-modal-close" aria-label="Close">&times;</button>
+        </div>
+
+        <form id="v-modal-form" class="vacancy-modal-form" novalidate>
+          <div class="vacancy-modal-body">
+            <div class="v-form-section">
+              <div class="v-form-section-head"><h3>Position Information</h3></div>
+              <div class="v-grid-eq">
+                <div class="v-field">
+                  <label for="v-name">Position Name</label>
+                  <input id="v-name" class="input" required placeholder="Example: Spray, QC Staff, Warehouse Admin">
+                </div>
+                <div class="v-field">
+                  <label>Visibility on /apply</label>
+                  <label class="v-check-inline">
+                    <input id="v-active" type="checkbox" checked>
+                    <span>Active (Show in candidate vacancy dropdown)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="v-form-section">
+              <div class="v-form-section-head"><h3>Primary Location Criteria &amp; Scoring</h3></div>
+              <div class="v-grid-2" style="margin-bottom:14px">
+                <div class="v-field">
+                  <label>Primary Districts (Static Catalog Picker)</label>
+                  <div class="district-picker-controls">
+                    <select id="district-city-filter" class="select">
+                      <option value="All">All Cities / Regencies</option>
+                      ${Object.keys(DISTRICTS_BY_CITY).map(city => `<option value="${esc(city)}">${esc(city)}</option>`).join('')}
+                    </select>
+                    <input id="district-search" class="input" type="search" placeholder="Filter district…">
+                    <button type="button" class="btn btn-secondary btn-xs" id="district-clear-all">Clear</button>
+                  </div>
+                  <div id="district-picker-list" class="district-picker-list"></div>
+                  <div class="district-custom-row">
+                    <input id="district-custom-input" class="input" placeholder="Add custom district / area…">
+                    <button type="button" class="btn btn-secondary btn-xs" id="district-custom-add">Add</button>
+                  </div>
+                  <div id="district-selected-tags" class="district-selected-tags"></div>
+                </div>
+                <div class="v-field">
+                  <label for="v-primary-score">Primary Location Score</label>
+                  <input id="v-primary-score" class="input" type="number" step="0.5" value="10">
+                </div>
+              </div>
+
+              <div class="v-grid-2">
+                <div class="v-field">
+                  <label for="v-other-label">Other Location Label</label>
+                  <input id="v-other-label" class="input" value="Area selain lokasi utama">
+                </div>
+                <div class="v-field">
+                  <label for="v-other-score">Other Location Score</label>
+                  <input id="v-other-score" class="input" type="number" step="0.5" value="5">
+                </div>
+              </div>
+            </div>
+
+            <div class="v-form-section">
+              <div class="v-form-section-head">
+                <h3>Screening Questions &amp; Score Weights</h3>
+                <button type="button" class="btn btn-secondary btn-xs" id="add-question-btn">+ Add Question</button>
+              </div>
+              <div id="q-builder-list" class="q-builder-list"></div>
+            </div>
+          </div>
+
+          <div class="vacancy-modal-footer">
+            <div id="v-modal-error" class="form-error" role="alert"></div>
+            <div class="employee-modal-actions">
+              <button type="button" class="btn btn-secondary" id="v-modal-cancel">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="v-modal-save">Save Vacancy</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.append(backdrop);
+
+    const closeModal = () => {
+      backdrop.classList.add('hidden');
+      recruitEditingVacancyId = null;
+      recruitDraftVacancy = null;
+    };
+    $('#v-modal-close', backdrop).addEventListener('click', closeModal);
+    $('#v-modal-cancel', backdrop).addEventListener('click', closeModal);
+    bindSafeModalClose(backdrop, closeModal);
+
+    $('#district-city-filter', backdrop).addEventListener('change', event => {
+      recruitPickerCityFilter = event.target.value;
+      renderRecruitDistrictPicker(backdrop);
+    });
+    $('#district-search', backdrop).addEventListener('input', event => {
+      recruitPickerSearch = event.target.value;
+      renderRecruitDistrictPicker(backdrop);
+    });
+    $('#district-clear-all', backdrop).addEventListener('click', () => {
+      if (!recruitDraftVacancy) return;
+      recruitDraftVacancy.primaryDistricts = [];
+      renderRecruitDistrictPicker(backdrop);
+    });
+    $('#district-custom-add', backdrop).addEventListener('click', () => {
+      const input = $('#district-custom-input', backdrop);
+      const val = input.value.trim();
+      if (!val || !recruitDraftVacancy) return;
+      if (!recruitDraftVacancy.primaryDistricts.includes(val)) {
+        recruitDraftVacancy.primaryDistricts.push(val);
+      }
+      input.value = '';
+      renderRecruitDistrictPicker(backdrop);
+    });
+    $('#district-custom-input', backdrop).addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      $('#district-custom-add', backdrop).click();
+    });
+    $('#add-question-btn', backdrop).addEventListener('click', () => {
+      syncRecruitQuestionsFromDom(backdrop);
+      recruitDraftVacancy.questions.push({
+        id: `q_${Date.now().toString(36)}`,
+        label: '',
+        type: 'dropdown',
+        required: true,
+        placeholder: '',
+        filledScore: 0,
+        options: [
+          { label: 'Ya', score: 10 },
+          { label: 'Tidak', score: 0 }
+        ]
+      });
+      renderRecruitQuestionBuilder(backdrop);
+      $('#q-builder-list', backdrop).lastElementChild?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+
+  $('#v-modal-form', backdrop).onsubmit = async event => {
+    event.preventDefault();
+    const errorBox = $('#v-modal-error', backdrop);
+    errorBox.textContent = '';
+
+    syncRecruitQuestionsFromDom(backdrop);
+    recruitDraftVacancy.name = $('#v-name', backdrop).value.trim();
+    recruitDraftVacancy.active = $('#v-active', backdrop).checked;
+    recruitDraftVacancy.primaryLocationScore = Number($('#v-primary-score', backdrop).value || 0);
+    recruitDraftVacancy.otherLocationLabel = $('#v-other-label', backdrop).value.trim() || 'Area selain lokasi utama';
+    recruitDraftVacancy.otherLocationScore = Number($('#v-other-score', backdrop).value || 0);
+
+    if (!recruitDraftVacancy.name) {
+      errorBox.textContent = 'Position name is required.';
+      $('#v-name', backdrop).focus();
+      return;
+    }
+    const dup = recruitVacancies.find(
+      v => v.id !== recruitEditingVacancyId && v.name.toLowerCase() === recruitDraftVacancy.name.toLowerCase()
+    );
+    if (dup) {
+      errorBox.textContent = `Position "${recruitDraftVacancy.name}" already exists.`;
+      $('#v-name', backdrop).focus();
+      return;
+    }
+
+    for (let i = 0; i < recruitDraftVacancy.questions.length; i++) {
+      const q = recruitDraftVacancy.questions[i];
+      if (!q.label.trim()) {
+        errorBox.textContent = `Question #${i + 1} prompt cannot be empty.`;
+        return;
+      }
+      if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
+        q.options = (q.options || []).filter(opt => opt.label.trim());
+        if (!q.options.length) {
+          errorBox.textContent = `Question "${q.label}" requires at least 1 answer option.`;
+          return;
+        }
+      }
+    }
+
+    const normalized = normalizeVacancy(recruitDraftVacancy, recruitVacancies.length);
+    const nextList = recruitEditingVacancyId
+      ? recruitVacancies.map(v => (v.id === recruitEditingVacancyId ? normalized : v))
+      : [...recruitVacancies, normalized];
+
+    const saveBtn = $('#v-modal-save', backdrop);
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      await persistRecruitVacancies(nextList);
+      backdrop.classList.add('hidden');
+      recruitEditingVacancyId = null;
+      recruitDraftVacancy = null;
+      renderRecruitVacanciesTab(host);
+      say(`Vacancy "${normalized.name}" saved.`);
+    } catch (error) {
+      errorBox.textContent = error.message || 'Failed to save vacancy.';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Vacancy';
+    }
+  };
+
+  recruitEditingVacancyId = id;
+  recruitPickerCityFilter = 'All';
+  recruitPickerSearch = '';
+
+  const source = id ? recruitVacancies.find(v => v.id === id) : null;
+  recruitDraftVacancy = source
+    ? structuredClone(source)
+    : {
+        id: '',
+        name: '',
+        active: true,
+        primaryDistricts: ['Pasuruan - Purwosari', 'Pasuruan - Purwodadi', 'Pasuruan - Sukorejo', 'Pasuruan - Pandaan', 'Pasuruan - Prigen'],
+        primaryLocationScore: 20,
+        otherLocationLabel: 'Area selain lokasi utama',
+        otherLocationScore: 10,
+        questions: [
+          {
+            id: 'pengalaman',
+            label: 'Berapa lama pengalaman?',
+            type: 'dropdown',
+            required: true,
+            placeholder: '',
+            filledScore: 0,
+            options: [
+              { label: 'Lebih dari 6 bulan', score: 60 },
+              { label: 'Kurang dari 6 bulan', score: 20 }
+            ]
+          },
+          {
+            id: 'penjelasan',
+            label: 'Jelaskan pengalaman kerja yang relevan',
+            type: 'textarea',
+            required: true,
+            placeholder: 'Uraikan tugas, alat, atau keahlian yang dikuasai',
+            filledScore: 20,
+            options: []
+          }
+        ]
+      };
+
+  $('#v-modal-title', backdrop).textContent = source ? `Edit Vacancy: ${source.name}` : 'Add New Vacancy';
+  $('#v-name', backdrop).value = recruitDraftVacancy.name;
+  $('#v-active', backdrop).checked = recruitDraftVacancy.active !== false;
+  $('#v-primary-score', backdrop).value = recruitDraftVacancy.primaryLocationScore ?? 20;
+  $('#v-other-label', backdrop).value = recruitDraftVacancy.otherLocationLabel || 'Area selain lokasi utama';
+  $('#v-other-score', backdrop).value = recruitDraftVacancy.otherLocationScore ?? 10;
+  $('#district-city-filter', backdrop).value = 'All';
+  $('#district-search', backdrop).value = '';
+  $('#district-custom-input', backdrop).value = '';
+  $('#v-modal-error', backdrop).textContent = '';
+
+  renderRecruitDistrictPicker(backdrop);
+  renderRecruitQuestionBuilder(backdrop);
+
+  backdrop.classList.remove('hidden');
+  $('.vacancy-modal-body', backdrop).scrollTop = 0;
+  $('#v-name', backdrop).focus();
+}
+
+function openRecruitShareModal(id) {
+  const vacancy = recruitVacancies.find(v => v.id === id);
+  if (!vacancy) return;
+
+  let backdrop = $('#share-modal');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'share-modal';
+    backdrop.className = 'modal-backdrop hidden';
+    backdrop.innerHTML = `
+      <div class="employee-modal-card share-modal-card" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+        <div class="employee-modal-head">
+          <div>
+            <small>SHARE VACANCY LINK (/apply)</small>
+            <h2 id="share-modal-title">Vacancy Link</h2>
+          </div>
+          <button type="button" class="modal-close" id="share-modal-close" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="v-field" style="margin-top:14px">
+          <label for="share-source">Source Tag (Pre-selected for candidates)</label>
+          <select id="share-source" class="select"></select>
+        </div>
+
+        <div class="v-field" style="margin-top:14px">
+          <label>Shareable Portal URL</label>
+          <div id="share-url-preview" class="share-preview-box"></div>
+        </div>
+
+        <div class="share-actions-row">
+          <button type="button" class="btn btn-primary" id="share-copy-btn">Copy Link</button>
+          <a id="share-open-btn" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">Open Portal</a>
+        </div>
+      </div>
+    `;
+    document.body.append(backdrop);
+    const closeModal = () => backdrop.classList.add('hidden');
+    $('#share-modal-close', backdrop).addEventListener('click', closeModal);
+    bindSafeModalClose(backdrop, closeModal);
+  }
+
+  const baseApplyUrl = new URL('apply/', location.href).href;
+  const sourceSelect = $('#share-source', backdrop);
+  const sources = getRecruitApplySources();
+
+  sourceSelect.innerHTML = [
+    '<option value="">All Sources (No Tag)</option>',
+    ...sources.map(src => `<option value="${esc(src)}">${esc(src)}</option>`)
+  ].join('');
+  sourceSelect.value = '';
+  $('#share-modal-title', backdrop).textContent = `Share Vacancy: ${vacancy.name}`;
+
+  const updateUrl = () => {
+    const url = buildShareUrl(baseApplyUrl, vacancy.name, sourceSelect.value);
+    $('#share-url-preview', backdrop).textContent = url;
+    $('#share-open-btn', backdrop).href = url;
+  };
+  sourceSelect.onchange = updateUrl;
+  updateUrl();
+
+  $('#share-copy-btn', backdrop).onclick = async () => {
+    try {
+      await copyToClipboard($('#share-url-preview', backdrop).textContent);
+      say('Vacancy share link copied.');
+    } catch {
+      say('Failed to copy link.');
+    }
+  };
+
+  backdrop.classList.remove('hidden');
+}
+
+function syncRecruitFormDraftFromDom(host) {
+  if (!recruitDraftForm) return;
+  const posInputs = $$('.schema-pos-input[data-pos-list="positions"]', host);
+  if (posInputs.length) {
+    recruitDraftForm.positions = posInputs.map(el => el.value.trim()).filter(Boolean);
+  }
+  const srcInputs = $$('.schema-pos-input[data-pos-list="infoSources"]', host);
+  if (srcInputs.length) {
+    recruitDraftForm.infoSources = srcInputs.map(el => el.value.trim()).filter(Boolean);
+  }
+  const consentEl = $('#form-consent-text', host);
+  if (consentEl) {
+    recruitDraftForm.consentText = consentEl.value.trim() || DEFAULT_STAGE2_SCHEMA.consentText;
+  }
+
+  const secObj = recruitDraftForm.sections[recruitActiveFormSecTab];
+  if (secObj) {
+    const titleEl = $('#form-sec-title', host);
+    if (titleEl) secObj.title = titleEl.value.trim() || secObj.title;
+    const secEnabledEl = $('#form-sec-enabled', host);
+    if (secEnabledEl) {
+      secObj.enabled = MANDATORY_STAGE2_SECTIONS.has(recruitActiveFormSecTab) ? true : secEnabledEl.checked;
+    }
+
+    $$('.schema-field-card[data-f2-idx]', host).forEach(card => {
+      const idx = Number(card.dataset.f2Idx);
+      const field = secObj.fields[idx];
+      if (!field) return;
+
+      const labelEl = card.querySelector('[data-f2-prop="label"]');
+      if (labelEl) field.label = labelEl.value.trim() || field.label;
+
+      const phEl = card.querySelector('[data-f2-prop="placeholder"]');
+      if (phEl) field.placeholder = phEl.value.trim();
+
+      if (!field.system) {
+        const typeEl = card.querySelector('[data-f2-prop="type"]');
+        if (typeEl && FORM_CUSTOM_FIELD_TYPES.some(t => t.value === typeEl.value)) {
+          field.type = typeEl.value;
+        }
+      }
+
+      const reqEl = card.querySelector('[data-f2-prop="required"]');
+      const enEl = card.querySelector('[data-f2-prop="enabled"]');
+      const wideEl = card.querySelector('[data-f2-prop="wide"]');
+
+      if (MANDATORY_STAGE2_FIELDS.has(field.name)) {
+        field.enabled = true;
+        field.required = true;
+      } else {
+        if (enEl) field.enabled = enEl.checked;
+        if (reqEl) {
+          field.required = (RECRUIT_FORM_GROUP_SYSTEM_TYPES.has(field.type) || !field.enabled) ? false : reqEl.checked;
+        }
+      }
+      if (wideEl) field.wide = wideEl.checked;
+
+      const optInputs = card.querySelectorAll('.schema-f2-option-input');
+      if (optInputs.length || RECRUIT_FORM_CHOICE_TYPES.has(field.type)) {
+        field.options = [...optInputs].map(el => el.value.trim()).filter(Boolean);
+      }
+    });
+  }
+}
+
+function renderRecruitFormFieldsTab(host) {
+  if (!recruitDraftForm) recruitDraftForm = structuredClone(recruitFormSchema);
+  if (!STAGE2_SECTION_META.some(m => m.id === recruitActiveFormSecTab)) {
+    recruitActiveFormSecTab = 'personal';
+  }
+  const activeMeta = STAGE2_SECTION_META.find(m => m.id === recruitActiveFormSecTab);
+  const currentSec = recruitDraftForm.sections[recruitActiveFormSecTab] || { title: activeMeta.defaultTitle, enabled: true, fields: [] };
+  const mandatorySec = MANDATORY_STAGE2_SECTIONS.has(recruitActiveFormSecTab);
+
+  const positionsRows = recruitDraftForm.positions.map((pos, idx) => `
+    <div class="schema-pos-row">
+      <span class="schema-order-num">${idx + 1}</span>
+      <input class="input schema-pos-input" data-pos-list="positions" value="${esc(pos)}" placeholder="Position name">
+      <div class="schema-row-btns">
+        <button type="button" class="icon-btn" data-pos-move="positions:${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+        <button type="button" class="icon-btn" data-pos-move="positions:${idx}:1" ${idx === recruitDraftForm.positions.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+        <button type="button" class="icon-btn danger-action" data-pos-del="positions:${idx}" ${recruitDraftForm.positions.length <= 1 ? 'disabled' : ''}>&times;</button>
+      </div>
+    </div>
+  `).join('');
+
+  const sourceRows = recruitDraftForm.infoSources.map((src, idx) => `
+    <div class="schema-pos-row">
+      <span class="schema-order-num">${idx + 1}</span>
+      <input class="input schema-pos-input" data-pos-list="infoSources" value="${esc(src)}" placeholder="Information source">
+      <div class="schema-row-btns">
+        <button type="button" class="icon-btn" data-pos-move="infoSources:${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+        <button type="button" class="icon-btn" data-pos-move="infoSources:${idx}:1" ${idx === recruitDraftForm.infoSources.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+        <button type="button" class="icon-btn danger-action" data-pos-del="infoSources:${idx}" ${recruitDraftForm.infoSources.length <= 1 ? 'disabled' : ''}>&times;</button>
+      </div>
+    </div>
+  `).join('');
+
+  const stepOrderHtml = RECRUIT_STEP_GROUP_TITLES.map(({ step, title }) => {
+    const order = recruitDraftForm.stepSectionOrder?.[step] || STEP_SECTION_DEFAULTS[step] || [];
+    const items = order.map((secId, idx) => {
+      const meta = STAGE2_SECTION_META.find(m => m.id === secId);
+      const sec = recruitDraftForm.sections?.[secId];
+      const secOn = MANDATORY_STAGE2_SECTIONS.has(secId) || sec?.enabled !== false;
+      return `
+        <div class="schema-pos-row">
+          <span class="schema-order-num">${idx + 1}</span>
+          <span class="schema-step-sec-label">
+            <b>${esc(meta?.code || '')} · ${esc(sec?.title || meta?.defaultTitle || secId)}</b>
+            ${secOn ? '' : '<span class="schema-sec-off-tag">Hidden</span>'}
+          </span>
+          <div class="schema-row-btns">
+            <button type="button" class="icon-btn" data-step-move-sec="${step}:${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+            <button type="button" class="icon-btn" data-step-move-sec="${step}:${idx}:1" ${idx === order.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="schema-step-order-card">
+        <div class="schema-step-order-title">${esc(title)}</div>
+        <div class="schema-pos-list">${items}</div>
+      </div>
+    `;
+  }).join('');
+
+  const sectionTabsHtml = STAGE2_SECTION_META.map(meta => {
+    const sec = recruitDraftForm.sections?.[meta.id];
+    const secOn = MANDATORY_STAGE2_SECTIONS.has(meta.id) || sec?.enabled !== false;
+    const isActive = recruitActiveFormSecTab === meta.id;
+    return `
+      <button type="button" class="schema-section-tab ${isActive ? 'active' : ''} ${secOn ? '' : 'is-off'}" data-f2-tab="${esc(meta.id)}">
+        ${esc(meta.code)} · ${esc(sec?.title || meta.defaultTitle)}
+      </button>
+    `;
+  }).join('');
+
+  const fieldsHtml = currentSec.fields.map((field, idx) => {
+    const mandatoryField = MANDATORY_STAGE2_FIELDS.has(field.name);
+    const isGroupSystem = RECRUIT_FORM_GROUP_SYSTEM_TYPES.has(field.type);
+    const hasOptions = RECRUIT_FORM_CHOICE_TYPES.has(field.type);
+    const hidePlaceholder = RECRUIT_FORM_NO_PH_TYPES.has(field.type);
+    const typeControl = field.system
+      ? `<input class="input" value="${esc(RECRUIT_FORM_TYPE_LABELS[field.type] || field.type)}" disabled>`
+      : `<select class="select" data-f2-prop="type">
+          ${RECRUIT_FORM_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}" ${field.type === t.value ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+        </select>`;
+
+    return `
+      <div class="schema-field-card" data-f2-idx="${idx}">
+        <div class="schema-field-top">
+          <div class="schema-field-ident">
+            <span class="schema-order-num">#${idx + 1}</span>
+            <span class="schema-field-badge ${field.system ? '' : 'custom'}">${field.system ? 'System' : 'Custom'}</span>
+            ${mandatoryField ? '<span class="schema-field-lock">Core Required</span>' : ''}
+          </div>
+          <div class="schema-row-btns">
+            <button type="button" class="icon-btn" data-f2-move="-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+            <button type="button" class="icon-btn" data-f2-move="1" ${idx === currentSec.fields.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+            ${field.system ? '' : '<button type="button" class="icon-btn danger-action" data-f2-del>Delete</button>'}
+          </div>
+        </div>
+
+        <div class="schema-field-grid ${hidePlaceholder ? 'schema-field-grid-3' : ''}">
+          <div class="v-field">
+            <label>Field Label (Shown to Indonesian Candidate)</label>
+            <input class="input" data-f2-prop="label" value="${esc(field.label)}">
+          </div>
+          ${hidePlaceholder ? '' : `
+            <div class="v-field">
+              <label>Placeholder</label>
+              <input class="input" data-f2-prop="placeholder" value="${esc(field.placeholder || '')}">
+            </div>
+          `}
+          <div class="v-field">
+            <label>Input Type</label>
+            ${typeControl}
+          </div>
+          <div class="schema-check-group">
+            ${isGroupSystem ? '' : `<label><input type="checkbox" data-f2-prop="required" ${field.required === true ? 'checked' : ''} ${mandatoryField ? 'disabled' : ''}> Required</label>`}
+            <label><input type="checkbox" data-f2-prop="enabled" ${field.enabled !== false ? 'checked' : ''} ${mandatoryField ? 'disabled' : ''}> Visible</label>
+            ${isGroupSystem ? '' : `<label><input type="checkbox" data-f2-prop="wide" ${field.wide === true ? 'checked' : ''}> Full Width</label>`}
+          </div>
+        </div>
+
+        ${hasOptions ? `
+          <div class="schema-options-wrap">
+            <span class="schema-options-label">Choice Options (${esc(field.label)})</span>
+            <div class="schema-option-chips">
+              ${(field.options || []).map((opt, optIdx) => `
+                <div class="schema-option-item">
+                  <input class="input schema-f2-option-input" value="${esc(opt)}" placeholder="Option label">
+                  <button type="button" class="q-option-del" data-f2-del-opt="${optIdx}" aria-label="Remove option">&times;</button>
+                </div>
+              `).join('')}
+            </div>
+            <div class="schema-add-bar" style="margin-bottom:0">
+              <input class="input" data-f2-new-opt placeholder="Add new option...">
+              <button type="button" class="btn btn-secondary btn-xs" data-f2-add-opt>+ Add</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="vacancy-toolbar">
+      <div class="vacancy-toolbar-meta">
+        <h2>/form Stage 2 Sections &amp; Field Builder</h2>
+        <span class="vacancy-count">${recruitDraftForm.positions.length} position(s) · ${STAGE2_SECTION_META.length} sections</span>
+      </div>
+      <div class="vacancy-toolbar-actions">
+        <button type="button" class="btn btn-secondary" id="form-reset-btn">Reset Default</button>
+        <button type="button" class="btn btn-primary" id="form-save-btn">Save Changes</button>
+      </div>
+    </div>
+
+    <div class="schema-grid-2">
+      <div class="schema-panel">
+        <div class="schema-panel-head">
+          <h3>/form Position Dropdown</h3>
+          <span class="schema-panel-meta">${recruitDraftForm.positions.length} options</span>
+        </div>
+        <div class="schema-add-bar">
+          <input id="new-form-pos-input" class="input" placeholder="Add new /form position...">
+          <button type="button" class="btn btn-secondary btn-xs" id="add-form-pos-btn">+ Add</button>
+        </div>
+        <div class="schema-pos-list">${positionsRows}</div>
+      </div>
+
+      <div class="schema-panel">
+        <div class="schema-panel-head">
+          <h3>/form Information Sources</h3>
+          <span class="schema-panel-meta">${recruitDraftForm.infoSources.length} sources</span>
+        </div>
+        <div class="schema-add-bar">
+          <input id="new-form-src-input" class="input" placeholder="Add new information source...">
+          <button type="button" class="btn btn-secondary btn-xs" id="add-form-src-btn">+ Add</button>
+        </div>
+        <div class="schema-pos-list">${sourceRows}</div>
+      </div>
+    </div>
+
+    <div class="schema-panel">
+      <div class="schema-panel-head">
+        <h3>Step Section Ordering &amp; Final Statement</h3>
+        <span class="schema-panel-meta">Steps with no visible sections are automatically skipped on /form</span>
+      </div>
+      <div class="schema-step-order-grid">${stepOrderHtml}</div>
+      <div class="v-field" style="margin-top:14px">
+        <label for="form-consent-text">Candidate Declaration Statement (Final Step · J)</label>
+        <input id="form-consent-text" class="input" value="${esc(recruitDraftForm.consentText || DEFAULT_STAGE2_SCHEMA.consentText)}">
+      </div>
+    </div>
+
+    <div class="schema-panel">
+      <div class="schema-panel-head">
+        <h3>Sections &amp; Field Ordering (/form)</h3>
+        <span class="schema-panel-meta">${esc(activeMeta.stepLabel)} · ${currentSec.fields.filter(f => f.enabled !== false).length} visible</span>
+      </div>
+
+      <div class="schema-section-tabs" role="tablist">${sectionTabsHtml}</div>
+
+      <div class="schema-section-settings">
+        <div class="v-field">
+          <label for="form-sec-title">Section Heading (${esc(activeMeta.code)})</label>
+          <input id="form-sec-title" class="input" value="${esc(currentSec.title || activeMeta.defaultTitle)}">
+        </div>
+        <label class="schema-section-toggle">
+          <input type="checkbox" id="form-sec-enabled" ${mandatorySec || currentSec.enabled !== false ? 'checked' : ''} ${mandatorySec ? 'disabled' : ''}>
+          <span>${mandatorySec ? 'Core Required Section' : 'Show This Section on /form'}</span>
+        </label>
+      </div>
+
+      <div class="schema-field-list">${fieldsHtml}</div>
+
+      <div class="schema-options-wrap" style="margin-top:14px">
+        <span class="schema-options-label">Add Custom Field to Section ${esc(activeMeta.code)} · ${esc(currentSec.title)}</span>
+        <div class="schema-add-bar" style="margin-bottom:0">
+          <input id="form-new-field-label" class="input" placeholder="Example: Nomor SIM / Pengalaman Organisasi">
+          <select id="form-new-field-type" class="select" style="max-width:210px">
+            ${RECRUIT_FORM_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-secondary" id="form-add-custom-field">+ Add Field</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  $('#add-form-pos-btn', host).addEventListener('click', () => {
+    syncRecruitFormDraftFromDom(host);
+    const input = $('#new-form-pos-input', host);
+    const name = input.value.trim();
+    if (!name) return;
+    if (recruitDraftForm.positions.some(p => p.toLowerCase() === name.toLowerCase())) {
+      say(`Position "${name}" already exists.`);
+      return;
+    }
+    recruitDraftForm.positions.push(name);
+    renderRecruitFormFieldsTab(host);
+  });
+
+  $('#new-form-pos-input', host).addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#add-form-pos-btn', host).click();
+  });
+
+  $('#add-form-src-btn', host).addEventListener('click', () => {
+    syncRecruitFormDraftFromDom(host);
+    const input = $('#new-form-src-input', host);
+    const name = input.value.trim();
+    if (!name) return;
+    if (recruitDraftForm.infoSources.some(s => s.toLowerCase() === name.toLowerCase())) {
+      say(`Source "${name}" already exists.`);
+      return;
+    }
+    recruitDraftForm.infoSources.push(name);
+    renderRecruitFormFieldsTab(host);
+  });
+
+  $('#new-form-src-input', host).addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#add-form-src-btn', host).click();
+  });
+
+  $$('[data-pos-move]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const [listName, rawIdx, rawDelta] = btn.dataset.posMove.split(':');
+      const idx = Number(rawIdx);
+      const target = idx + Number(rawDelta);
+      const arr = recruitDraftForm[listName];
+      if (!Array.isArray(arr) || target < 0 || target >= arr.length) return;
+      [arr[idx], arr[target]] = [arr[target], arr[idx]];
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-pos-del]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const [listName, rawIdx] = btn.dataset.posDel.split(':');
+      const idx = Number(rawIdx);
+      const arr = recruitDraftForm[listName];
+      if (!Array.isArray(arr) || arr.length <= 1) return;
+      arr.splice(idx, 1);
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-step-move-sec]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const [rawStep, rawIdx, rawDelta] = btn.dataset.stepMoveSec.split(':');
+      const step = Number(rawStep);
+      const idx = Number(rawIdx);
+      const target = idx + Number(rawDelta);
+      const order = recruitDraftForm.stepSectionOrder?.[step];
+      if (!Array.isArray(order) || target < 0 || target >= order.length) return;
+      [order[idx], order[target]] = [order[target], order[idx]];
+      if (step === 0) recruitDraftForm.step0SectionOrder = [...order];
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-f2-tab]', host).forEach(tab => {
+    tab.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      recruitActiveFormSecTab = tab.dataset.f2Tab;
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $('#form-sec-enabled', host)?.addEventListener('change', () => {
+    syncRecruitFormDraftFromDom(host);
+    renderRecruitFormFieldsTab(host);
+  });
+
+  $$('[data-f2-prop="required"]', host).forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        const card = cb.closest('[data-f2-idx]');
+        const enCb = card?.querySelector('[data-f2-prop="enabled"]');
+        if (enCb && !enCb.checked) enCb.checked = true;
+      }
+    });
+  });
+
+  $$('[data-f2-prop="enabled"]', host).forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (!cb.checked) {
+        const card = cb.closest('[data-f2-idx]');
+        const reqCb = card?.querySelector('[data-f2-prop="required"]');
+        if (reqCb) reqCb.checked = false;
+      }
+    });
+  });
+
+  $$('[data-f2-move]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
+      const target = idx + Number(btn.dataset.f2Move);
+      const list = recruitDraftForm.sections[recruitActiveFormSecTab].fields;
+      if (target < 0 || target >= list.length) return;
+      [list[idx], list[target]] = [list[target], list[idx]];
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-f2-del]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
+      recruitDraftForm.sections[recruitActiveFormSecTab].fields.splice(idx, 1);
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('.schema-field-card[data-f2-idx] [data-f2-prop="type"]', host).forEach(sel => {
+    sel.addEventListener('change', () => {
+      syncRecruitFormDraftFromDom(host);
+      const idx = Number(sel.closest('[data-f2-idx]').dataset.f2Idx);
+      const field = recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx];
+      if (field && RECRUIT_FORM_CHOICE_TYPES.has(field.type) && !field.options?.length) {
+        field.options = ['Option 1', 'Option 2'];
+      }
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-f2-add-opt]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const card = btn.closest('[data-f2-idx]');
+      const idx = Number(card.dataset.f2Idx);
+      const input = card.querySelector('[data-f2-new-opt]');
+      const val = input.value.trim();
+      if (!val) return;
+      const field = recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx];
+      if (!Array.isArray(field.options)) field.options = [];
+      if (!field.options.includes(val)) field.options.push(val);
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $$('[data-f2-new-opt]', host).forEach(input => {
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      input.closest('.schema-add-bar')?.querySelector('[data-f2-add-opt]')?.click();
+    });
+  });
+
+  $$('[data-f2-del-opt]', host).forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncRecruitFormDraftFromDom(host);
+      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
+      const optIdx = Number(btn.dataset.f2DelOpt);
+      recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx].options.splice(optIdx, 1);
+      renderRecruitFormFieldsTab(host);
+    });
+  });
+
+  $('#form-add-custom-field', host).addEventListener('click', () => {
+    syncRecruitFormDraftFromDom(host);
+    const labelInput = $('#form-new-field-label', host);
+    const typeSelect = $('#form-new-field-type', host);
+    const label = labelInput.value.trim();
+    if (!label) {
+      say('Enter a field label first.');
+      labelInput.focus();
+      return;
+    }
+    const type = typeSelect.value;
+    recruitDraftForm.sections[recruitActiveFormSecTab].fields.push({
+      name: `custom_${Date.now().toString(36)}`,
+      label,
+      placeholder: '',
+      type,
+      required: false,
+      enabled: true,
+      system: false,
+      wide: type === 'textarea' || type === 'radio' || type === 'checkbox',
+      options: RECRUIT_FORM_CHOICE_TYPES.has(type) ? ['Option 1', 'Option 2'] : []
+    });
+    renderRecruitFormFieldsTab(host);
+  });
+
+  $('#form-new-field-label', host).addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#form-add-custom-field', host).click();
+  });
+
+  $('#form-reset-btn', host).addEventListener('click', () => {
+    recruitDraftForm = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
+    renderRecruitFormFieldsTab(host);
+    say('Reset /form draft to defaults (unsaved).');
+  });
+
+  $('#form-save-btn', host).addEventListener('click', async () => {
+    syncRecruitFormDraftFromDom(host);
+    const btn = $('#form-save-btn', host);
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await persistRecruitFormSchema(recruitDraftForm);
+      renderRecruitFormFieldsTab(host);
+      say('/form schema configuration saved.');
+    } catch (error) {
+      say(error.message || 'Failed to save /form schema configuration.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
     }
   });
 }
@@ -3893,7 +5846,6 @@ async function loadView(view, forceRefresh = false) {
     if (!forceRefresh && !isDemoMode) {
       const cached = await cacheGet('workspace_snapshot', { maxAgeMs: SNAPSHOT_MAX_AGE_MS });
       if (cached?.value && hydrateSnapshotIntoMemory(cached.value, cached.savedAt)) {
-        await loadContractWorkspaceState(false);
         hasCached = true;
       }
     }
@@ -3912,8 +5864,9 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'interview') renderInterviewView();
     else if (view === 'tracking') renderTrackingView();
     else if (view === 'employees') renderEmployees();
-    else if (view === 'contracts') renderContractsView();
+    else if (view === 'contracts') await renderContractsView();
     else if (view === 'contractSettings') await renderContractSettings();
+    else if (view === 'recruitmentSettings') await renderRecruitmentSettings(forceRefresh);
     else if (view === 'systemImport') renderSystemImport();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
@@ -3962,11 +5915,7 @@ async function resolveAdminProfileFromServer(session) {
   let role = 'Superadmin';
   let isRootAdmin = false;
 
-  const [rpcProfile, userRow] = await Promise.all([
-    supabase.rpc('get_my_admin_profile').then(res => res, () => ({ data: null, error: true })),
-    supabase.from('admin_users').select('display_name,role').eq('user_id', session.user.id).maybeSingle()
-  ]);
-
+  const rpcProfile = await supabase.rpc('get_my_admin_profile').then(res => res, () => ({ data: null, error: true }));
   if (!rpcProfile.error && Array.isArray(rpcProfile.data) && rpcProfile.data[0]) {
     const p = rpcProfile.data[0];
     username = p.username || username;
@@ -3975,12 +5924,22 @@ async function resolveAdminProfileFromServer(session) {
     role = p.role || role;
     isRootAdmin = Boolean(p.is_root_admin);
   }
-  if (!displayName && userRow?.data?.display_name) {
-    displayName = userRow.data.display_name;
+
+  if (rpcProfile.error || !displayName) {
+    const userRow = await supabase
+      .from('admin_users')
+      .select('display_name,role')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+      .then(res => res, () => ({ data: null }));
+    if (!displayName && userRow?.data?.display_name) {
+      displayName = userRow.data.display_name;
+    }
+    if (userRow?.data?.role && role === 'Superadmin') {
+      role = userRow.data.role;
+    }
   }
-  if (userRow?.data?.role && role === 'Superadmin') {
-    role = userRow.data.role;
-  }
+
   displayName = displayName || session.user.email || 'HR Admin';
   isRootAdmin = isRootAdmin || isRootAdminAccount({ username, employeeNik, displayName });
 
@@ -4127,7 +6086,6 @@ $('#logout-btn').addEventListener('click', () => {
   invitedCandidates = [];
   cvScreenings = [];
   portalUsers = [];
-  contractRequests = [];
   contractHistory = [];
   activeView = 'dashboard';
   shell.classList.add('hidden');

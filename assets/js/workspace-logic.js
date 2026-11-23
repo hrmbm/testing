@@ -1,4 +1,5 @@
 // Pure business logic helpers for HR&GA Workspace (unit-tested via node:test)
+import { computeDisc } from './disc-engine.js?v=20261122-hrga-workspace-16';
 
 export const PIN_REVEAL_PASSWORD = '8karakterH!';
 
@@ -1555,4 +1556,174 @@ export function parseCandidateImportRows(rawRows = []) {
 
   return { rows, errors };
 }
+
+export const DISC_IMPORT_HEADERS = [
+  'NIK (16 Digits)',
+  'Full Name',
+  ...Array.from({ length: 24 }, (_, i) => [`Q${i + 1}_P`, `Q${i + 1}_K`]).flat()
+];
+
+export const DISC_IMPORT_SAMPLE_ROW = (() => {
+  const sample = {
+    'NIK (16 Digits)': '3514122006840004',
+    'Full Name': 'Budi Santoso'
+  };
+  for (let i = 1; i <= 24; i++) {
+    sample[`Q${i}_P`] = 'A';
+    sample[`Q${i}_K`] = 'B';
+  }
+  return sample;
+})();
+
+function parseDiscChoiceIndex(raw) {
+  if (raw === null || raw === undefined) return -1;
+  const str = String(raw).trim().toUpperCase();
+  if (!str) return -1;
+  if (str === 'A' || str === '0') return 0;
+  if (str === 'B' || str === '1') return 1;
+  if (str === 'C' || str === '2') return 2;
+  if (str === 'D' || str === '3') return 3;
+  const num = Number(str);
+  if (Number.isInteger(num) && num >= 1 && num <= 4) return num - 1;
+  return -1;
+}
+
+export function parseDiscImportRows(rawRows = []) {
+  const rows = [];
+  const errors = [];
+
+  (rawRows || []).forEach((rawRow, idx) => {
+    const normalized = {};
+    for (const [key, val] of Object.entries(rawRow || {})) {
+      normalized[normalizeHeaderKey(key)] = val;
+    }
+
+    const rawNik = normalized.nik16digits ?? normalized.nik ?? normalized.noktp ?? normalized.ktp ?? '';
+    const nikDigits = String(rawNik).replace(/\D/g, '');
+    const fullName = String(normalized.fullname ?? normalized.name ?? normalized.nama ?? normalized.namalengkap ?? '').trim();
+
+    if (!nikDigits && !fullName && !normalized.q1p && !normalized.answers) return;
+
+    if (nikDigits.length !== 16) {
+      errors.push(`Row ${idx + 2}: NIK must contain exactly 16 digits.`);
+      return;
+    }
+
+    let answers = null;
+    if (normalized.answers !== undefined && String(normalized.answers).trim() !== '') {
+      try {
+        const parsed = typeof normalized.answers === 'string' ? JSON.parse(normalized.answers) : normalized.answers;
+        if (Array.isArray(parsed) && parsed.length === 24) {
+          answers = parsed.map(item => ({
+            most: parseDiscChoiceIndex(item?.most ?? item?.p ?? item?.P),
+            least: parseDiscChoiceIndex(item?.least ?? item?.k ?? item?.K)
+          }));
+        }
+      } catch {}
+    }
+
+    if (!answers) {
+      answers = [];
+      for (let q = 1; q <= 24; q++) {
+        const rawMost = normalized[`q${q}p`] ?? normalized[`q${q}most`] ?? normalized[`p${q}`] ?? normalized[`soal${q}p`];
+        const rawLeast = normalized[`q${q}k`] ?? normalized[`q${q}least`] ?? normalized[`k${q}`] ?? normalized[`soal${q}k`];
+        answers.push({
+          most: parseDiscChoiceIndex(rawMost),
+          least: parseDiscChoiceIndex(rawLeast)
+        });
+      }
+    }
+
+    try {
+      const result = computeDisc(answers);
+      rows.push({
+        nik: nikDigits,
+        full_name: fullName,
+        answers,
+        result
+      });
+    } catch (err) {
+      errors.push(`Row ${idx + 2} (${nikDigits}): ${err.message || 'Invalid DISC answers.'}`);
+    }
+  });
+
+  return { rows, errors };
+}
+
+export function buildTrackingExportRows(rows = []) {
+  return (rows || []).map((row, idx) => {
+    const subParts = String(row.sub || '').split('·').map(s => s.trim()).filter(Boolean);
+    const extractedNikOrPhone = row.nik || (subParts.length > 1 ? subParts[1] : '');
+    const formSubmitted = row.formSubmittedDate
+      ? formatDmyDash(row.formSubmittedDate)
+      : (row.formSubmitted ? 'Submitted' : '-');
+    const hrTest = row.hrTestDone
+      ? (row.hrTestDate ? `Completed (${formatDmyDash(row.hrTestDate)})` : 'Completed')
+      : (row.discTrait ? `${row.discTrait}${row.discPattern ? ` (${row.discPattern})` : ''}` : '-');
+    const fmtStage = cell => cell ? `${cell.decision || ''}${cell.date ? ` (${formatDmyDash(cell.date)})` : ''}`.trim() : '-';
+
+    return {
+      No: idx + 1,
+      'Candidate Name': row.name || row.fullName || '',
+      Position: row.position || '',
+      'NIK / Phone': extractedNikOrPhone,
+      Source: row.inviteSource || row.source || '',
+      'Invite Status': row.inviteStatus || row.inviteNote || '',
+      'Invite Date': (row.inviteDate || row.invitedAt) ? formatDmyDash(row.inviteDate || row.invitedAt) : '',
+      'Form Submitted': formSubmitted,
+      'HR Test (DISC)': hrTest,
+      'HR Interview 1': fmtStage(row.hr1),
+      'HR Interview 2': fmtStage(row.hr2),
+      'User Interview 1': fmtStage(row.user1),
+      'User Interview 2': fmtStage(row.user2),
+      'Final Interview': row.finalInt ? fmtStage(row.finalInt) : (row.finalRow?.final_decision || '-'),
+      Decision: row.decision || row.progress?.label || '',
+      'Rejection Reason': row.rejectionReason || row.finalRow?.rejection_reason || '',
+      'Decision Date': row.decisionDate ? formatDmyDash(row.decisionDate) : '',
+      'Join Date': row.joinDate
+        ? formatDmyDash(row.joinDate)
+        : (row.finalRow?.contract_start_date ? formatDmyDash(row.finalRow.contract_start_date) : '')
+    };
+  });
+}
+
+export function buildConclusionExportRows(summary = {}) {
+  if (Array.isArray(summary.rows)) {
+    const mapped = summary.rows.map(r => ({
+      No: r.no,
+      Position: r.position || '',
+      'CV Screening': r.cvScreeningCount || 0,
+      Invited: r.invitedCount || 0,
+      'HR Test': r.hrTestCount || 0,
+      'HR Interview': r.hrInterviewCount || 0,
+      'User Interview': r.userInterviewCount || 0,
+      'Final Interview': r.finalInterviewCount || 0,
+      Accepted: r.acceptedCount || 0
+    }));
+    if (summary.totals) {
+      mapped.push({
+        No: 'TOTAL',
+        Position: 'All Positions',
+        'CV Screening': summary.totals.cvScreeningCount || 0,
+        Invited: summary.totals.invitedCount || 0,
+        'HR Test': summary.totals.hrTestCount || 0,
+        'HR Interview': summary.totals.hrInterviewCount || 0,
+        'User Interview': summary.totals.userInterviewCount || 0,
+        'Final Interview': summary.totals.finalInterviewCount || 0,
+        Accepted: summary.totals.acceptedCount || 0
+      });
+    }
+    return mapped;
+  }
+
+  return (summary.categories || []).map(cat => ({
+    Category: cat.label,
+    Count: cat.count,
+    Share: summary.totalCandidates > 0
+      ? `${Math.round((cat.count / summary.totalCandidates) * 100)}%`
+      : '0%'
+  }));
+}
+
+
 

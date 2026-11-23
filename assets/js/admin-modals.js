@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261121-hrga-workspace-15';
+import { $, esc } from './common.js?v=20261122-hrga-workspace-16';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -15,7 +15,7 @@ import {
   normalizeInterviewDecision,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261121-hrga-workspace-15';
+} from './workspace-logic.js?v=20261122-hrga-workspace-16';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside

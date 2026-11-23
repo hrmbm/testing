@@ -1,12 +1,12 @@
-import { APPLY_INFO_SOURCES, FORM_INFO_SOURCES, slugifyKey } from './vacancy-logic.js?v=20261122-lowongan-v5';
+import { APPLY_INFO_SOURCES, FORM_INFO_SOURCES, slugifyKey } from './vacancy-logic.js?v=20261122-hrga-workspace-16';
 
 export const DEFAULT_FORM_POSITIONS = [
-  'Operator Spray / Cat',
+  'Spray',
   'Las',
-  'Operator CNC',
-  'Operator Spindel Kayu',
+  'CNC',
+  'Spindel Kayu',
   'Maintenance',
-  'Operator Produksi',
+  'OP. Produksi',
   'Kepala Bagian Produksi',
   'PPIC',
   'Sales Project Lead',
@@ -16,25 +16,25 @@ export const DEFAULT_FORM_POSITIONS = [
 ];
 
 export const APPLY_CUSTOM_FIELD_TYPES = [
-  { value: 'text', label: 'Isian Singkat' },
-  { value: 'textarea', label: 'Isian Panjang' },
-  { value: 'number', label: 'Angka' },
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text' },
+  { value: 'number', label: 'Number' },
   { value: 'dropdown', label: 'Dropdown' },
-  { value: 'radio', label: 'Pilihan Tunggal' },
-  { value: 'checkbox', label: 'Pilihan Ganda' }
+  { value: 'radio', label: 'Single Choice' },
+  { value: 'checkbox', label: 'Multiple Choice' }
 ];
 
 export const FORM_CUSTOM_FIELD_TYPES = [
-  { value: 'text', label: 'Isian Singkat' },
-  { value: 'textarea', label: 'Isian Panjang' },
-  { value: 'number', label: 'Angka' },
-  { value: 'currency', label: 'Nominal Rupiah' },
-  { value: 'date', label: 'Tanggal' },
-  { value: 'tel', label: 'Telepon / WhatsApp' },
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text' },
+  { value: 'number', label: 'Number' },
+  { value: 'currency', label: 'Currency (IDR)' },
+  { value: 'date', label: 'Date' },
+  { value: 'tel', label: 'Phone / WhatsApp' },
   { value: 'email', label: 'Email' },
   { value: 'select', label: 'Dropdown' },
-  { value: 'radio', label: 'Pilihan Tunggal' },
-  { value: 'checkbox', label: 'Pilihan Ganda' }
+  { value: 'radio', label: 'Single Choice' },
+  { value: 'checkbox', label: 'Multiple Choice' }
 ];
 
 export const DEFAULT_APPLY_SCHEMA = {
@@ -166,23 +166,23 @@ export const STEP_SECTION_DEFAULTS = {
 
 export const STEP0_SECTION_IDS = [...STEP_SECTION_DEFAULTS[0]];
 export const STEP0_SECTION_LABELS = {
-  personal: 'A · Data Pribadi',
-  address: '⌖ · Alamat Sesuai KTP',
-  application: 'P · Informasi Lamaran'
+  personal: 'A · Personal Identity',
+  address: '⌖ · KTP Address',
+  application: 'P · Application Info'
 };
 
 export const STAGE2_SECTION_META = [
-  { id: 'personal', step: 0, code: 'A', defaultTitle: 'DATA PRIBADI', stepLabel: 'Langkah 1 · Identitas' },
-  { id: 'address', step: 0, code: '⌖', defaultTitle: 'ALAMAT SESUAI KTP', stepLabel: 'Langkah 1 · Identitas' },
-  { id: 'application', step: 0, code: 'P', defaultTitle: 'INFORMASI LAMARAN', stepLabel: 'Langkah 1 · Identitas' },
-  { id: 'family', step: 1, code: 'B', defaultTitle: 'SUSUNAN KELUARGA', stepLabel: 'Langkah 2 · Keluarga & Pendidikan' },
-  { id: 'education', step: 1, code: 'C', defaultTitle: 'PENDIDIKAN FORMAL', stepLabel: 'Langkah 2 · Keluarga & Pendidikan' },
-  { id: 'languages', step: 2, code: 'D', defaultTitle: 'KEMAMPUAN BAHASA (SELAIN BAHASA INDONESIA)', stepLabel: 'Langkah 3 · Kemampuan & Pengalaman' },
-  { id: 'hobby', step: 2, code: 'E', defaultTitle: 'HOBI', stepLabel: 'Langkah 3 · Kemampuan & Pengalaman' },
-  { id: 'work', step: 2, code: 'F', defaultTitle: 'PENGALAMAN KERJA', stepLabel: 'Langkah 3 · Kemampuan & Pengalaman' },
-  { id: 'expectation', step: 3, code: 'G', defaultTitle: 'EKSPEKTASI', stepLabel: 'Langkah 4 · Informasi Tambahan' },
-  { id: 'references', step: 3, code: 'H', defaultTitle: 'ORANG YANG BISA DIHUBUNGI DALAM KEADAAN DARURAT', stepLabel: 'Langkah 4 · Informasi Tambahan' },
-  { id: 'openQuestions', step: 3, code: 'I', defaultTitle: 'PERTANYAAN TERBUKA', stepLabel: 'Langkah 4 · Informasi Tambahan' }
+  { id: 'personal', step: 0, code: 'A', defaultTitle: 'DATA PRIBADI', stepLabel: 'Step 1 · Identity' },
+  { id: 'address', step: 0, code: '⌖', defaultTitle: 'ALAMAT SESUAI KTP', stepLabel: 'Step 1 · Identity' },
+  { id: 'application', step: 0, code: 'P', defaultTitle: 'INFORMASI LAMARAN', stepLabel: 'Step 1 · Identity' },
+  { id: 'family', step: 1, code: 'B', defaultTitle: 'SUSUNAN KELUARGA', stepLabel: 'Step 2 · Family & Education' },
+  { id: 'education', step: 1, code: 'C', defaultTitle: 'PENDIDIKAN FORMAL', stepLabel: 'Step 2 · Family & Education' },
+  { id: 'languages', step: 2, code: 'D', defaultTitle: 'KEMAMPUAN BAHASA (SELAIN BAHASA INDONESIA)', stepLabel: 'Step 3 · Skills & Experience' },
+  { id: 'hobby', step: 2, code: 'E', defaultTitle: 'HOBI', stepLabel: 'Step 3 · Skills & Experience' },
+  { id: 'work', step: 2, code: 'F', defaultTitle: 'PENGALAMAN KERJA', stepLabel: 'Step 3 · Skills & Experience' },
+  { id: 'expectation', step: 3, code: 'G', defaultTitle: 'EKSPEKTASI', stepLabel: 'Step 4 · Additional Info' },
+  { id: 'references', step: 3, code: 'H', defaultTitle: 'ORANG YANG BISA DIHUBUNGI DALAM KEADAAN DARURAT', stepLabel: 'Step 4 · Additional Info' },
+  { id: 'openQuestions', step: 3, code: 'I', defaultTitle: 'PERTANYAAN TERBUKA', stepLabel: 'Step 4 · Additional Info' }
 ];
 
 export const MANDATORY_STAGE2_SECTIONS = new Set(['personal', 'application']);

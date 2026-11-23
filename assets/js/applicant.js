@@ -1,6 +1,13 @@
-import { supabase, isConfigured } from './supabase.js?v=20261121-hrga-workspace-15';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261121-hrga-workspace-15';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261121-hrga-workspace-15';
+import { supabase, isConfigured } from './supabase.js?v=20261122-hrga-workspace-16';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261122-hrga-workspace-16';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261122-hrga-workspace-16';
+import {
+  DEFAULT_STAGE2_SCHEMA,
+  STEP_SECTION_DEFAULTS,
+  STAGE2_SECTION_META,
+  MANDATORY_STAGE2_SECTIONS,
+  normalizeStage2Schema
+} from './form-schema.js?v=20261122-hrga-workspace-16';
 
 function formatKtpAddress(data={}){
   const tidyPart=v=>String(v||'').replace(/\s+/g,' ').replace(/^\s*[:：\-]+\s*/,'').replace(/[,;]+$/,'').trim();
@@ -34,44 +41,68 @@ const root = $('#candidate-app');
 const queryAll = (selector, scope=document) => [...scope.querySelectorAll(selector)];
 const choices = items => items.map(value => ({value,label:value}));
 const educationChoices = choices(['Tidak sekolah','SD / Sederajat','SMP / Sederajat','SMA / SMK','D1','D2','D3','D4','S1','S2','S3']);
-const religionChoices = choices(['Islam','Kristen Protestan','Katolik','Hindu','Buddha','Konghucu','Kepercayaan','Lainnya']);
-const DEFAULT_POSITIONS = ['Spray','Las','CNC','Spindel Kayu','Maintenance','OP. Produksi'];
-let availablePositions = DEFAULT_POSITIONS.slice();
-const personalFields = [
-  {name:'nama',label:'Nama lengkap',required:true},
-  {name:'nik',label:'NIK',required:true,inputmode:'numeric',maxlength:16,pattern:'[0-9]{16}'},
-  {name:'tempat_lahir',label:'Tempat lahir',required:true},
-  {name:'tanggal_lahir',label:'Tanggal lahir',type:'date',required:true},
-  {name:'gender',label:'Jenis kelamin',type:'select',options:choices(['Laki-laki','Perempuan']),required:true},
-  {name:'gol_darah',label:'Golongan darah',type:'select',options:choices(['A','B','AB','O','Tidak tahu'])},
-  {name:'agama',label:'Agama',type:'select',options:religionChoices},
-  {name:'warga_negara',label:'Kewarganegaraan',type:'select',options:choices(['WNI','WNA']),value:'WNI'}
+const stepTitles = ['Identitas','Keluarga & pendidikan','Kemampuan & pengalaman','Informasi tambahan','Lampiran'];
+const DEMO_RECRUITMENT_KEY = 'hrga_demo_recruitment_v1';
+const isDemoQuery = (() => {
+  try { return new URLSearchParams(location.search).get('demo') === '1'; }
+  catch { return false; }
+})();
+
+let stage2Schema = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
+let availablePositions = stage2Schema.positions.slice();
+let availableInfoSources = stage2Schema.infoSources.slice();
+
+const SECTION_META_BY_ID = Object.fromEntries(STAGE2_SECTION_META.map(meta => [meta.id, meta]));
+
+function buildStage2FieldDef(f) {
+  if (f.type === 'system_form_position') {
+    return {
+      name: 'posisi',
+      label: f.label,
+      placeholder: f.placeholder || 'Pilih posisi',
+      type: 'select',
+      options: choices(availablePositions),
+      required: true,
+      wide: f.wide === true
+    };
+  }
+  if (f.type === 'system_form_source') {
+    return {
+      name: 'sumber_informasi',
+      label: f.label,
+      placeholder: f.placeholder || 'Pilih sumber informasi',
+      type: 'select',
+      options: choices(availableInfoSources),
+      required: f.required === true,
+      wide: f.wide === true
+    };
+  }
+  if (f.type === 'system_region_province') {
+    return { name: 'alamat_provinsi', label: f.label, type: 'select', options: [], required: f.required === true, wide: f.wide === true };
+  }
+  if (f.type === 'system_region_regency') {
+    return { name: 'alamat_kota_nama', label: f.label, type: 'select', options: [], required: f.required === true, wide: f.wide === true };
+  }
+  if (f.type === 'system_region_district') {
+    return { name: 'alamat_kecamatan', label: f.label, type: 'select', options: [], required: f.required === true, wide: f.wide === true };
+  }
+  if (f.type === 'system_region_village') {
+    return { name: 'alamat_desa', label: f.label, type: 'select', options: [], required: f.required === true, wide: f.wide === true };
+  }
+  if (f.type === 'currency') {
+    return { ...f, type: 'text', currency: true };
+  }
+  if (f.type === 'select') {
+    return { ...f, options: choices(f.options || []), ...(f.defaultValue ? { value: f.defaultValue } : {}) };
+  }
+  return { ...f, ...(f.defaultValue ? { value: f.defaultValue } : {}) };
+}
+
+const ADDRESS_FIELD_NAMES = [
+  'alamat_provinsi', 'alamat_kota_nama', 'alamat_kecamatan', 'alamat_desa',
+  'alamat_tipe', 'alamat_jalan', 'alamat_rt', 'alamat_rw', 'alamat_kodepos'
 ];
-const applicationFields = [
-  {name:'posisi',label:'Posisi yang dilamar',type:'select',options:choices(availablePositions),required:true},
-  {name:'telepon',label:'No. telepon / WhatsApp',type:'tel',required:true},
-  {name:'email',label:'Email',type:'email'},
-  {name:'tinggi',label:'Tinggi badan (cm)',type:'number',min:80,max:240},
-  {name:'berat',label:'Berat badan (kg)',type:'number',min:20,max:250}
-];
-const addressFields = [
-  {name:'alamat_provinsi',label:'Provinsi',type:'select',options:[],required:true},
-  {name:'alamat_kota_nama',label:'Kabupaten / kota',type:'select',options:[],required:true},
-  {name:'alamat_kecamatan',label:'Kecamatan',type:'select',options:[],required:true},
-  {name:'alamat_desa',label:'Desa / kelurahan',type:'select',options:[],required:true},
-  {name:'alamat_tipe',label:'Jenis alamat',type:'select',options:choices(['Jalan','Dusun','Kampung','Perumahan','Komplek','Lingkungan','Gang','Lorong','Blok','Apartemen','Lainnya'])},
-  {name:'alamat_jalan',label:'Nama jalan / dusun / perumahan',wide:true,required:true},
-  {name:'alamat_rt',label:'RT',inputmode:'numeric',maxlength:3,required:true},
-  {name:'alamat_rw',label:'RW',inputmode:'numeric',maxlength:3,required:true},
-  {name:'alamat_kodepos',label:'Kode pos (otomatis dari desa / kelurahan)',inputmode:'numeric',maxlength:5,readonly:true}
-];
-const parentFields = [
-  {name:'ayah_nama',label:'Nama ayah'}, {name:'ayah_umur',label:'Umur ayah (isi 0 jika meninggal dunia)',type:'number',min:0,max:120},
-  {name:'ayah_pendidikan',label:'Pendidikan ayah',type:'select',options:educationChoices}, {name:'ayah_pekerjaan',label:'Pekerjaan ayah'},
-  {name:'ibu_nama',label:'Nama ibu'}, {name:'ibu_umur',label:'Umur ibu (isi 0 jika meninggal dunia)',type:'number',min:0,max:120},
-  {name:'ibu_pendidikan',label:'Pendidikan ibu',type:'select',options:educationChoices}, {name:'ibu_pekerjaan',label:'Pekerjaan ibu'}
-];
-const maritalField = {name:'status_kawin',label:'Status perkawinan',type:'select',options:choices(['Belum kawin','Kawin','Cerai hidup','Cerai mati']),required:true};
+
 const spouseFields = [
   {name:'pasangan_nama',label:'Nama suami / istri'},
   {name:'pasangan_lp',label:'Jenis kelamin',type:'select',options:choices(['Laki-laki','Perempuan'])},
@@ -87,13 +118,13 @@ const educationRows = [
   {prefix:'universitas',title:'Universitas (S1/S2/S3)',fields:[['instansi','Nama universitas'],['kota','Kota'],['jurusan','Jurusan'],['lulus','Tahun lulus','year']]}
 ];
 const workKeys = [['perusahaan','Nama perusahaan'],['periode_mulai','Dari (bulan/tahun)','month'],['periode_selesai','Sampai (bulan/tahun)','month'],['jabatan','Jabatan'],['usaha','Jenis usaha'],['jumlah','Jumlah karyawan','number'],['atasan','Nama atasan langsung'],['gaji','Gaji terakhir (Rp)','currency'],['alasan','Alasan berhenti']];
-const refKeys = [['nama','Nama kontak darurat'],['alamat','Alamat'],['telepon','Telepon'],['pekerjaan','Pekerjaan'],['hubungan','Hubungan dengan Anda']];
-const stepNames = ['Identitas','Keluarga & pendidikan','Kemampuan & pengalaman','Informasi tambahan','Lampiran'];
+
 const LOCAL_DRAFT_KEY = 'portal_candidate_draft_v4';
 let initialData = {};
 let cvFilename = '';
 let cvPath = '';
 let activeStep = 0;
+let activeStepDefs = [];
 let mediaStream = null;
 let ktpPhotoDataUrl = '';
 let ocrFieldConfidence = {};
@@ -111,7 +142,7 @@ let cropDragging = false;
 let cropLastPointer = null;
 let activeCaptureMode = 'camera';
 
-const selectOptions = (options, selected) => options.map(o => {
+const selectOptions = (options, selected) => (options || []).map(o => {
   const item = typeof o === 'string' ? {value:o,label:o} : o;
   return `<option value="${esc(item.value)}" ${String(selected??'')===String(item.value)?'selected':''}>${esc(item.label)}</option>`;
 }).join('');
@@ -119,6 +150,7 @@ function formatCurrency(value){
   const digits=String(value??'').replace(/\D/g,'');
   return digits ? new Intl.NumberFormat('id-ID').format(Number(digits)) : '';
 }
+
 function fieldHtml(field, values={}){
   let value=values[field.name] ?? field.value ?? '';
   if(['gender','pasangan_lp','saudara1_lp','saudara2_lp','saudara3_lp','saudara4_lp','anak1_lp','anak2_lp','anak3_lp'].includes(field.name)){
@@ -129,29 +161,61 @@ function fieldHtml(field, values={}){
   const id=`f-${field.name}`;
   const confidence=Number(ocrFieldConfidence[field.name]);
   const reviewTag=Number.isFinite(confidence)&&confidence<0.84?`<small class="ocr-review-tag" data-level="${confidence<0.62?'low':'medium'}">${confidence<0.62?'Periksa ulang':'Tinjau OCR'}</small>`:'';
-  const label=`<label for="${esc(id)}">${esc(field.label)}${reviewTag}</label>`;
+  const reqMark=field.required?'<span class="req-mark" aria-hidden="true">*</span>':'';
+
+  if(field.type==='radio'){
+    const opts=(field.options||[]).map(opt=>{
+      const optVal=typeof opt==='string'?opt:opt.value;
+      const optLbl=typeof opt==='string'?opt:opt.label;
+      return `<label class="choice-chip"><input type="radio" name="${esc(field.name)}" value="${esc(optVal)}" ${String(value)===String(optVal)?'checked':''}><span>${esc(optLbl)}</span></label>`;
+    }).join('');
+    return `<div class="form-field ${wide}" data-field-group="radio" data-field-name="${esc(field.name)}" data-required="${field.required?'true':'false'}"><span class="group-label">${esc(field.label)}${reqMark}${reviewTag}</span><div class="choice-grid">${opts}</div></div>`;
+  }
+
+  if(field.type==='checkbox'){
+    const selectedArr=Array.isArray(value)
+      ? value.map(String)
+      : (typeof value==='string'&&value.trim()?value.split(',').map(s=>s.trim()).filter(Boolean):[]);
+    const opts=(field.options||[]).map(opt=>{
+      const optVal=typeof opt==='string'?opt:opt.value;
+      const optLbl=typeof opt==='string'?opt:opt.label;
+      return `<label class="choice-chip"><input type="checkbox" name="${esc(field.name)}" data-multi-checkbox="true" value="${esc(optVal)}" ${selectedArr.includes(String(optVal))?'checked':''}><span>${esc(optLbl)}</span></label>`;
+    }).join('');
+    return `<div class="form-field ${wide}" data-field-group="checkbox" data-field-name="${esc(field.name)}" data-required="${field.required?'true':'false'}"><span class="group-label">${esc(field.label)}${reqMark}${reviewTag}</span><div class="choice-grid">${opts}</div></div>`;
+  }
+
+  const label=`<label for="${esc(id)}">${esc(field.label)}${reqMark}${reviewTag}</label>`;
+  const phAttr=field.placeholder?`placeholder="${esc(field.placeholder)}"`:'';
   let control='';
   if(field.type==='select' || field.type==='year'){
     const options=field.type==='year' ? Array.from({length:57},(_,i)=>String(new Date().getFullYear()-i)) : field.options;
     control=`<select id="${esc(id)}" name="${esc(field.name)}" class="select" ${required}><option value="">${esc(field.placeholder||'Pilih')}</option>${selectOptions(options,value)}</select>`;
   }else if(field.type==='textarea'){
-    control=`<textarea id="${esc(id)}" name="${esc(field.name)}" ${required}>${esc(value)}</textarea>`;
+    control=`<textarea id="${esc(id)}" name="${esc(field.name)}" ${phAttr} ${required}>${esc(value)}</textarea>`;
   }else if(field.currency){
-    control=`<input id="${esc(id)}" name="${esc(field.name)}" type="text" inputmode="numeric" data-format-number="idr" value="${esc(formatCurrency(value))}" ${required}>`;
+    control=`<input id="${esc(id)}" name="${esc(field.name)}" type="text" inputmode="numeric" data-format-number="idr" value="${esc(formatCurrency(value))}" ${phAttr} ${required}>`;
   }else{
     const type=field.type||'text';
     const inputmode=field.inputmode?`inputmode="${field.inputmode}"`:type==='number'?'inputmode="numeric"':'';
-    control=`<input id="${esc(id)}" name="${esc(field.name)}" type="${type}" value="${esc(value)}" ${required} ${field.readonly?'readonly':''} ${inputmode} ${field.maxlength?`maxlength="${field.maxlength}"`:''} ${field.min!==undefined?`min="${field.min}"`:''} ${field.max!==undefined?`max="${field.max}"`:''} ${field.step?`step="${field.step}"`:''} ${field.pattern?`pattern="${field.pattern}"`:''}>`;
+    control=`<input id="${esc(id)}" name="${esc(field.name)}" type="${type}" value="${esc(value)}" ${phAttr} ${required} ${field.readonly?'readonly':''} ${inputmode} ${field.maxlength?`maxlength="${field.maxlength}"`:''} ${field.min!==undefined?`min="${field.min}"`:''} ${field.max!==undefined?`max="${field.max}"`:''} ${field.step?`step="${field.step}"`:''} ${field.pattern?`pattern="${field.pattern}"`:''}>`;
   }
   return `<div class="form-field ${wide}">${label}${control}</div>`;
 }
-function sectionHtml(letter,title,body){return `<section class="form-section"><h2><span class="section-bullet">${letter}</span>${title}</h2>${body}</section>`;}
-function basicGrid(fields,values={}){return `<div class="form-grid">${fields.map(f=>fieldHtml(f,values)).join('')}</div>`;}
-function countSelect(name,label,max,value,min=0){
-  return fieldHtml({name,label,type:'select',options:Array.from({length:max-min+1},(_,i)=>String(i+min))}, {[name]:String(value??min)});
+
+function sectionHtml(letter,title,body,sectionId=''){
+  const attr=sectionId?` data-section-id="${esc(sectionId)}"`:'';
+  return `<section class="form-section"${attr}><h2><span class="section-bullet">${esc(letter)}</span>${esc(title)}</h2>${body}</section>`;
 }
+function basicGrid(fields,values={}){return `<div class="form-grid">${fields.map(f=>fieldHtml(f,values)).join('')}</div>`;}
+function countSelect(name,label,max,value,min=0,wide=false){
+  return fieldHtml({name,label,type:'select',wide,options:Array.from({length:max-min+1},(_,i)=>String(i+min))}, {[name]:String(value??min)});
+}
+
 const REGION_API='https://www.emsifa.com/api-wilayah-indonesia/v2';
 const REGION_CACHE_PREFIX='portal_region_cache_v2:';
+const MAX_REGION_CACHE_ENTRIES=60;
+const REGION_CACHE_TTL_MS=30*86400000;
+
 function regionName(item){return String(item?.name||'').replace(/^(Kabupaten|Kota)\s+/i,'').trim();}
 function normalizeRegionName(value){
   return String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
@@ -177,11 +241,78 @@ function findRegionMatch(items,selected){
     return {item,score};
   }).sort((a,b)=>b.score-a.score);
   const best=ranked[0],second=ranked[1];
-  // Auto-match only when the spelling is very close and clearly unambiguous.
   return best&&best.score>=0.92&&(!second||best.score-second.score>=0.06)?best.item:null;
 }
-function regionCacheGet(key){try{const raw=localStorage.getItem(REGION_CACHE_PREFIX+key);if(!raw)return null;const value=JSON.parse(raw);return Date.now()-value.saved_at<30*86400000?value.data:null;}catch{return null;}}
-function regionCacheSet(key,data){try{localStorage.setItem(REGION_CACHE_PREFIX+key,JSON.stringify({saved_at:Date.now(),data}));}catch{}}
+
+function listRegionCacheEntries(){
+  const entries=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const fullKey=localStorage.key(i);
+      if(!fullKey||!fullKey.startsWith(REGION_CACHE_PREFIX))continue;
+      let savedAt=0;
+      try{
+        const parsed=JSON.parse(localStorage.getItem(fullKey)||'null');
+        savedAt=Number(parsed?.saved_at||0);
+      }catch{}
+      entries.push({fullKey,savedAt});
+    }
+  }catch{}
+  return entries.sort((a,b)=>a.savedAt-b.savedAt);
+}
+
+function pruneRegionCache(maxEntries=MAX_REGION_CACHE_ENTRIES){
+  try{
+    const now=Date.now();
+    const entries=listRegionCacheEntries();
+    const active=[];
+    for(const entry of entries){
+      if(!entry.savedAt || now-entry.savedAt>=REGION_CACHE_TTL_MS){
+        localStorage.removeItem(entry.fullKey);
+      }else{
+        active.push(entry);
+      }
+    }
+    while(active.length>maxEntries){
+      const oldest=active.shift();
+      if(oldest)localStorage.removeItem(oldest.fullKey);
+    }
+  }catch{}
+}
+
+function regionCacheGet(key){
+  const fullKey=REGION_CACHE_PREFIX+key;
+  try{
+    const raw=localStorage.getItem(fullKey);
+    if(!raw)return null;
+    const value=JSON.parse(raw);
+    if(Date.now()-Number(value?.saved_at||0)<REGION_CACHE_TTL_MS && Array.isArray(value?.data)){
+      try{
+        localStorage.setItem(fullKey,JSON.stringify({saved_at:Date.now(),data:value.data}));
+      }catch{}
+      return value.data;
+    }
+    localStorage.removeItem(fullKey);
+    return null;
+  }catch{
+    return null;
+  }
+}
+
+function regionCacheSet(key,data){
+  const fullKey=REGION_CACHE_PREFIX+key;
+  const payload=JSON.stringify({saved_at:Date.now(),data});
+  try{
+    localStorage.setItem(fullKey,payload);
+    pruneRegionCache(MAX_REGION_CACHE_ENTRIES);
+  }catch{
+    try{
+      pruneRegionCache(Math.max(5,Math.floor(MAX_REGION_CACHE_ENTRIES/2)));
+      localStorage.setItem(fullKey,payload);
+    }catch{}
+  }
+}
+
 async function getRegionList(path){
   const cached=regionCacheGet(path);if(cached)return cached;
   const response=await fetch(`${REGION_API}/${path}`,{headers:{Accept:'application/json'},cache:'force-cache'});
@@ -219,6 +350,7 @@ async function initAddressDropdowns(form,values={}){
       return;
     }
     setRegionHidden(form,'alamat_provinsi_id',p.id);
+    if(!regency)return;
     const regencies=await getRegionList(`regencies/${p.id}.json`);
     const r=setRegionOptions(regency,regencies,values.alamat_kota_nama,'Pilih kabupaten / kota');
     if(!r){
@@ -228,6 +360,7 @@ async function initAddressDropdowns(form,values={}){
     setRegionHidden(form,'alamat_kota_id',r.id);
     const kind=/^Kota\s/i.test(r.name)?'Kota':'Kabupaten';
     if(form.elements.namedItem('alamat_kota_jenis'))form.elements.namedItem('alamat_kota_jenis').value=kind;
+    if(!district)return;
     const districts=await getRegionList(`districts/${r.id}.json`);
     const d=setRegionOptions(district,districts,values.alamat_kecamatan,'Pilih kecamatan');
     if(!d){
@@ -235,6 +368,7 @@ async function initAddressDropdowns(form,values={}){
       return;
     }
     setRegionHidden(form,'alamat_kecamatan_id',d.id);
+    if(!village)return;
     const villages=await getRegionList(`villages/${d.id}.json`);
     const v=setRegionOptions(village,villages,values.alamat_desa,'Pilih desa / kelurahan');
     if(!v){
@@ -259,15 +393,15 @@ async function handleAddressRegionChange(form,name){
   if(name==='alamat_provinsi'){
     const id=selectedRegionId(form,name);setRegionHidden(form,'alamat_provinsi_id',id);setRegionHidden(form,'alamat_kota_id','');setRegionHidden(form,'alamat_kecamatan_id','');setRegionHidden(form,'alamat_desa_id','');
     reset(regency,'Pilih kabupaten / kota');reset(district,'Pilih kecamatan');reset(village,'Pilih desa / kelurahan');if(zip)zip.value='';
-    if(id){regency.disabled=true;try{setRegionOptions(regency,await getRegionList(`regencies/${id}.json`));}finally{regency.disabled=false;}}
+    if(id&&regency){regency.disabled=true;try{setRegionOptions(regency,await getRegionList(`regencies/${id}.json`));}finally{regency.disabled=false;}}
   }else if(name==='alamat_kota_nama'){
     const id=selectedRegionId(form,name),option=regency?.selectedOptions[0];setRegionHidden(form,'alamat_kota_id',id);setRegionHidden(form,'alamat_kecamatan_id','');setRegionHidden(form,'alamat_desa_id','');
     const kind=/^Kota\s/i.test(option?.dataset.regionName||'')?'Kota':'Kabupaten';if(form.elements.namedItem('alamat_kota_jenis'))form.elements.namedItem('alamat_kota_jenis').value=kind;
     reset(district,'Pilih kecamatan');reset(village,'Pilih desa / kelurahan');if(zip)zip.value='';
-    if(id){district.disabled=true;try{setRegionOptions(district,await getRegionList(`districts/${id}.json`));}finally{district.disabled=false;}}
+    if(id&&district){district.disabled=true;try{setRegionOptions(district,await getRegionList(`districts/${id}.json`));}finally{district.disabled=false;}}
   }else if(name==='alamat_kecamatan'){
     const id=selectedRegionId(form,name);setRegionHidden(form,'alamat_kecamatan_id',id);setRegionHidden(form,'alamat_desa_id','');reset(village,'Pilih desa / kelurahan');if(zip)zip.value='';
-    if(id){village.disabled=true;try{setRegionOptions(village,await getRegionList(`villages/${id}.json`));}finally{village.disabled=false;}}
+    if(id&&village){village.disabled=true;try{setRegionOptions(village,await getRegionList(`villages/${id}.json`));}finally{village.disabled=false;}}
   }else if(name==='alamat_desa'){
     const id=selectedRegionId(form,name);setRegionHidden(form,'alamat_desa_id',id);
     const option=village?.selectedOptions[0];if(zip)zip.value=option?.dataset.postalCode||'';
@@ -278,13 +412,10 @@ async function handleAddressRegionChange(form,name){
     status.textContent=selectedId?`${label} cocok dengan daftar resmi.`:`${label} belum cocok. Pilih nama resmi dari daftar.`;
   }
 }
-function renderAddress(values={}){
-  const different=String(values.domisili_berbeda||'false')==='true' || (!!values.domisili && !!values.alamat_asal && values.domisili!==values.alamat_asal);
-  return sectionHtml('⌖','ALAMAT SESUAI KTP',`${basicGrid(addressFields,values)}<input type="hidden" name="alamat_provinsi_id" value="${esc(values.alamat_provinsi_id||'')}"><input type="hidden" name="alamat_kota_id" value="${esc(values.alamat_kota_id||'')}"><input type="hidden" name="alamat_kota_jenis" value="${esc(values.alamat_kota_jenis||'Kabupaten')}"><input type="hidden" name="alamat_kecamatan_id" value="${esc(values.alamat_kecamatan_id||'')}"><input type="hidden" name="alamat_desa_id" value="${esc(values.alamat_desa_id||'')}"><input type="hidden" name="alamat_wilayah_type" value="${esc(values.alamat_wilayah_type||'')}"><input type="hidden" name="alamat_asal" value="${esc(values.alamat_asal||'')}"><div class="address-preview" id="address-preview"></div><label class="inline-toggle"><input type="checkbox" name="domisili_berbeda" value="true" ${different?'checked':''}><span>Alamat domisili berbeda</span></label><div class="conditional-fields" data-conditional="true" data-block="domicile" ${different?'':'hidden'}>${basicGrid([{name:'domisili',label:'Alamat domisili',type:'textarea',wide:true}],values)}</div>`);
-}
-function renderFamily(values={}){
+
+function renderSiblingsRowsHtml(values={}){
   const siblingCount=Math.min(3,Math.max(0,Number(values.saudara_count??0)));
-  const siblings=Array.from({length:siblingCount},(_,i)=>{
+  return Array.from({length:siblingCount},(_,i)=>{
     const n=i+2,p=`saudara${n}_`;
     const fields=[
       {name:p+'nama',label:'Nama'},
@@ -295,21 +426,43 @@ function renderFamily(values={}){
     ];
     return `<div class="repeat-row"><div class="repeat-title">Saudara kandung ${i+1}</div>${basicGrid(fields,values)}</div>`;
   }).join('');
+}
+
+function renderChildrenRowsHtml(values={}){
   const childrenCount=Math.min(3,Math.max(0,Number(values.anak_count||0)));
-  const children=Array.from({length:childrenCount},(_,i)=>{
+  return Array.from({length:childrenCount},(_,i)=>{
     const n=i+1,p=`anak${n}_`;
     const fs=[{name:p+'nama',label:'Nama'},{name:p+'lp',label:'Jenis kelamin',type:'select',options:choices(['Laki-laki','Perempuan'])},{name:p+'umur',label:'Umur',type:'number',min:0,max:100},{name:p+'pendidikan',label:'Pendidikan',type:'select',options:educationChoices},{name:p+'pekerjaan',label:'Pekerjaan'}];
     return `<div class="repeat-row"><div class="repeat-title">Anak ${n}</div>${basicGrid(fs,values)}</div>`;
   }).join('');
-  const spouseHidden=values.status_kawin==='Kawin'?'':'hidden';
-  const childrenHidden=!values.status_kawin||values.status_kawin==='Belum kawin'?'hidden':'';
-  return sectionHtml('B','SUSUNAN KELUARGA',
-    `<div class="repeat-title">Orang tua</div>${basicGrid(parentFields,values)}<div class="repeat-row"><div class="repeat-title">Saudara kandung</div>${countSelect('saudara_count','Jumlah saudara kandung',3,siblingCount,0)}<div id="siblings-rows">${siblings}</div></div><div class="repeat-row">${basicGrid([{...maritalField,label:'Status Perkawinan Anda'}],values)}</div><div class="conditional-fields" data-conditional="true" data-block="spouse" ${spouseHidden}><div class="repeat-title">Suami / istri</div>${basicGrid(spouseFields,values)}</div><div class="conditional-fields" data-conditional="true" data-block="children" ${childrenHidden}><div class="repeat-title">Anak</div>${countSelect('anak_count','Jumlah anak',3,childrenCount,0)}<div id="children-rows">${children}</div></div>`);
 }
 
-function renderEducation(values={}){
+function renderLanguageRowsHtml(values={}){
+  const count=Math.min(4,Math.max(0,Number(values.bahasa_count||0)));
+  return Array.from({length:count},(_,i)=>{
+    const n=i+1,p=`bahasa${n}`;
+    const fs=[{name:p,label:'Bahasa',type:'select',options:choices(['Inggris','Mandarin','Arab','Jepang','Rusia','Jerman','Perancis','Latin','Lainnya'])},{name:p+'_bicara',label:'Berbicara',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_baca',label:'Membaca',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_tulis',label:'Menulis',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_lainnya',label:'Nama bahasa (jika memilih Lainnya)'}];
+    return `<div class="repeat-row"><div class="repeat-title">Bahasa ${n}</div>${basicGrid(fs,values)}</div>`;
+  }).join('');
+}
+
+function renderWorkRowsHtml(values={}){
+  const count=Math.min(3,Math.max(0,Number(values.kerja_count||0)));
+  return Array.from({length:count},(_,i)=>{
+    const n=i+1,p=`kerja${n}_`,fs=workKeys.map(([key,label,type])=>({name:p+key,label,currency:type==='currency',type:type==='number'?'number':type==='month'?'month':undefined,min:type==='number'?0:undefined,wide:['perusahaan','alasan'].includes(key)}));
+    return `<div class="repeat-row"><div class="repeat-title">Pengalaman ${n}${n===1?' · terakhir':''}</div>${basicGrid(fs,values)}</div>`;
+  }).join('');
+}
+
+function renderEducationBlock(fieldConfig, values={}){
   let selected=String(values.pendidikan_terakhir||'');
-  if(!selected){if(values.universitas_instansi)selected='S1';else if(values.diploma_instansi)selected='D1-D4';else if(values.sma_instansi)selected='SMA';else if(values.smp_instansi)selected='SMP';else if(values.sd_instansi)selected='SD';}
+  if(!selected){
+    if(values.universitas_instansi)selected='S1';
+    else if(values.diploma_instansi)selected='D1-D4';
+    else if(values.sma_instansi)selected='SMA';
+    else if(values.smp_instansi)selected='SMP';
+    else if(values.sd_instansi)selected='SD';
+  }
   const levels=[['SD','SD / Sederajat'],['SMP','SMP / Sederajat'],['SMA','SMA / SMK'],['D1-D4','Diploma 1–4'],['S1','Sarjana (S1)'],['S2','Magister (S2)'],['S3','Doktor (S3)']];
   let rows=[];
   if(['SD','SMP','SMA','D1-D4'].includes(selected)){
@@ -322,29 +475,76 @@ function renderEducation(values={}){
     const fields=row.fields.map(([key,label,type])=>({name:`${row.prefix}_${key}`,label,type:type==='year'?'year':undefined}));
     return `<div class="repeat-row"><div class="repeat-title">${row.title}</div>${basicGrid(fields,values)}</div>`;
   }).join('');
-  return sectionHtml('C','PENDIDIKAN FORMAL',`${basicGrid([{name:'pendidikan_terakhir',label:'Pendidikan Terakhir',type:'select',options:levels.map(([value,label])=>({value,label})),required:true}],{pendidikan_terakhir:selected})}${content}`);
+  return `${basicGrid([{name:'pendidikan_terakhir',label:fieldConfig?.label||'Pendidikan Terakhir',type:'select',options:levels.map(([value,label])=>({value,label})),required:fieldConfig?.required===true}],{pendidikan_terakhir:selected})}${content}`;
 }
-function renderLanguages(values={}){
-  const count=Math.min(4,Math.max(0,Number(values.bahasa_count||0)));
-  const rows=Array.from({length:count},(_,i)=>{
-    const n=i+1,p=`bahasa${n}`;
-    const fs=[{name:p,label:'Bahasa',type:'select',options:choices(['Inggris','Mandarin','Arab','Jepang','Rusia','Jerman','Perancis','Latin','Lainnya'])},{name:p+'_bicara',label:'Berbicara',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_baca',label:'Membaca',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_tulis',label:'Menulis',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_lainnya',label:'Nama bahasa (jika memilih Lainnya)'}];
-    return `<div class="repeat-row"><div class="repeat-title">Bahasa ${n}</div>${basicGrid(fs,values)}</div>`;
+
+function renderDynamicSection(sectionId, values={}){
+  const meta=SECTION_META_BY_ID[sectionId];
+  const secConfig=stage2Schema.sections?.[sectionId];
+  if(!meta || !secConfig) return '';
+  if(!MANDATORY_STAGE2_SECTIONS.has(sectionId) && secConfig.enabled===false) return '';
+
+  const enabledFields=(secConfig.fields||[]).filter(f=>f.enabled!==false);
+  if(!enabledFields.length && !MANDATORY_STAGE2_SECTIONS.has(sectionId)) return '';
+
+  const itemsHtml=enabledFields.map(f=>{
+    if(f.type==='system_domicile'){
+      const different=String(values.domisili_berbeda||'false')==='true' || (!!values.domisili && !!values.alamat_asal && values.domisili!==values.alamat_asal);
+      return `<div class="form-field wide"><label class="inline-toggle"><input type="checkbox" name="domisili_berbeda" value="true" ${different?'checked':''}><span>${esc(f.label)}</span></label><div class="conditional-fields" data-conditional="true" data-block="domicile" ${different?'':'hidden'}>${basicGrid([{name:'domisili',label:'Alamat domisili',placeholder:f.placeholder||'',type:'textarea',wide:true}],values)}</div></div>`;
+    }
+    if(f.type==='system_siblings_repeater'){
+      const siblingCount=Math.min(3,Math.max(0,Number(values.saudara_count??0)));
+      return `<div class="form-field wide repeat-row-wide"><div class="repeat-row"><div class="repeat-title">Saudara kandung</div>${countSelect('saudara_count',f.label||'Jumlah saudara kandung',3,siblingCount,0,true)}<div id="siblings-rows">${renderSiblingsRowsHtml(values)}</div></div></div>`;
+    }
+    if(f.type==='system_spouse_group'){
+      const spouseHidden=values.status_kawin==='Kawin'?'':'hidden';
+      return `<div class="form-field wide repeat-row-wide conditional-fields" data-conditional="true" data-block="spouse" ${spouseHidden}><div class="repeat-title">Suami / istri</div>${basicGrid(spouseFields,values)}</div>`;
+    }
+    if(f.type==='system_children_repeater'){
+      const childrenCount=Math.min(3,Math.max(0,Number(values.anak_count||0)));
+      const childrenHidden=!values.status_kawin||values.status_kawin==='Belum kawin'?'hidden':'';
+      return `<div class="form-field wide repeat-row-wide conditional-fields" data-conditional="true" data-block="children" ${childrenHidden}><div class="repeat-title">Anak</div>${countSelect('anak_count',f.label||'Jumlah anak',3,childrenCount,0,true)}<div id="children-rows">${renderChildrenRowsHtml(values)}</div></div>`;
+    }
+    if(f.type==='system_education_repeater'){
+      return `<div class="form-field wide repeat-row-wide" id="education-block">${renderEducationBlock(f,values)}</div>`;
+    }
+    if(f.type==='system_languages_repeater'){
+      const count=Math.min(4,Math.max(0,Number(values.bahasa_count||0)));
+      return `<div class="form-field wide repeat-row-wide">${countSelect('bahasa_count',f.label||'Jumlah bahasa',4,count,0,true)}<div id="language-rows">${renderLanguageRowsHtml(values)}</div></div>`;
+    }
+    if(f.type==='system_work_repeater'){
+      const count=Math.min(3,Math.max(0,Number(values.kerja_count||0)));
+      return `<div class="form-field wide repeat-row-wide">${countSelect('kerja_count',f.label||'Jumlah pengalaman kerja',3,count,0,true)}<div class="conditional-fields" data-conditional="true" data-block="work-rows" ${count?'':'hidden'}><div id="work-rows">${renderWorkRowsHtml(values)}</div></div></div>`;
+    }
+    return fieldHtml(buildStage2FieldDef(f), values);
   }).join('');
-  return sectionHtml('D','KEMAMPUAN BAHASA (SELAIN BAHASA INDONESIA)',`${countSelect('bahasa_count','Jumlah bahasa',4,count,0)}<div id="language-rows">${rows}</div>`);
+
+  let addressExtras='';
+  if(sectionId==='address'){
+    addressExtras=`<input type="hidden" name="alamat_provinsi_id" value="${esc(values.alamat_provinsi_id||'')}"><input type="hidden" name="alamat_kota_id" value="${esc(values.alamat_kota_id||'')}"><input type="hidden" name="alamat_kota_jenis" value="${esc(values.alamat_kota_jenis||'Kabupaten')}"><input type="hidden" name="alamat_kecamatan_id" value="${esc(values.alamat_kecamatan_id||'')}"><input type="hidden" name="alamat_desa_id" value="${esc(values.alamat_desa_id||'')}"><input type="hidden" name="alamat_wilayah_type" value="${esc(values.alamat_wilayah_type||'')}"><input type="hidden" name="alamat_asal" value="${esc(values.alamat_asal||'')}"><div class="address-preview" id="address-preview"></div>`;
+  }
+
+  return sectionHtml(meta.code, secConfig.title || meta.defaultTitle, `<div class="form-grid">${itemsHtml}</div>${addressExtras}`, sectionId);
 }
-function renderWork(values={}){
-  const count=Math.min(3,Math.max(0,Number(values.kerja_count||0)));
-  const rows=Array.from({length:count},(_,i)=>{
-    const n=i+1,p=`kerja${n}_`,fs=workKeys.map(([key,label,type])=>({name:p+key,label,currency:type==='currency',type:type==='number'?'number':type==='month'?'month':undefined,min:type==='number'?0:undefined,wide:['perusahaan','alasan'].includes(key)}));
-    return `<div class="repeat-row"><div class="repeat-title">Pengalaman ${n}${n===1?' · terakhir':''}</div>${basicGrid(fs,values)}</div>`;
-  }).join('');
-  return sectionHtml('F','PENGALAMAN KERJA',`${countSelect('kerja_count','Jumlah pengalaman kerja',3,count,0)}<div class="conditional-fields" data-conditional="true" data-block="work-rows" ${count?'':'hidden'}><div id="work-rows">${rows}</div></div>`);
+
+function computeActiveStepDefs(adminMode = false){
+  const defs=[];
+  for(const stepIdx of [0,1,2,3]){
+    const order=stage2Schema.stepSectionOrder?.[stepIdx] || STEP_SECTION_DEFAULTS[stepIdx] || [];
+    const activeIds=order.filter(secId=>{
+      const sec=stage2Schema.sections?.[secId];
+      if(MANDATORY_STAGE2_SECTIONS.has(secId)) return true;
+      if(!sec || sec.enabled===false) return adminMode;
+      return (sec.fields||[]).some(f=>f.enabled!==false);
+    });
+    if(activeIds.length){
+      defs.push({stepIndex:stepIdx, label:stepTitles[stepIdx], secIds:activeIds});
+    }
+  }
+  defs.push({stepIndex:4, label:stepTitles[4], secIds:[]});
+  return defs;
 }
-function renderReferences(values={}){
-  const fs=refKeys.map(([key,label])=>({name:`referensi1_${key}`,label,type:key==='alamat'?'textarea':key==='telepon'?'tel':key==='hubungan'?'select':undefined,options:key==='hubungan'?choices(['Orang tua','Pasangan','Saudara','Teman','Atasan','Lainnya']):undefined,wide:key==='alamat'}));
-  return sectionHtml('H','ORANG YANG BISA DIHUBUNGI DALAM KEADAAN DARURAT',`<div class="repeat-row">${basicGrid(fs,values)}</div>`);
-}
+
 function renderOcrMappingPanel(data){
   if(!data)return '';
   const gender=data.gender==='L'?'Laki-laki':data.gender==='P'?'Perempuan':data.gender||'';
@@ -373,43 +573,53 @@ function renderOcrMappingPanel(data){
   const rowsHtml=rows.map(([label,value])=>`<tr><td>${esc(label)}</td><td>${String(value||'').trim()?esc(value):'<span class="ocr-map-missing">Belum terbaca</span>'}</td></tr>`).join('');
   return `<details class="ocr-map-details" open><summary>Hasil pembacaan KTP</summary><div class="ocr-map-table-wrap"><table class="ocr-map-table"><thead><tr><th>Data KTP</th><th>Hasil</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></details>`;
 }
+
 function renderForm(values={}, options={}){
   initialData=values;
-  activeStep=Math.min(stepNames.length-1,Math.max(0,Number(values.__form_step||0)));
-  const step0=`<div class="form-step" data-form-step="0">${sectionHtml('A','DATA PRIBADI',basicGrid(personalFields,values))}${renderAddress(values)}${sectionHtml('P','INFORMASI LAMARAN',basicGrid(applicationFields,values))}</div>`;
-  const step1=`<div class="form-step" data-form-step="1">${renderFamily(values)}${renderEducation(values)}</div>`;
-  const step2=`<div class="form-step" data-form-step="2">${renderLanguages(values)}${sectionHtml('E','HOBI',basicGrid([{name:'hobby',label:'Hobi dan minat',type:'textarea',wide:true}],values))}${renderWork(values)}</div>`;
-  const step3=`<div class="form-step" data-form-step="3">${sectionHtml('G','EKSPEKTASI',basicGrid([{name:'mulai_kerja',label:'Tanggal mulai bisa bekerja',type:'date'},{name:'gaji_harapan',label:'Gaji yang diharapkan (Rp)',currency:true},{name:'fasilitas_harapan',label:'Fasilitas lain yang diharapkan',wide:true}],values))}${renderReferences(values)}${sectionHtml('I','PERTANYAAN TERBUKA',basicGrid([{name:'jawaban1',label:'Apa yang Anda ketahui tentang perusahaan kami?',type:'textarea',wide:true},{name:'jawaban2',label:'Ceritakan tentang pribadi Anda.',type:'textarea',wide:true},{name:'jawaban3',label:'Apa yang akan Anda lakukan untuk perusahaan kami jika diterima?',type:'textarea',wide:true}],values))}</div>`;
-  const consent=`<label class="consent-wrap"><input type="checkbox" id="setuju" name="setuju" value="true" ${String(values.setuju)==='true'||values.setuju===true?'checked':''} required><span>Dengan ini saya menyatakan semua data yang saya isi benar.</span></label>`;
+  activeStepDefs=computeActiveStepDefs(options.adminMode === true);
+  const savedStep=Number(values.__form_step||0);
+  activeStep=activeStepDefs.some(d=>d.stepIndex===savedStep) ? savedStep : activeStepDefs[0].stepIndex;
+
+  const contentStepsHtml=activeStepDefs
+    .filter(d=>d.stepIndex!==4)
+    .map(d=>`<div class="form-step" data-form-step="${d.stepIndex}">${d.secIds.map(secId=>renderDynamicSection(secId,values)).join('')}</div>`)
+    .join('');
+
+  const consentText=stage2Schema.consentText || DEFAULT_STAGE2_SCHEMA.consentText;
+  const consentChecked = String(values.setuju)==='true' || values.setuju===true;
+  const consentHtml = `<label class="consent-wrap"><input type="checkbox" id="setuju" name="setuju" value="true" ${consentChecked?'checked':''} required><span>${esc(consentText)}</span></label>`;
+
   const adminAttachments=options.adminMode
     ? `<div class="admin-attachment-grid">
         ${values.ktp_path?`<button type="button" class="admin-attachment-action" data-admin-document="ktp"><span class="admin-attachment-icon">▧</span><span><b>Foto KTP</b><small>Buka dokumen di tab baru</small></span><strong>↗</strong></button>`:'<div class="admin-attachment-missing">Foto KTP tidak tersedia.</div>'}
         ${values.cv_path?`<button type="button" class="admin-attachment-action" data-admin-document="cv"><span class="admin-attachment-icon">▤</span><span><b>Curriculum Vitae</b><small>Buka dokumen di tab baru</small></span><strong>↗</strong></button>`:'<div class="admin-attachment-missing">CV tidak tersedia.</div>'}
       </div>`
     : '';
+
   const step4=options.adminMode
-    ? `<div class="form-step" data-form-step="4">${sectionHtml('J','PERNYATAAN',consent)}<section class="form-section admin-attachment-note"><h2><span class="section-bullet">↗</span>LAMPIRAN</h2>${adminAttachments}</section></div>`
-    : `<div class="form-step" data-form-step="4">${sectionHtml('J','PERNYATAAN',consent)}<section class="form-section"><h2><span class="section-bullet">KTP</span>FOTO KTP</h2><p class="field-hint">Unggah foto KTP yang jelas. Pada mode manual, foto hanya dikompres di perangkat dan tidak diproses dengan OCR.</p><label class="upload-zone"><span class="upload-icon">↥</span><b id="ktp-upload-label">Unggah foto KTP</b><small>JPG, PNG, atau WebP · Maks. 8 MB</small><input type="file" id="ktp-photo-file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><div class="cv-upload-state" id="ktp-upload-state" aria-live="polite"></div><img id="ktp-photo-preview" alt="Pratinjau foto KTP" hidden style="display:none;max-width:100%;width:240px;max-height:150px;object-fit:contain;border:1px solid #dce2ea;border-radius:10px;margin-top:12px"></section><section class="form-section"><h2><span class="section-bullet">CV</span>CURRICULUM VITAE</h2><label class="upload-zone cv-upload-zone"><span class="upload-icon">↥</span><b id="cv-filename">${esc(cvFilename||'Unggah CV (PDF)')}</b><small>PDF · Maks. 10 MB</small><input type="file" id="cv-file" accept="application/pdf,.pdf"></label><div class="cv-upload-state" id="cv-upload-state"></div></section></div>`;
+    ? `<div class="form-step" data-form-step="4">${sectionHtml('J','PERNYATAAN',consentHtml)}<section class="form-section admin-attachment-note"><h2><span class="section-bullet">↗</span>LAMPIRAN</h2>${adminAttachments}</section></div>`
+    : `<div class="form-step" data-form-step="4">${sectionHtml('J','PERNYATAAN',consentHtml)}<section class="form-section"><h2><span class="section-bullet">KTP</span>FOTO KTP</h2><p class="field-hint">Unggah foto KTP yang jelas. Pada mode manual, foto hanya dikompres di perangkat dan tidak diproses dengan OCR.</p><label class="upload-zone"><span class="upload-icon">↥</span><b id="ktp-upload-label">Unggah foto KTP</b><small>JPG, PNG, atau WebP · Maks. 8 MB</small><input type="file" id="ktp-photo-file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><div class="cv-upload-state" id="ktp-upload-state" aria-live="polite"></div><img id="ktp-photo-preview" alt="Pratinjau foto KTP" hidden style="display:none;max-width:100%;width:240px;max-height:150px;object-fit:contain;border:1px solid #dce2ea;border-radius:10px;margin-top:12px"></section><section class="form-section"><h2><span class="section-bullet">CV</span>CURRICULUM VITAE</h2><label class="upload-zone cv-upload-zone"><span class="upload-icon">↥</span><b id="cv-filename">${esc(cvFilename||'Unggah CV (PDF)')}</b><small>PDF · Maks. 10 MB</small><input type="file" id="cv-file" accept="application/pdf,.pdf"></label><div class="cv-upload-state" id="cv-upload-state"></div></section></div>`;
+
   const reviewCount=options.adminMode?0:Object.values(ocrFieldConfidence).filter(score=>score<0.84).length;
   const reviewNotice=reviewCount?`<div class="ocr-review-summary" role="status">${reviewCount} bagian hasil OCR memiliki tingkat keyakinan teks rendah. Periksa penanda di samping kolom sebelum mengirim lamaran.</div>`:'';
+
   if(options.adminMode){
-    return `<div class="admin-candidate-wizard"><div class="step-top"><span class="stage-kicker">DATA KANDIDAT</span><span class="step-number" id="admin-wizard-count">01 / 05</span></div><div class="wizard-progress"><span id="admin-wizard-progress"></span></div><section class="candidate-card form-wizard-card"><div class="wizard-heading"><div><h1 class="candidate-title">Formulir kandidat</h1><div class="wizard-step-label" id="admin-wizard-step-label">${stepNames[0]}</div></div><span class="admin-editor-state">MODE KOREKSI</span></div><form id="admin-candidate-form" novalidate>${step0}${step1}${step2}${step3}${step4}<div class="wizard-actions admin-wizard-actions"><button type="button" class="btn btn-secondary" id="admin-wizard-prev" disabled>Kembali</button><button type="button" class="btn btn-primary" id="admin-wizard-next">Lanjut</button></div></form></section></div>`;
+    return `<div class="admin-candidate-wizard"><div class="step-top"><span class="stage-kicker">DATA KANDIDAT</span><span class="step-number" id="admin-wizard-count">01 / ${String(activeStepDefs.length).padStart(2,'0')}</span></div><div class="wizard-progress"><span id="admin-wizard-progress"></span></div><section class="candidate-card form-wizard-card"><div class="wizard-heading"><div><h1 class="candidate-title">Formulir kandidat</h1><div class="wizard-step-label" id="admin-wizard-step-label">${stepTitles[0]}</div></div><span class="admin-editor-state">MODE KOREKSI</span></div><form id="admin-candidate-form" novalidate>${contentStepsHtml}${step4}<div class="wizard-actions admin-wizard-actions"><button type="button" class="btn btn-secondary" id="admin-wizard-prev" disabled>Kembali</button><button type="button" class="btn btn-primary" id="admin-wizard-next">Lanjut</button></div></form></section></div>`;
   }
-  return `<div class="step-top"><span class="stage-kicker">FORMULIR LAMARAN KERJA</span><span class="step-number" id="wizard-count"></span></div><div class="wizard-progress"><span id="wizard-progress-bar"></span></div><section class="candidate-card form-wizard-card">${renderOcrMappingPanel(ocrMappingData)}${reviewNotice}<div class="wizard-heading"><div><h1 class="candidate-title">Data pelamar</h1><div class="wizard-step-label" id="wizard-step-label"></div></div><span class="wizard-save-state" id="draft-save-state" aria-live="polite">●</span></div><form id="application-form" novalidate>${step0}${step1}${step2}${step3}${step4}<div id="form-error" class="form-error" role="alert"></div><div class="wizard-actions"><button type="button" class="btn btn-secondary" id="wizard-prev">Kembali</button><button type="button" class="btn btn-primary" id="wizard-next">Lanjut</button></div></form></section>`;
+  return `<div class="step-top"><span class="stage-kicker">FORMULIR LAMARAN KERJA</span><span class="step-number" id="wizard-count"></span></div><div class="wizard-progress"><span id="wizard-progress-bar"></span></div><section class="candidate-card form-wizard-card">${renderOcrMappingPanel(ocrMappingData)}${reviewNotice}<div class="wizard-heading"><div><h1 class="candidate-title">Data pelamar</h1><div class="wizard-step-label" id="wizard-step-label"></div></div><span class="wizard-save-state" id="draft-save-state" aria-live="polite">●</span></div><form id="application-form" novalidate>${contentStepsHtml}${step4}<div id="form-error" class="form-error" role="alert"></div><div class="wizard-actions"><button type="button" class="btn btn-secondary" id="wizard-prev">Kembali</button><button type="button" class="btn btn-primary" id="wizard-next">Lanjut</button></div></form></section>`;
 }
 
 /**
- * Build the Tahap 2 admin editor from the exact field renderer used by the
- * candidate mobile form. This keeps labels, options, conditional groups and
- * wizard order in one source of truth.
+ * Build the Stage 2 admin editor using the exact mobile section/field renderer.
+ * Zero external emsifa.com requests are issued on modal open.
  */
 export function renderAdminEditorMarkup(values={}, positions=[]){
+  stage2Schema = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
   const source={...(values||{})};
-  const normalizedPositions=[...new Set([...(Array.isArray(positions)?positions:[]),source.posisi].map(v=>String(v||'').trim()).filter(Boolean))];
-  availablePositions=normalizedPositions.length?normalizedPositions:DEFAULT_POSITIONS.slice();
-  applicationFields[0].options=choices(availablePositions);
-  // Older submissions may not contain the visible repeat-count controls. Infer
-  // the number of rendered rows from the saved keys instead of hiding data.
+  const normalizedPositions=[...new Set([...(Array.isArray(positions)?positions:[]),...stage2Schema.positions,source.posisi].map(v=>String(v||'').trim()).filter(Boolean))];
+  availablePositions=normalizedPositions.length?normalizedPositions:stage2Schema.positions.slice();
+  availableInfoSources=stage2Schema.infoSources.slice();
+
   const inferCount=(key,pattern,max)=>{
     if(source[key]!==undefined&&source[key]!==null&&source[key]!=='')return;
     const numbers=Object.keys(source).map(name=>name.match(pattern)).filter(Boolean).map(match=>Number(match[1]));
@@ -420,7 +630,7 @@ export function renderAdminEditorMarkup(values={}, positions=[]){
   inferCount('bahasa_count',/^bahasa([1-4])_bicara$/,4);
   inferCount('kerja_count',/^kerja([1-3])_perusahaan$/,3);
   if(!source.pendidikan_terakhir){
-    if(source.universitas_instansi)source.pendidikan_terakhir=source.sma_instansi?'S1':'S1';
+    if(source.universitas_instansi)source.pendidikan_terakhir='S1';
     else if(source.diploma_instansi)source.pendidikan_terakhir='D1-D4';
     else if(source.sma_instansi)source.pendidikan_terakhir='SMA';
     else if(source.smp_instansi)source.pendidikan_terakhir='SMP';
@@ -437,20 +647,21 @@ export function renderAdminEditorMarkup(values={}, positions=[]){
 export async function bindAdminEditorForm(form, values={}){
   if(!form)throw new Error('Form koreksi kandidat tidak ditemukan.');
   const host=form.closest('.admin-candidate-wizard')||form.parentElement;
-  const labels=stepNames;
-  let step=0;
-  const showStep=(next,scroll=true)=>{
-    step=Math.max(0,Math.min(labels.length-1,next));
-    form.querySelectorAll('.form-step').forEach(el=>{el.hidden=Number(el.dataset.formStep)!==step;});
-    const count=host.querySelector('#admin-wizard-count');if(count)count.textContent=`${String(step+1).padStart(2,'0')} / 05`;
-    const title=host.querySelector('#admin-wizard-step-label');if(title)title.textContent=labels[step];
-    const progress=host.querySelector('#admin-wizard-progress');if(progress)progress.style.width=`${(step+1)/labels.length*100}%`;
-    const prev=host.querySelector('#admin-wizard-prev');if(prev)prev.disabled=step===0;
-    const nextButton=host.querySelector('#admin-wizard-next');if(nextButton){nextButton.textContent='Lanjut';nextButton.hidden=step===labels.length-1;}
+  const defs=computeActiveStepDefs(true);
+  let pos=0;
+  const showStep=(nextPos,scroll=true)=>{
+    pos=Math.max(0,Math.min(defs.length-1,nextPos));
+    const stepIdx=defs[pos].stepIndex;
+    form.querySelectorAll('.form-step').forEach(el=>{el.hidden=Number(el.dataset.formStep)!==stepIdx;});
+    const count=host.querySelector('#admin-wizard-count');if(count)count.textContent=`${String(pos+1).padStart(2,'0')} / ${String(defs.length).padStart(2,'0')}`;
+    const title=host.querySelector('#admin-wizard-step-label');if(title)title.textContent=defs[pos].label;
+    const progress=host.querySelector('#admin-wizard-progress');if(progress)progress.style.width=`${(pos+1)/defs.length*100}%`;
+    const prev=host.querySelector('#admin-wizard-prev');if(prev)prev.disabled=pos===0;
+    const nextButton=host.querySelector('#admin-wizard-next');if(nextButton){nextButton.textContent='Lanjut';nextButton.hidden=pos===defs.length-1;}
     if(scroll)host.scrollIntoView?.({behavior:'smooth',block:'start'});
   };
-  host.querySelector('#admin-wizard-prev')?.addEventListener('click',()=>showStep(step-1));
-  host.querySelector('#admin-wizard-next')?.addEventListener('click',()=>showStep(step+1));
+  host.querySelector('#admin-wizard-prev')?.addEventListener('click',()=>showStep(pos-1));
+  host.querySelector('#admin-wizard-next')?.addEventListener('click',()=>showStep(pos+1));
 
   const numericFields=['nik','alamat_rt','alamat_rw','alamat_kodepos'];
   form.addEventListener('input',event=>{
@@ -459,7 +670,7 @@ export async function bindAdminEditorForm(form, values={}){
     if(el.name==='telepon')normalizeDigitInput(el,16);
     if(el.dataset.formatNumber==='idr')formatCurrencyInput(el);
     if(['nama','tanggal_lahir','gender'].includes(el.name))syncApplicantRow(form);
-    if(addressFields.some(field=>field.name===el.name))updateAddressPreview(form);
+    if(ADDRESS_FIELD_NAMES.includes(el.name))updateAddressPreview(form);
   });
   form.addEventListener('change',async event=>{
     const key=event.target?.name;
@@ -468,15 +679,17 @@ export async function bindAdminEditorForm(form, values={}){
     }
     if(['saudara_count','anak_count','bahasa_count','kerja_count'].includes(key))rerenderGroups(form);
     if(key==='pendidikan_terakhir'){
-      const old=collect(form);const section=[...form.querySelectorAll('.form-section')].find(el=>el.textContent.includes('PENDIDIKAN FORMAL'));
-      if(section)section.outerHTML=renderEducation(old);
+      const old=collect(form);
+      const eduBlock=$('#education-block',form);
+      const eduField=stage2Schema.sections?.education?.fields?.find(f=>f.type==='system_education_repeater');
+      if(eduBlock)eduBlock.innerHTML=renderEducationBlock(eduField,old);
     }else if(key==='status_kawin'||key==='domisili_berbeda')updateDynamic(form,collect(form));
     syncApplicantRow(form);updateAddressPreview(form);
   });
   showStep(0,false);
   rerenderGroups(form);
-  // Populate saved KTP region values immediately in Admin Edit mode without
-  // blocking on external emsifa.com cascading HTTP requests/cache lookups.
+
+  // Populate saved KTP region values synchronously without querying emsifa.com
   const savedRegions=[
     ['alamat_provinsi',values.alamat_provinsi,'Pilih provinsi',values.alamat_provinsi_id],
     ['alamat_kota_nama',values.alamat_kota_nama,'Pilih kabupaten / kota',values.alamat_kota_id],
@@ -506,8 +719,6 @@ export function collectAdminEditorData(form, original={}){
   merged.nama=String(edited.nama||'').trim();
   merged.nik=String(edited.nik||'').replace(/\D/g,'');
   merged.posisi=String(edited.posisi||'').trim();
-  // A visible repeat-count is an explicit instruction to retain only that many
-  // entries. Remove stale keys above the chosen count instead of keeping hidden rows.
   const repeatGroups=[
     {prefix:'saudara',count:Number(edited.saudara_count||0),offset:1},
     {prefix:'anak',count:Number(edited.anak_count||0),offset:0},
@@ -522,7 +733,6 @@ export function collectAdminEditorData(form, original={}){
       if(match&&Number(match[1])>keepThrough)delete merged[key];
     });
   }
-  // Recompute the candidate's own family-row mirror, as the mobile form does.
   merged.saudara1_nama=merged.nama||'';
   merged.saudara1_lp=merged.gender||'';
   merged.saudara1_umur=merged.umur??'';
@@ -538,12 +748,25 @@ function buildAddress(data){
 }
 function collect(form){
   const data={};
-  // Keep even conditionally hidden values in the draft. If a candidate changes a
-  // selection by mistake, hiding a group must not erase what was already typed.
+  const radioSeen=new Set();
+  const multiSeen=new Set();
   for(const el of [...form.elements]){
     const key=el.name;
     if(!key||el.disabled||el.type==='file') continue;
-    if(el.type==='checkbox'){data[key]=el.checked?'true':'false';continue;}
+    if(el.type==='radio'){
+      if(!radioSeen.has(key)){radioSeen.add(key);if(!(key in data))data[key]='';}
+      if(el.checked)data[key]=el.value;
+      continue;
+    }
+    if(el.type==='checkbox'){
+      if(el.dataset.multiCheckbox==='true'){
+        if(!multiSeen.has(key)){multiSeen.add(key);data[key]=[];}
+        if(el.checked)data[key].push(el.value);
+      }else{
+        data[key]=el.checked?'true':'false';
+      }
+      continue;
+    }
     data[key]=el.value;
   }
   const genderMap={'Laki-laki':'L','Perempuan':'P'};
@@ -554,12 +777,9 @@ function collect(form){
   for(let i=1;i<=3;i++){const key=`anak${i}_lp`;if(genderMap[data[key]])data[key]=genderMap[data[key]];}
   data.umur=ageFrom(data.tanggal_lahir);
   data.nama_terang=data.nama||'';
-  // Candidate is appended as the first family member automatically.
   data.saudara1_nama=data.nama||'';
   data.saudara1_lp=data.gender||'';
   data.saudara1_umur=data.umur;
-  data.saudara1_pendidikan=data.pendidikan_terakhir||data.saudara1_pendidikan||'';
-  data.saudara1_pekerjaan=data.kerja1_jabatan||data.kerja1_usaha||data.saudara1_pekerjaan||'';
   data.saudara1_pendidikan=data.pendidikan_terakhir||data.saudara1_pendidikan||'';
   data.saudara1_pekerjaan=data.kerja1_jabatan||data.kerja1_usaha||data.saudara1_pekerjaan||'';
   return buildAddress(data);
@@ -573,54 +793,27 @@ function updateDynamic(form,values){
   const marital=form.querySelector('[name="status_kawin"]')?.value||values.status_kawin||'';
   const spouse=form.querySelector('[data-block="spouse"]');if(spouse)spouse.hidden=marital!=='Kawin';
   const children=form.querySelector('[data-block="children"]');if(children)children.hidden=!marital||marital==='Belum kawin';
-  const workCount=Number(form.querySelector('#kerja_count')?.value??values.kerja_count??0);
+  const workCount=Number(form.querySelector('#f-kerja_count')?.value??values.kerja_count??0);
   const work=form.querySelector('[data-block="work-rows"]');if(work)work.hidden=workCount===0;
-  
+
   const domicile=form.querySelector('[data-block="domicile"]');
   const domicileToggle=form.querySelector('[name="domisili_berbeda"]');
   if(domicile)domicile.hidden=!domicileToggle?.checked;
 }
 function rerenderGroups(form){
   const values=collect(form);
-  const siblingCount=Math.min(3,Math.max(0,Number(values.saudara_count??0)));
   const siblingHost=$('#siblings-rows',form);
-  if(siblingHost){
-    siblingHost.innerHTML=Array.from({length:siblingCount},(_,i)=>{
-      const n=i+2,p=`saudara${n}_`;
-      const fields=[
-        {name:p+'nama',label:'Nama'},
-        {name:p+'lp',label:'Jenis kelamin',type:'select',options:choices(['Laki-laki','Perempuan'])},
-        {name:p+'umur',label:'Umur',type:'number',min:0,max:120},
-        {name:p+'pendidikan',label:'Pendidikan',type:'select',options:educationChoices},
-        {name:p+'pekerjaan',label:'Pekerjaan'}
-      ];
-      return `<div class="repeat-row"><div class="repeat-title">Saudara kandung ${i+1}</div>${basicGrid(fields,values)}</div>`;
-    }).join('');
-  }
+  if(siblingHost) siblingHost.innerHTML=renderSiblingsRowsHtml(values);
+
   const childrenHost=$('#children-rows',form);
-  if(childrenHost){
-    const count=Math.min(3,Math.max(0,Number(values.anak_count||0)));
-    childrenHost.innerHTML=Array.from({length:count},(_,i)=>{
-      const n=i+1,p=`anak${n}_`,fields=[{name:p+'nama',label:'Nama'},{name:p+'lp',label:'Jenis kelamin',type:'select',options:choices(['Laki-laki','Perempuan'])},{name:p+'umur',label:'Umur',type:'number',min:0,max:100},{name:p+'pendidikan',label:'Pendidikan',type:'select',options:educationChoices},{name:p+'pekerjaan',label:'Pekerjaan'}];
-      return `<div class="repeat-row"><div class="repeat-title">Anak ${n}</div>${basicGrid(fields,values)}</div>`;
-    }).join('');
-  }
+  if(childrenHost) childrenHost.innerHTML=renderChildrenRowsHtml(values);
+
   const languageHost=$('#language-rows',form);
-  if(languageHost){
-    const count=Math.min(4,Math.max(0,Number(values.bahasa_count||0)));
-    languageHost.innerHTML=Array.from({length:count},(_,i)=>{
-      const p=`bahasa${i+1}`,fields=[{name:p,label:'Bahasa',type:'select',options:choices(['Inggris','Mandarin','Arab','Jepang','Rusia','Jerman','Perancis','Latin','Lainnya'])},{name:p+'_bicara',label:'Berbicara',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_baca',label:'Membaca',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_tulis',label:'Menulis',type:'select',options:choices(['Dasar','Menengah','Mahir'])},{name:p+'_lainnya',label:'Nama bahasa (jika memilih Lainnya)'}];
-      return `<div class="repeat-row"><div class="repeat-title">Bahasa ${i+1}</div>${basicGrid(fields,values)}</div>`;
-    }).join('');
-  }
+  if(languageHost) languageHost.innerHTML=renderLanguageRowsHtml(values);
+
   const workHost=$('#work-rows',form);
-  if(workHost){
-    const count=Math.min(3,Math.max(0,Number(values.kerja_count||0)));
-    workHost.innerHTML=Array.from({length:count},(_,i)=>{
-      const n=i+1,p=`kerja${n}_`,fields=workKeys.map(([key,label,type])=>({name:p+key,label,currency:type==='currency',type:type==='number'?'number':type==='month'?'month':undefined,min:type==='number'?0:undefined,wide:['perusahaan','alasan'].includes(key)}));
-      return `<div class="repeat-row"><div class="repeat-title">Pengalaman ${n}${n===1?' · terakhir':''}</div>${basicGrid(fields,values)}</div>`;
-    }).join('');
-  }
+  if(workHost) workHost.innerHTML=renderWorkRowsHtml(values);
+
   updateDynamic(form,values);
   syncApplicantRow(form);
   updateAddressPreview(form);
@@ -628,20 +821,25 @@ function rerenderGroups(form){
 
 function updateAddressPreview(form){
   const preview=$('#address-preview',form);if(!preview)return;
-  const data={};for(const key of addressFields.map(f=>f.name)){const el=form.elements.namedItem(key);data[key]=el?.value||'';}
+  const data={};for(const key of ADDRESS_FIELD_NAMES){const el=form.elements.namedItem(key);data[key]=el?.value||'';}
   const address=formatKtpAddress(data);
   const hidden=form.elements.namedItem('alamat_asal');if(hidden)hidden.value=address;
   preview.textContent=address;
   preview.classList.toggle('empty',!address);
 }
-function setWizardStep(step,{push=false,replace=false}={}){
-  activeStep=Math.max(0,Math.min(stepNames.length-1,step));
+function setWizardStep(stepIndex,{push=false,replace=false}={}){
+  const target=activeStepDefs.find(d=>d.stepIndex===stepIndex) || activeStepDefs[0];
+  activeStep=target.stepIndex;
+  const pos=activeStepDefs.indexOf(target);
+  const total=activeStepDefs.length;
+
   queryAll('.form-step',root).forEach(el=>el.hidden=Number(el.dataset.formStep)!==activeStep);
-  $('#wizard-count',root).textContent=`${String(activeStep+1).padStart(2,'0')} / 05`;
-  $('#wizard-step-label',root).textContent=stepNames[activeStep];
-  $('#wizard-progress-bar',root).style.width=`${(activeStep+1)/stepNames.length*100}%`;
-  $('#wizard-prev',root).disabled=activeStep===0;
-  $('#wizard-next',root).textContent=activeStep===stepNames.length-1?'Kirim lamaran':'Lanjut';
+  $('#wizard-count',root).textContent=`${String(pos+1).padStart(2,'0')} / ${String(total).padStart(2,'0')}`;
+  $('#wizard-step-label',root).textContent=target.label;
+  $('#wizard-progress-bar',root).style.width=`${(pos+1)/total*100}%`;
+  $('#wizard-prev',root).disabled=pos===0;
+  $('#wizard-next',root).textContent=pos===total-1?'Kirim lamaran':'Lanjut';
+
   if(push){try{history.pushState({portalForm:true,step:activeStep},'',location.href);}catch{}}
   else if(replace){try{history.replaceState({portalForm:true,step:activeStep},'',location.href);}catch{}}
   const form=$('#application-form');if(form)queueDraftSave(form);
@@ -651,7 +849,6 @@ function saveState(message,failed=false){
   const el=$('#draft-save-state');if(!el)return;
   el.textContent=message;el.classList.toggle('failed',failed);
 }
-function localDraftKey(){return LOCAL_DRAFT_KEY;}
 function readLocalDraft(){
   try{const raw=localStorage.getItem(LOCAL_DRAFT_KEY);return raw?JSON.parse(raw):null;}catch{return null;}
 }
@@ -667,9 +864,6 @@ function writeLocalInitialDraft(data={}){
 function queueDraftSave(form){
   writeLocalDraft(form);
   saveState('Tersimpan di perangkat');
-}
-async function flushDraft(form){
-  writeLocalDraft(form);
 }
 function normalizeDigitInput(el,max){
   const digits=el.value.replace(/\D/g,'').slice(0,max);
@@ -738,8 +932,6 @@ async function uploadKtpForSubmission(){
 function sanitizeFinalData(data){
   const result={...data};
   if(result.ktp_foto && result.ktp_foto.length>145000) delete result.ktp_foto;
-  // Conditional data is retained in the local draft but excluded from the final
-  // application record when the corresponding branch does not apply.
   if(result.status_kawin!=='Kawin') for(const key of Object.keys(result)) if(key.startsWith('pasangan_')) delete result[key];
   if(!result.status_kawin||result.status_kawin==='Belum kawin') for(const key of Object.keys(result)) if(key.startsWith('anak')) delete result[key];
   if(String(result.domisili_berbeda)!=='true') result.domisili=result.alamat_asal||'';
@@ -778,32 +970,67 @@ function setFieldValidationError(el,message=''){
     hint.id=`field-error-${String(el.name||el.id||'field').replace(/[^a-z0-9_-]/gi,'-')}`;
     hint.textContent=message;
     if(!old)wrapper.append(hint);
-    el.setAttribute('aria-invalid','true');
-    el.setAttribute('aria-describedby',hint.id);
+    if(el!==wrapper){
+      el.setAttribute('aria-invalid','true');
+      el.setAttribute('aria-describedby',hint.id);
+    }
   }else{
     old?.remove();
-    el.removeAttribute('aria-invalid');
-    el.removeAttribute('aria-describedby');
+    if(el!==wrapper){
+      el.removeAttribute('aria-invalid');
+      el.removeAttribute('aria-describedby');
+    }
   }
 }
+function validateFieldGroup(groupEl){
+  if(!groupEl)return true;
+  const required=groupEl.dataset.required==='true';
+  const kind=groupEl.dataset.fieldGroup;
+  const hasChecked=Boolean(groupEl.querySelector('input:checked'));
+  const message=(required && !hasChecked)
+    ? (kind==='checkbox' ? 'Pilih minimal satu opsi.' : 'Pilih salah satu opsi.')
+    : '';
+  groupEl.classList.toggle('is-invalid',!!message);
+  const old=groupEl.querySelector('.field-validation-error');
+  if(message){
+    const hint=old||document.createElement('small');
+    hint.className='field-validation-error';
+    hint.textContent=message;
+    if(!old)groupEl.append(hint);
+  }else{
+    old?.remove();
+  }
+  return !message;
+}
 function focusInvalidField(el){
-  const wrapper=el.closest('.form-field')||el.closest('.consent-wrap');
+  const wrapper=el.closest('.form-field')||el.closest('.consent-wrap')||el;
   requestAnimationFrame(()=>{
     wrapper?.scrollIntoView({behavior:'smooth',block:'center'});
-    el.focus({preventScroll:true});
+    const targetInput=wrapper.querySelector?.('input,select,textarea')||el;
+    targetInput.focus?.({preventScroll:true});
   });
 }
 function validateField(el){
+  if(el.type==='radio' || el.dataset.multiCheckbox==='true'){
+    return validateFieldGroup(el.closest('[data-field-group]'));
+  }
   const message=fieldValidationMessage(el);
   setFieldValidationError(el,message);
   return !message;
 }
 function validateCurrentStep(form){
   const step=$(`[data-form-step="${activeStep}"]`,form);
+  if(!step)return true;
   let firstInvalid=null;
   let invalidAddress=false;
+
+  for(const group of queryAll('[data-field-group]',step)){
+    if(group.closest('[data-conditional="true"][hidden]'))continue;
+    if(!validateFieldGroup(group)&&!firstInvalid)firstInvalid=group;
+  }
+
   for(const el of queryAll('input,select,textarea',step)){
-    if(el.disabled||['file','hidden'].includes(el.type)||el.closest('[data-conditional="true"][hidden]'))continue;
+    if(el.disabled||['file','hidden','radio'].includes(el.type)||el.dataset.multiCheckbox==='true'||el.closest('[data-conditional="true"][hidden]'))continue;
     if(!validateField(el)&&!firstInvalid)firstInvalid=el;
   }
   if(activeStep===0){
@@ -829,8 +1056,18 @@ function validateCurrentStep(form){
   return true;
 }
 function validateWholeForm(form){
+  for(const group of queryAll('[data-field-group]',form)){
+    if(group.closest('[data-conditional="true"][hidden]'))continue;
+    if(!validateFieldGroup(group)){
+      const step=group.closest('[data-form-step]');
+      if(step)setWizardStep(Number(step.dataset.formStep));
+      $('#form-error',form).textContent='Periksa kembali kolom yang ditandai sebelum mengirim lamaran.';
+      focusInvalidField(group);
+      return false;
+    }
+  }
   for(const el of queryAll('input,select,textarea',form)){
-    if(el.disabled||['file','hidden'].includes(el.type)||el.closest('[data-conditional="true"][hidden]'))continue;
+    if(el.disabled||['file','hidden','radio'].includes(el.type)||el.dataset.multiCheckbox==='true'||el.closest('[data-conditional="true"][hidden]'))continue;
     if(!validateField(el)){
       const step=el.closest('[data-form-step]');
       if(step)setWizardStep(Number(step.dataset.formStep));
@@ -949,8 +1186,8 @@ async function runOcr(canvas,generation){
   ktpPhotoDataUrl=canvasToKtpDataUrl(canvas);
   setOcrProgress('Menyiapkan mesin OCR lokal…');
   const [{ recognizeWithPaddle }, { extractKtpText }] = await Promise.all([
-    import('./ocr-engine.js?v=20261121-hrga-workspace-15'),
-    import('./ktp-ocr.js?v=20261121-hrga-workspace-15')
+    import('./ocr-engine.js?v=20261122-hrga-workspace-16'),
+    import('./ktp-ocr.js?v=20261122-hrga-workspace-16')
   ]);
   let result;
   try{
@@ -961,8 +1198,6 @@ async function runOcr(canvas,generation){
     );
   }catch(error){
     if(generation!==ocrRunGeneration)return;
-    // Avoid silently launching a second large OCR runtime after the primary
-    // model times out; that double-download caused long mobile loading loops.
     throw new Error(`${error.message||'Mesin OCR lokal belum siap.'} Foto tetap berada di perangkat. Coba ulangi pemindaian.`);
   }
   if(generation!==ocrRunGeneration)return;
@@ -1072,9 +1307,6 @@ async function startCamera(){
       if(stream)stream.getTracks().forEach(track=>track.stop());
       if(mediaStream===stream)mediaStream=null;
       video.srcObject=null;
-      // Retry weaker constraints only when the browser says a requested
-      // constraint is unsupported. Permission / device / first-frame failures
-      // should fail fast instead of presenting a long black camera preview.
       if(!['OverconstrainedError','TypeError'].includes(error?.name))break;
     }
   }
@@ -1141,13 +1373,13 @@ async function processPhotoFile(file){
   finally{const input=$('#ktp-fallback-input');if(input)input.value='';}
 }
 function showEntryModeChoice(){
-  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pilih cara mengisi identitas</h1><p class="candidate-sub">Anda dapat memindai KTP atau mengisi seluruh data secara manual.</p><div class="candidate-actions"><button type="button" class="btn btn-primary" id="choose-ocr">Pindai KTP</button><button type="button" class="btn btn-secondary" id="choose-manual">Isi manual</button></div></section>`;
+  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&amp;GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pilih cara mengisi identitas</h1><p class="candidate-sub">Anda dapat memindai KTP atau mengisi seluruh data secara manual.</p><div class="candidate-actions"><button type="button" class="btn btn-primary" id="choose-ocr">Pindai KTP</button><button type="button" class="btn btn-secondary" id="choose-manual">Isi manual</button></div></section>`;
   $('#choose-ocr').addEventListener('click',showKtpScreen);
   $('#choose-manual').addEventListener('click',showForm);
 }
 function showKtpScreen(){
   ocrRunGeneration++;ocrAttempts=0;ocrBusy=false;ocrFieldConfidence={};ocrMappingData=null;activeCaptureMode='camera';closeCropImage();
-  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><div class="wizard-progress"><span style="width:8%"></span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pindai KTP</h1><div id="ktp-camera-area"><div class="ktp-camera-frame" id="ktp-camera-frame" data-camera-state="loading"><video id="ktp-video" autoplay muted playsinline webkit-playsinline></video><div class="ktp-camera-placeholder" id="ktp-camera-placeholder" role="status"><strong>Mengaktifkan kamera…</strong></div><div class="ktp-guide" id="ktp-guide" aria-hidden="true"></div></div><div class="camera-status" id="camera-status" aria-live="polite"></div><div id="ktp-fallback" class="ktp-fallback" hidden><span>Kamera tidak tersedia. Pilih foto dari perangkat.</span></div><input type="file" id="ktp-fallback-input" accept="image/jpeg,image/png,image/webp" hidden><div class="candidate-actions camera-actions"><button type="button" class="btn btn-primary" id="capture-ktp" disabled>Ambil foto</button><button type="button" class="btn btn-secondary" id="select-ktp-photo">Pilih foto</button></div></div><div id="ktp-crop-editor" hidden></div><div class="ocr-loading-panel" id="ocr-loading" hidden aria-live="polite"><div class="ocr-spinner" aria-hidden="true"></div><strong id="ocr-loading-text">Memproses foto KTP</strong><span id="ocr-attempt-count">Percobaan 1 dari 3</span><small id="ocr-progress">Menyiapkan pemindai…</small></div><div class="ocr-status" id="ocr-status" aria-live="polite"></div><button type="button" class="manual-entry" id="manual-entry" hidden aria-hidden="true" tabindex="-1">Lanjut isi data secara manual</button></section>`;
+  root.innerHTML=`<div class="step-top"><span class="stage-kicker">HR&amp;GA WORKSPACE</span><span class="step-number">IDENTITAS</span></div><div class="wizard-progress"><span style="width:8%"></span></div><section class="candidate-card ktp-card"><h1 class="candidate-title">Pindai KTP</h1><div id="ktp-camera-area"><div class="ktp-camera-frame" id="ktp-camera-frame" data-camera-state="loading"><video id="ktp-video" autoplay muted playsinline webkit-playsinline></video><div class="ktp-camera-placeholder" id="ktp-camera-placeholder" role="status"><strong>Mengaktifkan kamera…</strong></div><div class="ktp-guide" id="ktp-guide" aria-hidden="true"></div></div><div class="camera-status" id="camera-status" aria-live="polite"></div><div id="ktp-fallback" class="ktp-fallback" hidden><span>Kamera tidak tersedia. Pilih foto dari perangkat.</span></div><input type="file" id="ktp-fallback-input" accept="image/jpeg,image/png,image/webp" hidden><div class="candidate-actions camera-actions"><button type="button" class="btn btn-primary" id="capture-ktp" disabled>Ambil foto</button><button type="button" class="btn btn-secondary" id="select-ktp-photo">Pilih foto</button></div></div><div id="ktp-crop-editor" hidden></div><div class="ocr-loading-panel" id="ocr-loading" hidden aria-live="polite"><div class="ocr-spinner" aria-hidden="true"></div><strong id="ocr-loading-text">Memproses foto KTP</strong><span id="ocr-attempt-count">Percobaan 1 dari 3</span><small id="ocr-progress">Menyiapkan pemindai…</small></div><div class="ocr-status" id="ocr-status" aria-live="polite"></div><button type="button" class="manual-entry" id="manual-entry" hidden aria-hidden="true" tabindex="-1">Lanjut isi data secara manual</button></section>`;
   startCamera();
   $('#capture-ktp').addEventListener('click',async()=>{
     if(ocrBusy||ocrAttempts>=3)return;
@@ -1170,6 +1402,14 @@ async function uploadCv(file){
   const signature=new TextDecoder().decode(await file.slice(0,5).arrayBuffer());
   if(signature!=='%PDF-'){status.textContent='File harus PDF.';return;}
   status.textContent='Mengunggah CV…';
+  if(isDemoQuery){
+    cvPath=`${CV_PATH_PREFIX}/demo-${crypto.randomUUID()}/cv.pdf`;
+    cvFilename=file.name;
+    name.textContent=cvFilename;
+    status.textContent='CV tersimpan (mode pratinjau).';
+    writeLocalDraft($('#application-form'));
+    return;
+  }
   try{
     const path=`${CV_PATH_PREFIX}/${crypto.randomUUID()}/cv.pdf`;
     const {error}=await supabase.storage.from(CV_BUCKET).upload(path,file,{contentType:'application/pdf',upsert:false});
@@ -1185,6 +1425,7 @@ async function uploadCv(file){
     saveState('Belum tersimpan',true);
   }
 }
+
 function showForm(){
   stopCamera();
   root.innerHTML=renderForm(initialData);
@@ -1192,7 +1433,6 @@ function showForm(){
   $('#cv-filename').textContent=cvFilename||'Unggah CV (PDF)';
   initAddressDropdowns(form,initialData).then(()=>{updateAddressPreview(form);queueDraftSave(form);});
   $('#cv-upload-state').textContent=cvFilename?'CV tersimpan':'';
-  const nik=form.querySelector('[name="nik"]');
   const numericFields=['nik','alamat_rt','alamat_rw','alamat_kodepos'];
   form.addEventListener('input',event=>{
     const el=event.target;
@@ -1200,32 +1440,43 @@ function showForm(){
     if(el.name==='telepon')normalizeDigitInput(el,16);
     if(el.dataset.formatNumber==='idr')formatCurrencyInput(el);
     if(['nama','tanggal_lahir','gender'].includes(el.name))syncApplicantRow(form);
-    if(addressFields.some(f=>f.name===el.name))updateAddressPreview(form);
+    if(ADDRESS_FIELD_NAMES.includes(el.name))updateAddressPreview(form);
     const wrapper=el.closest('.form-field')||el.closest('.consent-wrap');
     if(wrapper?.classList.contains('is-invalid'))validateField(el);
     if(!form.querySelector('.is-invalid'))$('#form-error',form).textContent='';
     queueDraftSave(form);
   });
   form.addEventListener('change',event=>{
-    const key=event.target.name;
-    if(['alamat_rt','alamat_rw'].includes(key))padRtRw(event.target);
-    if(['alamat_provinsi','alamat_kota_nama','alamat_kecamatan','alamat_desa'].includes(key))handleAddressRegionChange(form,key).then(()=>{updateAddressPreview(form);queueDraftSave(form);}).catch(error=>{const el=$('#address-region-status');if(el)el.textContent=error.message;});
+    const el=event.target;
+    const key=el.name;
+    if(['alamat_rt','alamat_rw'].includes(key))padRtRw(el);
+    if(['alamat_provinsi','alamat_kota_nama','alamat_kecamatan','alamat_desa'].includes(key)){
+      handleAddressRegionChange(form,key).then(()=>{updateAddressPreview(form);queueDraftSave(form);}).catch(error=>{const status=$('#address-region-status');if(status)status.textContent=error.message;});
+    }
     if(['saudara_count','anak_count','bahasa_count','kerja_count'].includes(key))rerenderGroups(form);
-    if(key==='pendidikan_terakhir'){const old=collect(form);const section=[...form.querySelectorAll('.form-section')].find(x=>x.textContent.includes('PENDIDIKAN FORMAL'));if(section)section.outerHTML=renderEducation(old);}
-    else if(key==='status_kawin' || key==='domisili_berbeda'){
+    if(key==='pendidikan_terakhir'){
+      const old=collect(form);
+      const eduBlock=$('#education-block',form);
+      const eduField=stage2Schema.sections?.education?.fields?.find(f=>f.type==='system_education_repeater');
+      if(eduBlock)eduBlock.innerHTML=renderEducationBlock(eduField,old);
+    }else if(key==='status_kawin' || key==='domisili_berbeda'){
       const current=collect(form);updateDynamic(form,current);
     }
-    if((event.target.closest('.form-field')||event.target.closest('.consent-wrap'))?.classList.contains('is-invalid'))validateField(event.target);
+    if((el.closest('.form-field')||el.closest('.consent-wrap'))?.classList.contains('is-invalid'))validateField(el);
     syncApplicantRow(form);updateAddressPreview(form);queueDraftSave(form);
   });
   updateKtpUploadUI(form);
   $('#ktp-photo-file',form).addEventListener('change',event=>uploadManualKtp(event.target.files?.[0],form));
   $('#cv-file',form).addEventListener('change',event=>uploadCv(event.target.files?.[0]));
-  $('#wizard-prev').addEventListener('click',()=>{if(activeStep>0)setWizardStep(activeStep-1,{replace:true});});
+  $('#wizard-prev').addEventListener('click',()=>{
+    const pos=activeStepDefs.findIndex(d=>d.stepIndex===activeStep);
+    if(pos>0)setWizardStep(activeStepDefs[pos-1].stepIndex,{replace:true});
+  });
   $('#wizard-next').addEventListener('click',async()=>{
     const error=$('#form-error');error.textContent='';
     if(!validateCurrentStep(form))return;
-    if(activeStep<stepNames.length-1){setWizardStep(activeStep+1,{push:true});return;}
+    const pos=activeStepDefs.findIndex(d=>d.stepIndex===activeStep);
+    if(pos<activeStepDefs.length-1){setWizardStep(activeStepDefs[pos+1].stepIndex,{push:true});return;}
     if(!cvFilename){error.textContent='Unggah CV dalam format PDF.';return;}
     if(!validateWholeForm(form))return;
     await submitApplication(form);
@@ -1240,18 +1491,26 @@ function showForm(){
 }
 
 function renderSubmissionComplete(){
-  root.innerHTML=`<section class="candidate-card completion-card"><div class="completion-mark">✓</div><h1>Lamaran terkirim</h1><a class="btn btn-primary full" href="../disc/">Lanjut ke Tes DISC</a></section>`;
+  root.innerHTML=`<section class="candidate-card completion-card"><div class="completion-mark">✓</div><h1>Lamaran terkirim</h1><a class="btn btn-primary full" href="../disc/${isDemoQuery?'?demo=1':''}">Lanjut ke Tes DISC</a></section>`;
 }
+
 async function submitApplication(form){
   const error=$('#form-error'),button=$('#wizard-next');
   error.textContent='';
-  if(!isConfigured){error.textContent='Server belum terhubung.';return;}
   if(!ktpPhotoDataUrl){error.textContent='Unggah foto KTP pada bagian FOTO KTP sebelum mengirim lamaran.';$('#ktp-photo-file')?.focus();return;}
   if(!cvPath){error.textContent='CV belum tersimpan. Pilih ulang file CV dalam format PDF.';$('#cv-file')?.focus();return;}
   const data=sanitizeFinalData({...collect(form),ktp_foto:ktpPhotoDataUrl||''});
   if(!/^\d{16}$/.test(String(data.nik||''))){setWizardStep(0);const field=form.elements.namedItem('nik');if(field){setFieldValidationError(field,'NIK harus tepat 16 digit angka.');focusInvalidField(field);}error.textContent='Periksa kembali NIK yang ditandai.';return;}
   if(!data.nama){setWizardStep(0);error.textContent='Nama lengkap wajib diisi.';return;}
   setBusy(button,true,'Mengirim…');
+  if(isDemoQuery){
+    cacheCandidateNik(data.nik);
+    try{localStorage.removeItem(LOCAL_DRAFT_KEY);}catch{}
+    cvPath='';cvFilename='';
+    renderSubmissionComplete(data.nama);
+    return;
+  }
+  if(!isConfigured){error.textContent='Server belum terhubung.';setBusy(button,false);return;}
   try{
     const ktpPath=await uploadKtpForSubmission();
     data.ktp_path=ktpPath;
@@ -1266,46 +1525,101 @@ async function submitApplication(form){
     setBusy(button,false);
   }
 }
-async function loadApplicationPositions(){
-  try{
-    const {data,error}=await supabase.from('portal_settings').select('value').eq('key','application_positions').maybeSingle();
-    if(error)throw error;
-    const list=Array.isArray(data?.value)?data.value.filter(x=>typeof x==='string'&&x.trim()):[];
-    if(list.length)availablePositions=[...new Set(list.map(x=>x.trim()))];
-    applicationFields[0].options=choices(availablePositions);
-  }catch(error){
-    console.warn('Daftar posisi memakai daftar cadangan:',error);
-    applicationFields[0].options=choices(availablePositions);
+
+function readDemoRecruitmentConfig() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DEMO_RECRUITMENT_KEY) || 'null');
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
   }
 }
-async function init(){
-  if(!isConfigured){
-    root.innerHTML='<section class="candidate-card"><h1 class="candidate-title">HR&GA Workspace</h1><p class="candidate-sub">Server belum terhubung.</p></section>';return;
+
+async function loadStage2Config(){
+  if (isDemoQuery) {
+    const demoCfg = readDemoRecruitmentConfig();
+    const baseSchema = demoCfg?.stage2Schema && typeof demoCfg.stage2Schema === 'object'
+      ? demoCfg.stage2Schema
+      : DEFAULT_STAGE2_SCHEMA;
+    stage2Schema = normalizeStage2Schema(baseSchema);
+    availablePositions = stage2Schema.positions.slice();
+    availableInfoSources = stage2Schema.infoSources.slice();
+    return;
   }
-  await loadApplicationPositions();
+
+  let sbSettingsRes = {};
+  if (isConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('portal_settings')
+        .select('key,value')
+        .in('key', ['stage2_form_schema', 'application_positions']);
+      if (error) throw error;
+      sbSettingsRes = Object.fromEntries((data || []).map(row => [row.key, row.value]));
+    } catch (error) {
+      console.warn('Konfigurasi formulir /form memakai daftar lokal:', error);
+    }
+  }
+
+  const demoFallback = readDemoRecruitmentConfig();
+  const sbSchema = sbSettingsRes?.stage2_form_schema && typeof sbSettingsRes.stage2_form_schema === 'object'
+    ? sbSettingsRes.stage2_form_schema
+    : (demoFallback?.stage2Schema || null);
+  const sbPositions = Array.isArray(sbSettingsRes?.application_positions)
+    ? sbSettingsRes.application_positions.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim())
+    : [];
+
+  const nextSchema = normalizeStage2Schema(sbSchema || DEFAULT_STAGE2_SCHEMA);
+  if (!sbSchema && sbPositions.length) {
+    nextSchema.positions = [...new Set(sbPositions)];
+  }
+
+  stage2Schema = nextSchema;
+  availablePositions = stage2Schema.positions.slice();
+  availableInfoSources = stage2Schema.infoSources.slice();
+}
+
+async function init(){
+  if(!isConfigured && !isDemoQuery){
+    root.innerHTML='<section class="candidate-card"><h1 class="candidate-title">HR&amp;GA Workspace</h1><p class="candidate-sub">Server belum terhubung.</p></section>';return;
+  }
+  await loadStage2Config();
+  const params=new URLSearchParams(location.search);
+  const paramPos=(params.get('posisi')||'').trim();
+  const paramSrc=(params.get('sumber')||'').trim();
+  const matchedPos=paramPos?availablePositions.find(p=>p.toLocaleLowerCase('id')===paramPos.toLocaleLowerCase('id')):'';
+  const matchedSrc=paramSrc?availableInfoSources.find(s=>s.toLocaleLowerCase('id')===paramSrc.toLocaleLowerCase('id')):'';
+
   const localDraft=readLocalDraft();
   if(localDraft){
-    initialData=localDraft;
+    initialData={
+      ...localDraft,
+      ...(matchedPos&&!localDraft.posisi?{posisi:matchedPos}:{}),
+      ...(matchedSrc&&!localDraft.sumber_informasi?{sumber_informasi:matchedSrc}:{})
+    };
     cvFilename=localDraft.__cv_filename||'';
     cvPath=localDraft.__cv_path||'';
     ktpPhotoDataUrl=localDraft.ktp_foto||'';
     showForm();
     return;
   }
+  if(matchedPos)initialData.posisi=matchedPos;
+  if(matchedSrc)initialData.sumber_informasi=matchedSrc;
   let ocrEnabled=false;
-  try{
-    const {data:flag}=await supabase.from('portal_settings').select('value').eq('key','ktp_ocr_enabled').maybeSingle();
-    ocrEnabled=flag?.value===true;
-  }catch(error){console.warn('OCR flag unavailable; manual mode remains active.',error);}
+  if(!isDemoQuery && isConfigured && supabase){
+    try{
+      const {data:flag}=await supabase.from('portal_settings').select('value').eq('key','ktp_ocr_enabled').maybeSingle();
+      ocrEnabled=flag?.value===true;
+    }catch(error){console.warn('OCR flag unavailable; manual mode remains active.',error);}
+  }
   if(ocrEnabled)showEntryModeChoice();else showForm();
 }
+
 if(root){
   window.addEventListener('popstate',event=>{
     const form=$('#application-form');if(!form)return;
     if(event.state?.portalForm){
       setWizardStep(Number(event.state.step||0));
-      // The root state is the final in-form back stop. A further back may leave
-      // the page, but the draft is durable and will be restored on return.
     }else if(location.pathname.replace(/\/+$/,'').endsWith('/form')){
       setWizardStep(activeStep);history.pushState({portalForm:true,step:activeStep,root:false},'',location.href);
     }
@@ -1318,6 +1632,6 @@ if(root){
     const form=$('#application-form');if(document.visibilityState==='hidden'&&form)writeLocalDraft(form);
   });
   init().catch(error=>{
-    stopCamera();root.innerHTML=`<section class="candidate-card"><h1 class="candidate-title">HR&GA Workspace</h1><p class="candidate-sub">${esc(error.message||'Formulir belum dapat dimuat.')}</p></section>`;
+    stopCamera();root.innerHTML=`<section class="candidate-card"><h1 class="candidate-title">HR&amp;GA Workspace</h1><p class="candidate-sub">${esc(error.message||'Formulir belum dapat dimuat.')}</p></section>`;
   });
 }

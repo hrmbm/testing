@@ -6,8 +6,8 @@
   <title>Perjanjian Bersama Penyelesaian Kekurangan Upah Lembur - {{nama_karyawan}}</title>
   <style>
   @page {
-    size: A4 portrait;
-    margin: 15mm 18mm 16mm 18mm;
+    size: letter portrait;
+    margin: 12mm 16mm 13mm 16mm;
   }
 
   * {
@@ -20,17 +20,17 @@
     background: #eef2f6;
     color: #111827;
     font-family: "Times New Roman", "Source Serif 4", Georgia, serif;
-    font-size: 11pt;
-    line-height: 1.5;
+    font-size: 10.5pt;
+    line-height: 1.44;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
   .a4-page {
-    width: 210mm;
-    min-height: 297mm;
+    width: 215.9mm;
+    min-height: 279.4mm;
     margin: 12px auto;
-    padding: 15mm 18mm 16mm 18mm;
+    padding: 12mm 16mm 13mm 16mm;
     background: #ffffff;
     box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
     display: flex;
@@ -60,8 +60,8 @@
   .letterhead {
     text-align: center;
     border-bottom: 2px solid #0f172a;
-    padding-bottom: 8px;
-    margin-bottom: 16px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
   }
 
   .letterhead-company {
@@ -97,14 +97,14 @@
     text-align: center;
     font-size: 10.5pt;
     font-weight: 700;
-    margin: 0 0 14px 0;
+    margin: 0 0 10px 0;
   }
 
   .pasal-heading {
     text-align: center;
     font-weight: 700;
-    font-size: 11pt;
-    margin-top: 12px;
+    font-size: 10.5pt;
+    margin-top: 9px;
     margin-bottom: 2px;
     page-break-after: avoid;
     break-after: avoid;
@@ -207,7 +207,7 @@
   }
 
   .sig-space {
-    height: 62px;
+    height: 54px;
   }
 
   .sig-name {
@@ -218,16 +218,6 @@
 
   .sig-title {
     font-size: 10pt;
-  }
-
-  .doc-footer {
-    margin-top: 24px;
-    padding-top: 6px;
-    border-top: 1px solid #cbd5e1;
-    display: flex;
-    justify-content: space-between;
-    font-size: 8.5pt;
-    color: #475569;
   }
 
   mark.hris-var {
@@ -332,10 +322,6 @@
       </div>
     
     </div>
-    <footer class="doc-footer">
-      <span>Perjanjian Bersama Penyelesaian Kekurangan Lembur · {{no_pb}}</span>
-      <span>Paraf _______</span>
-    </footer>
   </div>
 </body>
 </html>

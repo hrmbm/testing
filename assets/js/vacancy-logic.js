@@ -48,12 +48,14 @@ export const FORM_INFO_SOURCES = [
 
 export const QUESTION_TYPES = [
   { value: 'dropdown', label: 'Dropdown' },
-  { value: 'radio', label: 'Pilihan Tunggal' },
-  { value: 'checkbox', label: 'Pilihan Ganda' },
-  { value: 'text', label: 'Isian Singkat' },
-  { value: 'textarea', label: 'Isian Panjang' },
-  { value: 'number', label: 'Angka' }
+  { value: 'radio', label: 'Single Choice' },
+  { value: 'checkbox', label: 'Multiple Choice' },
+  { value: 'text', label: 'Short Text' },
+  { value: 'textarea', label: 'Long Text' },
+  { value: 'number', label: 'Number' }
 ];
+
+export const HR_WHATSAPP_NUMBER = '628133193313';
 
 const VALID_QUESTION_TYPES = new Set(QUESTION_TYPES.map(item => item.value));
 
@@ -337,7 +339,6 @@ export function normalizeVacancy(raw = {}, index = 0) {
     .map((q, qIndex) => normalizeQuestion(q, qIndex))
     .filter(q => q.label);
 
-  // Ensure unique question ids inside a vacancy
   const seenIds = new Set();
   for (let i = 0; i < questions.length; i++) {
     let qid = questions[i].id;
@@ -587,4 +588,81 @@ export function buildShareUrl(baseHref, positionName = '', sourceName = '') {
     url.searchParams.set('sumber', String(sourceName).trim());
   }
   return url.toString();
+}
+
+function formatWaAnswerValue(val) {
+  if (Array.isArray(val)) return val.map(x => String(x ?? '').trim()).filter(Boolean).join(', ');
+  return String(val ?? '').trim();
+}
+
+export function buildStage1WhatsAppMessage(payload = {}, vacancy = null, applySchema = null, referenceId = '') {
+  const name = String(payload.name || payload.full_name || '').trim() || '-';
+  const position = String(payload.position || '').trim() || '-';
+  const city = String(payload.city || '').trim() || '-';
+  const district = String(payload.district || '').trim() || '-';
+  const ref = String(referenceId || payload.referenceId || payload.id || '').trim() || '-';
+  const exp = (payload.experience && typeof payload.experience === 'object') ? payload.experience : {};
+  const custom = (payload.customFields && typeof payload.customFields === 'object') ? payload.customFields : {};
+  const normalizedVacancy = vacancy ? normalizeVacancy(vacancy) : null;
+
+  const experienceLines = [];
+  const coveredKeys = new Set();
+
+  if (normalizedVacancy && Array.isArray(normalizedVacancy.questions)) {
+    for (const q of normalizedVacancy.questions) {
+      coveredKeys.add(q.id);
+      const ans = formatWaAnswerValue(exp[q.id]);
+      if (ans) {
+        const cleanLabel = String(q.label || q.id).trim().replace(/:$/, '');
+        experienceLines.push(`* ${cleanLabel}: ${ans}`);
+      }
+    }
+  }
+
+  for (const [key, val] of Object.entries(exp)) {
+    if (coveredKeys.has(key)) continue;
+    const ans = formatWaAnswerValue(val);
+    if (ans) {
+      experienceLines.push(`* ${key}: ${ans}`);
+    }
+  }
+
+  if (applySchema && Array.isArray(applySchema.fields)) {
+    for (const field of applySchema.fields) {
+      if (field.system) continue;
+      const ans = formatWaAnswerValue(custom[field.id]);
+      if (ans) {
+        const cleanLabel = String(field.label || field.id).trim().replace(/:$/, '');
+        experienceLines.push(`* ${cleanLabel}: ${ans}`);
+      }
+    }
+  } else {
+    for (const [key, val] of Object.entries(custom)) {
+      const ans = formatWaAnswerValue(val);
+      if (ans) experienceLines.push(`* ${key}: ${ans}`);
+    }
+  }
+
+  const lines = [
+    'Yth. HRD',
+    'PT. MITRA BINAMANDIRI MAKMUR',
+    '',
+    `Nama kandidat: ${name}`,
+    `Posisi dilamar: ${position}`,
+    `Kabupaten/Kota: ${city}`,
+    `Kecamatan: ${district}`
+  ];
+
+  if (experienceLines.length) {
+    lines.push('', 'PENGALAMAN KERJA', ...experienceLines);
+  }
+
+  lines.push('', `Referensi: ${ref}`, '', 'Terimakasih');
+  return lines.join('\n');
+}
+
+export function buildStage1WhatsAppUrl(payload = {}, vacancy = null, applySchema = null, referenceId = '', waNumber = HR_WHATSAPP_NUMBER) {
+  const cleanNumber = String(waNumber || HR_WHATSAPP_NUMBER).replace(/\D/g, '') || HR_WHATSAPP_NUMBER;
+  const text = buildStage1WhatsAppMessage(payload, vacancy, applySchema, referenceId);
+  return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(text)}`;
 }

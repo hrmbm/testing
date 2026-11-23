@@ -1000,10 +1000,10 @@ test('UI & CSS enforce removed KPIs/Remarks/guides, Root Admin submenus, and 1st
   assert.doesNotMatch(appCss, /nth-child\(2\)[^{]*\{[^}]*(position\s*:\s*sticky|left\s*:)/, 'Second column must NOT have sticky/left freeze');
 });
 
-test('PKWT print opens foreground tab matching Application Print, foreground auto-print replaces opener setTimeout(tab.print), and non-Root Admin hides approval panel', async () => {
-  const { buildPkwtPrintPackageHtml } = await import('../assets/js/contract-logic.js');
-  const doc1 = '<html><head><style>@page{size:A4 portrait;} .a4-page{width:210mm;}</style></head><body><div class="a4-page">DOC 1 PKWT</div></body></html>';
-  const doc2 = '<html><head><style>@page{size:A4 portrait;} .a4-page{width:210mm;}</style></head><body><div class="a4-page">DOC 2 PB</div></body></html>';
+test('PKWT print is print-only with inline Sync to Employee Directory button and zero approval queue', async () => {
+  const { buildPkwtPrintPackageHtml, buildDirectContractSyncPayloads } = await import('../assets/js/contract-logic.js');
+  const doc1 = '<html><head><style>@page{size:letter portrait;} .pkwt-page{width:8.5in;}</style></head><body><div class="pkwt-page">DOC 1 PKWT</div></body></html>';
+  const doc2 = '<html><head><style>@page{size:letter portrait;} .pkwt-page{width:8.5in;}</style></head><body><div class="pkwt-page">DOC 2 PB</div></body></html>';
   const pkgHtml = buildPkwtPrintPackageHtml([doc1, doc2], { title: 'Hendra Wijaya — 2 Contract Documents' });
 
   assert.ok(pkgHtml.includes('Print / Save PDF'), 'PKWT print tab must include Print / Save PDF toolbar button');
@@ -1020,6 +1020,140 @@ test('PKWT print opens foreground tab matching Application Print, foreground aut
   assert.ok(contractModalJs.includes("window.open('', '_blank')"), 'contract-modal.js must open dedicated print tab synchronously');
 
   const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
-  assert.ok(adminJs.includes('isRoot && pendingRequests.length'), 'Contracts approval queue must only be shown to Root Admin');
+  assert.ok(!adminJs.includes('openPostPrintEmployeeUpdateModal'), 'Post-print modal must be removed');
+  assert.ok(!adminJs.includes('data-approve-creq'), 'Approval panel buttons must be removed');
+  assert.ok(adminJs.includes('data-sync-employee'), 'Contracts table must render inline Sync to Employee Directory button');
+  assert.ok(adminJs.includes('Sync to Employee Directory'), 'Contracts table must label sync button clearly');
+
+  const sync = buildDirectContractSyncPayloads({
+    record: { queueKey: 'emp:e1', employeeId: 'e1', fullName: 'Hendra Wijaya', ktpNik: '3514122006840004' },
+    config: { docSequence: '205', signingDate: '2026-11-22', durationMonths: 12, employeeNo: 'KT 205', cashWageAmount: 5500000, employeePosition: 'Senior CNC', employeeAddress: 'Pandaan' },
+    payload: { docSequence: '205', signingDate: '2026-11-22', durationMonths: 12 },
+    currentEmployee: { id: 'e1', employee_no: 'KT 205', full_name: 'Hendra Wijaya', position: 'CNC' },
+    appliedBy: 'Diana Anita Sari'
+  });
+  assert.equal(sync.employeePayload.ktp_nik, '3514122006840004');
+  assert.equal('employee_nik' in sync.employeePayload, false, 'employeePayload must use ktp_nik column, not employee_nik');
+  assert.equal(sync.historyEntry.contractNumber, '205/PKWT/XI/2026');
+  assert.equal(sync.historyEntry.status, 'applied');
+
+  for (const tpl of [
+    'assets/contracts/01-pkwt.html',
+    'assets/contracts/02-pb-pembayaran-upah.html',
+    'assets/contracts/03-pb-pembayaran-upah-lembur.html',
+    'assets/contracts/04-pb-penyelesaian-upah.html',
+    'assets/contracts/05-pb-penyelesaian-lembur.html'
+  ]) {
+    const html = fs.readFileSync(tpl, 'utf8');
+    assert.ok(!/Paraf/i.test(html), `${tpl} must not contain Paraf footer`);
+    assert.ok(/letter/i.test(html), `${tpl} must configure US Letter page size`);
+  }
 });
+
+test('parseDiscImportRows, Tracking XLSX export formatters, Recruitment Settings & clean /apply UI are valid', async () => {
+  const {
+    DISC_IMPORT_HEADERS,
+    DISC_IMPORT_SAMPLE_ROW,
+    parseDiscImportRows,
+    buildUnifiedTrackingRows,
+    buildRecruitmentConclusionSummary,
+    buildTrackingExportRows,
+    buildConclusionExportRows
+  } = await import('../assets/js/workspace-logic.js');
+  const {
+    DISTRICTS_BY_CITY,
+    DEFAULT_VACANCIES,
+    calculateCandidateScore,
+    buildStage1WhatsAppUrl,
+    buildShareUrl
+  } = await import('../assets/js/vacancy-logic.js');
+  const {
+    DEFAULT_APPLY_SCHEMA,
+    DEFAULT_STAGE2_SCHEMA,
+    normalizeApplySchema,
+    normalizeStage2Schema
+  } = await import('../assets/js/form-schema.js');
+
+  assert.equal(DISC_IMPORT_HEADERS.length, 50);
+  const discParsed = parseDiscImportRows([
+    DISC_IMPORT_SAMPLE_ROW,
+    { 'NIK (16 Digits)': '1234', 'Full Name': 'Invalid NIK' }
+  ]);
+  assert.equal(discParsed.rows.length, 1);
+  assert.equal(discParsed.errors.length, 1);
+  assert.equal(discParsed.rows[0].nik, '3514122006840004');
+  assert.equal(discParsed.rows[0].answers.length, 24);
+  assert.ok(['D', 'I', 'S', 'C'].includes(discParsed.rows[0].result.hurufDominan));
+
+  const tRows = buildUnifiedTrackingRows({
+    applicants: [{ id: 'a1', full_name: 'Faisal', nik: '3514122006840004', position: 'Spray', stage: 'disc_completed', created_at: '2026-11-20T01:00:00Z', disc_submissions: [{ completed_at: '2026-11-20T02:00:00Z' }] }],
+    stage1Leads: [{ id: 's1', full_name: 'Faisal', position: 'Spray', source: 'Instagram', created_at: '2026-11-19T01:00:00Z' }],
+    interviews: [],
+    employees: [],
+    invitedCandidates: []
+  });
+  const exportedTracking = buildTrackingExportRows(tRows);
+  assert.equal(exportedTracking.length, 1);
+  assert.equal(exportedTracking[0]['Candidate Name'], 'Faisal');
+  assert.equal(exportedTracking[0].Position, 'Spray');
+
+  const summary = buildRecruitmentConclusionSummary({
+    positions: ['Spray'],
+    cvScreenings: [{ position: 'Spray', screening_count: 5 }],
+    invitedCandidates: [],
+    stage1Leads: [],
+    applicants: [{ id: 'a1', full_name: 'Faisal', nik: '3514122006840004', position: 'Spray', stage: 'disc_completed', disc_submissions: [{ completed_at: '2026-11-20T02:00:00Z' }] }],
+    interviews: [],
+    employees: []
+  });
+  const exportedSummary = buildConclusionExportRows(summary);
+  assert.ok(exportedSummary.length >= 2);
+  assert.equal(exportedSummary[0].Position, 'Spray');
+  assert.equal(exportedSummary[0]['CV Screening'], 5);
+  assert.equal(exportedSummary[exportedSummary.length - 1].No, 'TOTAL');
+
+  assert.ok(Object.keys(DISTRICTS_BY_CITY).includes('Pasuruan'));
+  const spray = DEFAULT_VACANCIES.find(v => v.name === 'Spray');
+  const scored = calculateCandidateScore(spray, 'Pasuruan', 'Bangil', {});
+  assert.ok(scored.locationScore >= 0);
+  assert.ok(scored.totalScore >= 0);
+
+  const waUrl = buildStage1WhatsAppUrl({
+    name: 'Fasial',
+    position: 'Spray',
+    city: 'Pasuruan',
+    district: 'Bangil',
+    experience: {
+      'Pernah nyepray apa?': 'Kayu',
+      'Pengalamannya di mana?': 'pirknr'
+    }
+  }, null, null, '29df58ea-cd3e-4b7a-86fa-dfcc81f5a127', '6281234567890');
+  const waText = decodeURIComponent(waUrl.split('text=')[1] || '');
+  assert.ok(waText.includes('Yth. HRD\nPT. MITRA BINAMANDIRI MAKMUR'));
+  assert.ok(waText.includes('Nama kandidat: Fasial'));
+  assert.ok(waText.includes('PENGALAMAN KERJA\n* Pernah nyepray apa?: Kayu'));
+  assert.ok(waText.includes('Referensi: 29df58ea-cd3e-4b7a-86fa-dfcc81f5a127\n\nTerimakasih'));
+
+  assert.ok(buildShareUrl('https://example.com/apply/', 'Spray', 'Instagram').includes('posisi=Spray'));
+  assert.equal(normalizeApplySchema(DEFAULT_APPLY_SCHEMA).fields.length, 5);
+  assert.ok(normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA).positions.length >= 5);
+
+  const applyHtml = fs.readFileSync('apply/index.html', 'utf8');
+  assert.ok(applyHtml.includes('Lamaran Berhasil Terkirim'));
+  assert.ok(applyHtml.includes('WAJIB KONFIRMASI WA'));
+  assert.ok(applyHtml.includes('Konfirmasi WhatsApp HR'));
+  assert.ok(!applyHtml.includes('#016172') && !applyHtml.includes('#FBF9EA'));
+
+  const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(!adminJs.includes('emsifa.com'), 'Desktop admin must never call emsifa.com');
+  assert.ok(adminJs.includes('renderRecruitmentSettings'), 'Desktop admin must include Recruitment Settings');
+
+  const applicantJs = fs.readFileSync('assets/js/applicant.js', 'utf8');
+  assert.ok(applicantJs.includes('MAX_REGION_CACHE_ENTRIES'), 'Mobile /form/ must enforce bounded region cache');
+
+  assert.equal(fs.existsSync('karir-main'), false, 'Legacy /karir-main directory must be removed');
+  assert.equal(fs.existsSync('HRIS-MBM-HTML-Kit (1)'), false, 'Legacy HRIS kit folder must be removed');
+  assert.equal(fs.existsSync('public'), false, 'Unused public folder must be removed');
+});
+
 

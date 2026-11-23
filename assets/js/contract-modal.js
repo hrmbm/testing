@@ -1,5 +1,5 @@
-import { $, esc } from './common.js?v=20261121-hrga-workspace-15';
-import { CONTRACT_DURATION_OPTIONS } from './workspace-logic.js?v=20261121-hrga-workspace-15';
+import { $, esc } from './common.js?v=20261122-hrga-workspace-16';
+import { CONTRACT_DURATION_OPTIONS } from './workspace-logic.js?v=20261122-hrga-workspace-16';
 import {
   CONTRACT_DOCUMENTS,
   DEFAULT_CONTRACT_SETTINGS,
@@ -11,7 +11,7 @@ import {
   parseNumericCurrency,
   renderAgreementHtml,
   toIsoDate
-} from './contract-logic.js?v=20261121-hrga-workspace-15';
+} from './contract-logic.js?v=20261122-hrga-workspace-16';
 
 export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -86,7 +86,7 @@ function decorateScreenPreview(html) {
       }
       .a4-page {
         width: 100% !important;
-        max-width: 210mm !important;
+        max-width: 215.9mm !important;
         min-height: auto !important;
         margin: 0 auto !important;
         padding: 18px 22px !important;

@@ -2,13 +2,13 @@ import {
   normalizeInterviewDecision,
   normalizeLeadRecommendation,
   normalizeDisplayNik
-} from './workspace-logic.js?v=20261121-hrga-workspace-15';
+} from './workspace-logic.js?v=20261122-hrga-workspace-16';
 import {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
   renderAgreementHtml
-} from './hris-renderer.js?v=20261121-hrga-workspace-15';
+} from './hris-renderer.js?v=20261122-hrga-workspace-16';
 
 export {
   computeEndDate,
@@ -603,22 +603,7 @@ export function buildDashboardAttentionItems({
     isContractEmployee(emp) && (!emp.contract_end_date || !String(emp.address || '').trim())
   ).length;
 
-  const pendingApprovals = (contractRequests || []).filter(r => r.status === 'pending').length;
-
   const items = [];
-
-  if (isRootAdmin && pendingApprovals > 0) {
-    items.push({
-      id: 'pkwt-pending-approvals',
-      category: 'PKWT Approval',
-      title: 'Employee Contract Updates Pending Approval',
-      description: `${pendingApprovals} printed contract update${pendingApprovals === 1 ? '' : 's'} waiting for Administrator approval.`,
-      count: pendingApprovals,
-      severity: 'urgent',
-      targetView: 'contracts',
-      ctaLabel: 'Review Approvals'
-    });
-  }
 
   if (queue.expiringCount > 0) {
     items.push({
@@ -872,4 +857,104 @@ export function buildPkwtPrintPackageHtml(renderedDocs = [], {
 </body>
 </html>`;
 }
+
+export function buildDirectContractSyncPayloads({
+  record = {},
+  config = {},
+  payload = {},
+  currentEmployee = null,
+  currentInterview = null,
+  appliedBy = 'HR Admin',
+  appliedAt = new Date().toISOString()
+} = {}) {
+  const fullName = String(config.employeeName || record.fullName || currentEmployee?.full_name || '').trim();
+  const assignedNik = String(config.employeeNo || config.employeeNik || record.employeeNik || currentEmployee?.employee_no || '').trim();
+  const ktpNik = String(config.employeeKtpNik || config.ktpNik || record.ktpNik || currentEmployee?.ktp_nik || '').replace(/\D/g, '');
+  const position = String(config.employeePosition || record.position || currentEmployee?.position || '').trim();
+  const department = String(config.employeeDepartment || record.department || currentEmployee?.department || '').trim();
+  const address = String(config.employeeAddress || record.address || currentEmployee?.address || '').trim();
+  const salary = parseNumericCurrency(config.cashWageAmount ?? currentEmployee?.salary ?? currentInterview?.salary);
+  const startDate = toIsoDate(config.signingDate) || currentEmployee?.contract_start_date || currentEmployee?.join_date || toIsoDate(new Date());
+  const durationMonths = Number(config.durationMonths) || Number(currentInterview?.contract_duration_months) || 6;
+  const endDate = computeEndDate(startDate, durationMonths) || currentEmployee?.contract_end_date || null;
+  const employmentStatus = String(currentEmployee?.employment_status || '').trim() || 'KONTRAK';
+  const docSequence = String(config.docSequence || payload.docSequence || '').trim();
+  const contractNo = String(payload.no_pkwt || config.contractNumber || config.pkwtNumber || (docSequence ? formatContractCode(docSequence, startDate, 'PKWT') : '')).trim();
+  const resolvedEmpNo = assignedNik || ktpNik || `EMP-${Date.now().toString().slice(-6)}`;
+  const contractNote = contractNo ? `Contract No. ${contractNo}` : (currentEmployee?.notes || '');
+
+  const employeePayload = {
+    applicant_id: record.applicantId || currentEmployee?.applicant_id || null,
+    employee_no: resolvedEmpNo,
+    full_name: fullName,
+    department,
+    join_date: currentEmployee?.join_date || startDate,
+    position,
+    contract_start_date: startDate,
+    contract_end_date: endDate,
+    address,
+    ktp_nik: ktpNik || '',
+    birth_place: currentEmployee?.birth_place || null,
+    birth_date: currentEmployee?.birth_date || null,
+    phone: currentEmployee?.phone || record.phone || '',
+    employment_status: /tetap/i.test(employmentStatus) ? 'KONTRAK' : employmentStatus,
+    education: currentEmployee?.education || null,
+    gender: currentEmployee?.gender || null,
+    religion: currentEmployee?.religion || null,
+    salary,
+    notes: contractNote
+  };
+
+  const interviewPatch = (record.interviewId || currentInterview?.id)
+    ? {
+        id: record.interviewId || currentInterview.id,
+        official_position: position,
+        assigned_nik: resolvedEmpNo,
+        contract_number: contractNo,
+        contract_start_date: startDate,
+        contract_end_date: endDate,
+        contract_duration_months: durationMonths,
+        salary,
+        updated_at: appliedAt
+      }
+    : null;
+
+  const historyEntry = {
+    id: `chist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    queueKey: record.queueKey || '',
+    sourceType: record.sourceType || (currentEmployee ? 'expiring_contract' : 'final_interview'),
+    requestId: null,
+    employeeId: currentEmployee?.id || record.employeeId || null,
+    createdEmployeeId: null,
+    interviewId: interviewPatch?.id || null,
+    applicantId: record.applicantId || null,
+    fullName,
+    employeeName: fullName,
+    employeeNik: resolvedEmpNo,
+    employeeNo: resolvedEmpNo,
+    contractNumber: contractNo,
+    docSequence,
+    position,
+    department,
+    contractStartDate: startDate,
+    contractEndDate: endDate,
+    startDate,
+    endDate,
+    durationMonths,
+    salary,
+    appliedAt,
+    appliedBy,
+    status: 'applied',
+    previousSnapshot: createContractSnapshot(currentEmployee, currentInterview)
+  };
+
+  return {
+    employeePayload,
+    interviewPatch,
+    applicantId: record.applicantId || null,
+    historyEntry
+  };
+}
+
+
 
