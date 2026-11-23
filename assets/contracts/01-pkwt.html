@@ -3,15 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Perjanjian Kerja Waktu Tertentu - {{nama_karyawan}}</title>
+  <title>PKWT - {{nama_karyawan}}</title>
   <style>
   @page {
-    size: 8.27in 12.6in;
-    margin: 0;
-  }
-
-  @page pkwt {
-    size: 8.27in 12.6in;
+    size: 8.27in 12.5in;
     margin: 0;
   }
 
@@ -24,28 +19,27 @@
     padding: 0;
     background: #eef2f6;
     color: #000000;
-    font-family: "Calibri", "Carlito", "Arial", "Liberation Sans", sans-serif;
-    font-size: 9.6pt;
-    line-height: 1.28;
+    font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
+    font-size: 10.1pt;
+    line-height: 1.33;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  .pkwt-sheet {
-    page: pkwt;
-    width: 8.27in;
-    height: 12.6in;
-    min-height: 12.6in;
+  .contract-sheet.pkwt-sheet {
+    width: min(100%, 8.27in);
+    height: 12.40in;
+    min-height: 12.40in;
     margin: 12px auto;
-    padding: 0.44in 0.65in 0.42in 0.65in;
+    padding: 0.34in 0.70in 0.32in 0.70in;
     background: #ffffff;
     box-shadow: 0 2px 12px rgba(15, 23, 42, 0.10);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-family: "Calibri", "Carlito", "Arial", "Liberation Sans", sans-serif;
+    font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
     font-size: 10.1pt;
-    line-height: 1.34;
+    line-height: 1.33;
     color: #000000;
     position: relative;
     overflow: hidden;
@@ -57,21 +51,21 @@
       margin: 0 !important;
       padding: 0 !important;
     }
-    .pkwt-sheet {
-      width: 8.27in !important;
-      height: 12.56in !important;
-      min-height: 12.56in !important;
-      margin: 0 !important;
-      padding: 0.44in 0.65in 0.42in 0.65in !important;
+    .contract-sheet.pkwt-sheet {
+      width: min(100%, 8.27in) !important;
+      height: 12.38in !important;
+      min-height: 12.38in !important;
+      margin: 0 auto !important;
+      padding: 0.34in 0.70in 0.32in 0.70in !important;
       box-shadow: none !important;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    .pkwt-sheet:not(:last-child) {
+    .contract-sheet.pkwt-sheet:not(:last-child) {
       break-after: page;
       page-break-after: always;
     }
-    .pkwt-sheet:last-child {
+    .contract-sheet.pkwt-sheet:last-child {
       break-after: auto;
       page-break-after: auto;
     }
@@ -81,23 +75,23 @@
     flex: 1 1 auto;
   }
 
-  /* ---- KOP SURAT MITRA (Centered + Blue Email + Double Border) ---- */
+  /* ---- KOP SURAT MITRA (Centered + Blue Email + Crisp Rule) ---- */
   .kop-mitra {
     text-align: center;
-    margin-bottom: 13px;
+    margin-bottom: 12px;
   }
 
   .kop-mitra-company {
     font-size: 16.5pt;
     font-weight: 700;
-    letter-spacing: 0.25px;
+    letter-spacing: 0.2px;
     line-height: 1.14;
     text-transform: uppercase;
     color: #000000;
   }
 
   .kop-mitra-line {
-    font-size: 9.8pt;
+    font-size: 9.5pt;
     line-height: 1.24;
     color: #000000;
   }
@@ -110,23 +104,21 @@
 
   .kop-mitra-divider {
     margin-top: 5px;
-    border-top: 2.2pt solid #000000;
-    border-bottom: 0.75pt solid #000000;
-    height: 4px;
+    border-top: 2pt solid #000000;
     width: 100%;
   }
 
-  /* ---- KOP SURAT REHOLZ (Left SVG Logo + Right-Aligned PT Radin Mitra Lestari) ---- */
+  /* ---- KOP SURAT REHOLZ (Original PNG Logo + Right-Aligned PT Radin Mitra Lestari) ---- */
   .kop-reholz {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
 
   .kop-reholz-logo {
-    width: 138px;
+    width: 136px;
     height: auto;
     display: block;
     flex-shrink: 0;
@@ -135,52 +127,48 @@
   .kop-reholz-info {
     text-align: right;
     color: #111111;
-    line-height: 1.32;
+    line-height: 1.3;
   }
 
   .kop-reholz-company {
-    font-size: 12.2pt;
+    font-size: 12pt;
     font-weight: 500;
-    letter-spacing: 0.35px;
+    letter-spacing: 0.3px;
     text-transform: uppercase;
     margin-bottom: 2px;
   }
 
   .kop-reholz-meta {
-    font-size: 8.9pt;
+    font-size: 8.8pt;
     color: #111111;
-    line-height: 1.28;
+    line-height: 1.26;
   }
 
   /* ---- TITLE & DOCUMENT NO ---- */
   .pkwt-title-wrap {
     text-align: center;
-    margin: 2px 0 12px 0;
+    margin: 2px 0 11px 0;
   }
 
   .pkwt-title {
     display: inline-block;
-    font-size: 13.2pt;
+    font-size: 13pt;
     font-weight: 700;
-    line-height: 1.15;
-    letter-spacing: 0.2px;
+    line-height: 1.14;
+    letter-spacing: 0.15px;
     border-bottom: 1.2pt solid #000000;
     padding-bottom: 1px;
   }
 
   .pkwt-number {
     font-size: 9.8pt;
-    font-weight: 700;
+    font-weight: 400;
     margin-top: 2px;
-  }
-
-  .pkwt-reholz .pkwt-number {
-    font-weight: 500;
   }
 
   /* ---- BODY TYPOGRAPHY & TABLES ---- */
   .pkwt-sheet p {
-    margin: 0 0 6.5px 0;
+    margin: 0 0 6px 0;
     text-align: justify;
   }
 
@@ -188,165 +176,145 @@
     text-indent: 24px;
   }
 
-  .party-table {
+  .pkwt-party-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 3px 0 4px 0;
+    margin: 3px 0 3px 0;
   }
 
-  .party-table td {
+  .pkwt-party-table td {
     vertical-align: top;
     padding: 0;
   }
 
-  .party-num {
+  .pkwt-party-num {
     width: 24px;
     font-weight: 700;
   }
 
-  .party-indent {
+  .pkwt-party-indent {
     padding-left: 24px;
   }
 
-  .kv-table {
+  .pkwt-kv-table {
     width: calc(100% - 24px);
     border-collapse: collapse;
-    margin: 3px 0 4px 24px;
+    margin: 2px 0 3px 24px;
   }
 
-  .kv-table td {
+  .pkwt-kv-table td {
     vertical-align: top;
     padding: 0.5px 4px 0.5px 0;
   }
 
-  .kv-label {
+  .pkwt-kv-label {
     width: 92px;
     font-weight: 700;
   }
 
-  .kv-sep {
+  .pkwt-kv-sep {
     width: 10px;
     font-weight: 700;
   }
 
-  .pasal-heading {
+  .pkwt-pasal-heading {
     text-align: center;
     font-weight: 700;
-    font-size: 10.1pt;
-    margin-top: 9px;
+    font-size: 9.8pt;
+    margin-top: 6.5px;
     margin-bottom: 0;
-    line-height: 1.22;
+    line-height: 1.18;
   }
 
-  .pasal-subheading {
+  .pkwt-pasal-subheading {
     text-align: center;
     font-weight: 700;
-    font-size: 10.1pt;
+    font-size: 9.8pt;
     margin-top: 0;
-    margin-bottom: 4px;
-    line-height: 1.22;
+    margin-bottom: 3px;
+    line-height: 1.18;
   }
 
-  .pasal-top {
+  .pkwt-pasal-top {
     margin-top: 2px;
   }
 
   ol.pkwt-num-list {
-    margin: 2px 0 6px 0;
+    margin: 2px 0 4px 0;
     padding-left: 22px;
   }
 
   ol.pkwt-num-list > li {
-    margin-bottom: 3px;
-    text-align: justify;
-    padding-left: 4px;
-  }
-
-  ol.pkwt-num-list-bold {
-    margin: 2px 0 6px 0;
-    padding-left: 20px;
-  }
-
-  ol.pkwt-num-list-bold > li {
-    margin-bottom: 3px;
+    margin-bottom: 2px;
     text-align: justify;
     padding-left: 4px;
   }
 
   ol.pkwt-alpha-list {
     list-style-type: lower-alpha;
-    margin: 2px 0 6px 0;
+    margin: 2px 0 4px 0;
     padding-left: 38px;
   }
 
   ol.pkwt-alpha-list > li {
-    margin-bottom: 3px;
+    margin-bottom: 2px;
     text-align: justify;
     padding-left: 4px;
   }
 
-  .section-label {
+  .pkwt-section-label {
     font-weight: 700;
-    margin: 7px 0 2.5px 0;
+    margin: 4.5px 0 1.5px 0;
   }
 
-  .note-box {
+  .pkwt-note-box {
     border: 1px solid #cbd5e1;
     background: #f8fafc;
     padding: 6px 10px;
     margin: 8px 0;
-    font-size: 9.4pt;
+    font-size: 9.2pt;
     text-align: justify;
   }
 
   /* ---- SIGNATURES ---- */
-  .signature-section {
-    margin-top: 14px;
+  .pkwt-signature-section {
+    margin-top: 12px;
   }
 
-  .signature-date {
+  .pkwt-signature-date {
     margin-bottom: 12px;
   }
 
-  .signature-table {
+  .pkwt-signature-table {
     width: 100%;
     border-collapse: collapse;
     text-align: center;
   }
 
-  .signature-table td {
+  .pkwt-signature-table td {
     width: 50%;
     vertical-align: top;
     padding: 0 10px;
   }
 
-  .sig-role {
+  .pkwt-sig-role {
     font-weight: 700;
     line-height: 1.28;
   }
 
-  .sig-space {
+  .pkwt-sig-space {
     height: 70px;
   }
 
-  .sig-emp {
+  .pkwt-sig-emp,
+  .pkwt-sig-hrd {
     font-weight: 700;
     text-decoration: underline;
     text-underline-offset: 2px;
   }
 
-  .pkwt-reholz .sig-emp {
-    text-decoration: none;
-  }
-
-  .sig-hrd {
-    font-weight: 700;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .sig-title {
-    font-size: 9.8pt;
+  .pkwt-sig-title {
+    font-size: 9.6pt;
     font-weight: 400;
     line-height: 1.25;
   }
@@ -356,8 +324,8 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    padding-top: 8px;
-    font-size: 9.2pt;
+    padding-top: 6px;
+    font-size: 9pt;
     color: #111111;
     flex-shrink: 0;
   }
@@ -371,7 +339,7 @@
 <body>
 
   <!-- ============================ HALAMAN 1 DARI 3 ============================ -->
-  <div class="a4-page pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
+  <div class="a4-page contract-sheet pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
     <div class="pkwt-page-body">
       {{#if is_standard_kop}}
       <header class="kop-mitra">
@@ -402,69 +370,76 @@
       </div>
 
       <p>
-        Pada hari ini {{hari_ttd}}, tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}} tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), yang bertandatangan dibawah ini :
+        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}} tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), yang bertandatangan dibawah ini :
       </p>
 
-      <table class="party-table">
+      <table class="pkwt-party-table">
         <tr>
-          <td class="party-num">I.</td>
+          <td class="pkwt-party-num">I.</td>
           <td style="text-align: justify;">
             <strong>{{nama_perusahaan}}</strong>, berkedudukan di {{alamat_perusahaan_pkwt}}, yang dalam hal ini diwakili oleh {{nama_hrd}} selaku {{jabatan_hrd_pkwt}}.
           </td>
         </tr>
       </table>
-      <p class="party-indent">Selanjutnya disebut <strong>PIHAK PERTAMA.</strong></p>
+      <p class="pkwt-party-indent">Selanjutnya disebut <strong>PIHAK PERTAMA.</strong></p>
 
-      <table class="kv-table">
-        <tr><td class="kv-label">Nama</td><td class="kv-sep">:</td><td><strong>{{nama_karyawan}}</strong></td></tr>
-        {{#if nik_karyawan}}<tr><td class="kv-label">NIK</td><td class="kv-sep">:</td><td>{{nik_karyawan}}</td></tr>{{/if}}
-        {{#if no_ktp}}<tr><td class="kv-label">No. KTP</td><td class="kv-sep">:</td><td>{{no_ktp}}</td></tr>{{/if}}
-        {{#if departemen}}<tr><td class="kv-label">Departemen</td><td class="kv-sep">:</td><td>{{departemen}}</td></tr>{{/if}}
-        <tr><td class="kv-label">Alamat</td><td class="kv-sep">:</td><td><strong>{{alamat_karyawan}}</strong></td></tr>
+      <table class="pkwt-party-table" style="margin-bottom: 0;">
+        <tr>
+          <td class="pkwt-party-num">II.</td>
+          <td>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td class="pkwt-kv-label">Nama</td><td class="pkwt-kv-sep">:</td><td><strong>{{nama_karyawan}}</strong></td></tr>
+              {{#if nik_karyawan}}<tr><td class="pkwt-kv-label">NIK</td><td class="pkwt-kv-sep">:</td><td><strong>{{nik_karyawan}}</strong></td></tr>{{/if}}
+              {{#if no_ktp}}<tr><td class="pkwt-kv-label">No. KTP</td><td class="pkwt-kv-sep">:</td><td><strong>{{no_ktp}}</strong></td></tr>{{/if}}
+              {{#if departemen}}<tr><td class="pkwt-kv-label">Departemen</td><td class="pkwt-kv-sep">:</td><td><strong>{{departemen}}</strong></td></tr>{{/if}}
+              <tr><td class="pkwt-kv-label">Alamat</td><td class="pkwt-kv-sep">:</td><td><strong>{{alamat_karyawan}}</strong></td></tr>
+            </table>
+          </td>
+        </tr>
       </table>
 
-      <p class="party-indent" style="margin-bottom: 1px;">dalam hal ini bertindak untuk dan atas nama diri sendiri.</p>
-      <p class="party-indent">Selanjutnya disebut <strong>PIHAK KEDUA.</strong></p>
+      <p class="pkwt-party-indent" style="margin-bottom: 1px;">dalam hal ini bertindak untuk dan atas nama diri sendiri.</p>
+      <p class="pkwt-party-indent">Selanjutnya disebut <strong>PIHAK KEDUA.</strong></p>
 
       <p class="pkwt-p-indent">
         Bahwa Para Pihak sepakat mengikatkan diri dalam Perjanjian Kerja Waktu Tertentu ( PKWT ) sebagaimana yang dituangkan dalam pasal - pasal berikut ini :
       </p>
 
-      <div class="pasal-heading">PASAL 1</div>
-      <div class="pasal-subheading">KETENTUAN UMUM</div>
+      <div class="pkwt-pasal-heading">PASAL 1</div>
+      <div class="pkwt-pasal-subheading">KETENTUAN UMUM</div>
       <ol class="pkwt-num-list">
         <li>Bahwa Pihak Pertama adalah perusahaan yang bergerak dalam bidang {{bidang_usaha_pkwt}}.</li>
         <li>Bahwa Pihak Kedua adalah pekerja Pihak Pertama berdasar Perjanjian Waktu Tertentu (PKWT).</li>
       </ol>
 
-      <div class="pasal-heading">PASAL 2</div>
-      <div class="pasal-subheading">MASA BERLAKU</div>
+      <div class="pkwt-pasal-heading">PASAL 2</div>
+      <div class="pkwt-pasal-subheading">MASA BERLAKU</div>
       <p>
-        Bahwa Pihak Pertama mengadakan ikatan kerja dengan Pihak Kedua, untuk masa waktu tertentu selama <strong>{{durasi_lengkap}}</strong> berlaku terhitung mulai tanggal <strong>{{tgl_mulai}}</strong> sampai dengan tanggal <strong>{{tgl_akhir}}.</strong>
+        Bahwa Pihak Pertama mengadakan ikatan kerja dengan Pihak Kedua, untuk masa waktu tertentu selama {{durasi_lengkap}} berlaku terhitung mulai tanggal <strong>{{tgl_mulai}}</strong> sampai dengan tanggal <strong>{{tgl_akhir}}.</strong>
       </p>
 
-      <div class="pasal-heading">PASAL 3</div>
-      <div class="pasal-subheading">PENEMPATAN</div>
+      <div class="pkwt-pasal-heading">PASAL 3</div>
+      <div class="pkwt-pasal-subheading">PENEMPATAN</div>
       <p>
         Bahwa Pihak Pertama memberikan pekerjaan kepada Pihak Kedua pada bagian <strong>{{jabatan}}.</strong>
       </p>
 
-      <div class="pasal-heading">PASAL 4</div>
-      <div class="pasal-subheading">UPAH DAN CARA PEMBAYARAN</div>
+      <div class="pkwt-pasal-heading">PASAL 4</div>
+      <div class="pkwt-pasal-subheading">UPAH DAN CARA PEMBAYARAN</div>
       <ol class="pkwt-num-list">
         <li>Bahwa Pihak Pertama memberikan upah dan / atau hak – hak lainnya kepada Pihak Kedua sesuai dengan apa yang telah disepakati.</li>
         <li>Bahwa Pihak Pertama memberikan pembayaran Upah dan / atau upah lembur kepada Pihak Kedua <strong>pada tanggal {{tgl_gajian}} ( {{tgl_gajian_terbilang}} )</strong> dalam setiap bulannya secara tunai / atau melalui transfer ke rekening Pihak Kedua.</li>
       </ol>
 
-      <div class="pasal-heading">PASAL 5</div>
-      <div class="pasal-subheading">JAM KERJA</div>
+      <div class="pkwt-pasal-heading">PASAL 5</div>
+      <div class="pkwt-pasal-subheading">JAM KERJA</div>
       <p>
         Bahwa waktu kerja dan jam kerja sesuai dengan yang ditentukan oleh Pihak Pertama dan berdasarkan atas peraturan perundang - undangan ketenagakerjaan yang berlaku.
       </p>
 
-      <div class="pasal-heading">PASAL 6</div>
-      <div class="pasal-subheading">HAK DAN KEWAJIBAN</div>
-      <div class="section-label">1. HAK PIHAK KEDUA</div>
+      <div class="pkwt-pasal-heading">PASAL 6</div>
+      <div class="pkwt-pasal-subheading">HAK DAN KEWAJIBAN</div>
+      <div class="pkwt-section-label">1. HAK PIHAK KEDUA</div>
       <ol class="pkwt-alpha-list">
         <li>Bahwa Pihak Kedua mempunyai hak mendapatkan tugas dan pekerjaan sesuai dengan bagian yang diberikan oleh Pihak Pertama.</li>
         <li>Bahwa Pihak Kedua mempunyai hak atas imbalan berupa upah dan / atau tunjangan dan / atau pendapatan lain yang ditetapkan sesuai dengan pekerjaan dan tanggungjawabnya.</li>
@@ -481,7 +456,7 @@
   </div>
 
   <!-- ============================ HALAMAN 2 DARI 3 ============================ -->
-  <div class="a4-page pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
+  <div class="a4-page contract-sheet pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
     <div class="pkwt-page-body">
       {{#if is_standard_kop}}
       <header class="kop-mitra">
@@ -512,7 +487,7 @@
       </ol>
       {{/if}}
 
-      <div class="section-label">2. KEWAJIBAN PIHAK KEDUA</div>
+      <div class="pkwt-section-label">2. KEWAJIBAN PIHAK KEDUA</div>
       <ol class="pkwt-alpha-list">
         <li>Bahwa Pihak Kedua berkewajiban melaksanakan tugas sesuai dengan ketentuan Undang – undang yang berlaku.</li>
         <li>Bahwa Pihak Kedua berkewajiban melaksanakan tugas sesuai dengan standart kualitas yang ditentukan oleh perusahaan.</li>
@@ -521,7 +496,7 @@
         <li>Bahwa Pihak Kedua berkewajiban bertanggungjawab atas kesalahannya baik karena disengaja / atau kelalaiannya dan apabila menimbulkan kerugian bagi perusahaan, maka Pihak Kedua bertanggungjawab untuk menggantinya.</li>
       </ol>
 
-      <div class="section-label">3. HAK PIHAK PERTAMA</div>
+      <div class="pkwt-section-label">3. HAK PIHAK PERTAMA</div>
       <ol class="pkwt-alpha-list">
         <li>Bahwa Pihak Pertama mempunyai hak memberikan perintah / pekerjaan kepada pekerja sesuai dengan bagian / atau jabatannya.</li>
         <li>Bahwa Pihak Pertama mempunyai hak menugaskan pekerja melakukan kerja lembur sesuai dengan kebutuhan perusahaan.</li>
@@ -530,15 +505,15 @@
         <li>Bahwa Pihak Pertama mempunyai hak meminta ganti rugi kepada Pihak Kedua karena atas kesalahannya baik karena disengaja / atau kelalaiannya yang apabila menimbulkan kerugian bagi perusahaan.</li>
       </ol>
 
-      <div class="section-label">4. KEWAJIBAN PIHAK PERTAMA</div>
+      <div class="pkwt-section-label">4. KEWAJIBAN PIHAK PERTAMA</div>
       <ol class="pkwt-alpha-list">
         <li>Bahwa Pihak Pertama berkewajiban memberikan pekerjaan kepada pekerja sesuai dengan bagian / atau jabatannya yang telah ditetapkan oleh perusahaan.</li>
         <li>Bahwa Pihak Pertama berkewajiban memberikan upah dan hak – hak pekerja yang telah menjalankan pekerjaan dan tanggungjawabnya sesuai dengan bagian / atau jabatannya.</li>
         <li>Bahwa Pihak Pertama berkewajiban menyediakan sarana dan prasarana kerja untuk pekerja sesuai dengan kebutuhan pekerja dalam menjalankan pekerjaannya.</li>
       </ol>
 
-      <div class="pasal-heading">PASAL 7</div>
-      <div class="pasal-subheading">PEMUTUSAN HUBUNGAN KERJA</div>
+      <div class="pkwt-pasal-heading">PASAL 7</div>
+      <div class="pkwt-pasal-subheading">PEMUTUSAN HUBUNGAN KERJA</div>
       <p style="margin-bottom: 3px;">Bahwa Pihak Pertama sewaktu - waktu dapat memutuskan hubungan kerja secara sepihak terhadap Pihak Kedua apabila Pihak Kedua terbukti telah melakukan kesalahan - kesalahan antara lain sebagai berikut :</p>
       <ol class="pkwt-num-list">
         <li>Melanggar ketentuan Undang - undang Ketenagakerjaan.</li>
@@ -551,8 +526,8 @@
       </ol>
 
       {{#if is_reholz}}
-      <div class="pasal-heading">PASAL 8</div>
-      <div class="pasal-subheading">BERAKHIRNYA HUBUNGAN KERJA</div>
+      <div class="pkwt-pasal-heading">PASAL 8</div>
+      <div class="pkwt-pasal-subheading">BERAKHIRNYA HUBUNGAN KERJA</div>
       <ol class="pkwt-num-list">
         <li>Bahwa masa berlakunya perjanjian kerja waktu tertentu telah berakhir.</li>
         <li>Bahwa Pihak Kedua meninggal dunia.</li>
@@ -570,7 +545,7 @@
   </div>
 
   <!-- ============================ HALAMAN 3 DARI 3 ============================ -->
-  <div class="a4-page pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
+  <div class="a4-page contract-sheet pkwt-sheet {{#if is_reholz}}pkwt-reholz{{/if}} {{#if is_standard_kop}}pkwt-mitra{{/if}}">
     <div class="pkwt-page-body">
       {{#if is_standard_kop}}
       <header class="kop-mitra">
@@ -596,8 +571,8 @@
       {{/if}}
 
       {{#if is_standard_kop}}
-      <div class="pasal-heading pasal-top">PASAL 8</div>
-      <div class="pasal-subheading">BERAKHIRNYA HUBUNGAN KERJA</div>
+      <div class="pkwt-pasal-heading pkwt-pasal-top">PASAL 8</div>
+      <div class="pkwt-pasal-subheading">BERAKHIRNYA HUBUNGAN KERJA</div>
       <ol class="pkwt-num-list">
         <li>Bahwa masa berlakunya perjanjian kerja waktu tertentu telah berakhir.</li>
         <li>Bahwa Pihak Kedua meninggal dunia.</li>
@@ -607,21 +582,21 @@
       </ol>
       {{/if}}
 
-      <div class="pasal-heading">PASAL 9</div>
-      <div class="pasal-subheading">PENYELESAIAN PERSELISIHAN</div>
+      <div class="pkwt-pasal-heading">PASAL 9</div>
+      <div class="pkwt-pasal-subheading">PENYELESAIAN PERSELISIHAN</div>
       <ol class="pkwt-num-list">
         <li>Bahwa apabila terjadi perselisihan hubungan industrial antara Pihak Pertama dengan Pihak Kedua, maka Para Pihak sepakat menyelesaikannya secara musyawarah.</li>
         <li>Bahwa bilamana perselisihan tidak dapat diselesaikan secara musyawarah, maka Para Pihak sepakat menyelesaikan perselisihan tersebut sesuai dengan ketentuan yang berlaku.</li>
       </ol>
 
-      <div class="pasal-heading">PASAL 10</div>
-      <div class="pasal-subheading">KETENTUAN TAMBAHAN</div>
+      <div class="pkwt-pasal-heading">PASAL 10</div>
+      <div class="pkwt-pasal-subheading">KETENTUAN TAMBAHAN</div>
       <p>
         Bahwa antara Pihak Pertama dengan Pihak Kedua sepakat mengenai hal – hal yang belum diatur dalam perjanjian kerja ini akan tunduk dan berpedoman atas peraturan perundang – undangan ketenagakerjaan yang berlaku.
       </p>
 
       {{#if catatan_tambahan}}
-      <div class="note-box">
+      <div class="pkwt-note-box">
         <strong>Ketentuan Khusus:</strong> {{catatan_tambahan}}
       </div>
       {{/if}}
@@ -630,22 +605,22 @@
         Demikian surat Perjanjian Kerja Waktu Tertentu ( PKWT ) ini dibuat dan ditandatangani oleh para Pihak diatas kertas bermaterai cukup.
       </p>
 
-      <div class="signature-section">
-        <div class="signature-date">{{kota_ttd}}, {{tgl_mulai}}</div>
-        <table class="signature-table">
+      <div class="pkwt-signature-section">
+        <div class="pkwt-signature-date">{{kota_ttd}}, {{tgl_mulai}}</div>
+        <table class="pkwt-signature-table">
           <tr>
             <td>
-              <div class="sig-role">PIHAK KEDUA,</div>
-              <div class="sig-role">KARYAWAN</div>
-              <div class="sig-space"></div>
-              <div class="sig-emp">{{nama_karyawan}}</div>
+              <div class="pkwt-sig-role">PIHAK KEDUA,</div>
+              <div class="pkwt-sig-role">KARYAWAN</div>
+              <div class="pkwt-sig-space"></div>
+              <div class="pkwt-sig-emp">{{nama_karyawan}}</div>
             </td>
             <td>
-              <div class="sig-role">PIHAK PERTAMA,</div>
-              <div class="sig-role">{{nama_perusahaan}}</div>
-              <div class="sig-space"></div>
-              <div class="sig-hrd">{{nama_hrd_ttd}}</div>
-              <div class="sig-title">{{jabatan_ttd_hrd}}</div>
+              <div class="pkwt-sig-role">PIHAK PERTAMA,</div>
+              <div class="pkwt-sig-role">{{nama_perusahaan}}</div>
+              <div class="pkwt-sig-space"></div>
+              <div class="pkwt-sig-hrd">{{nama_hrd_ttd}}</div>
+              <div class="pkwt-sig-title">{{jabatan_ttd_hrd}}</div>
             </td>
           </tr>
         </table>

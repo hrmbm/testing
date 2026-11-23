@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Perjanjian Bersama Pembayaran Upah - {{nama_karyawan}}</title>
+  <title>PB Upah - {{nama_karyawan}}</title>
   <style>
   @page {
-    size: letter portrait;
-    margin: 12mm 16mm 13mm 16mm;
+    size: 8.27in 12.5in;
+    margin: 0;
   }
 
   * {
@@ -18,317 +18,464 @@
     margin: 0;
     padding: 0;
     background: #eef2f6;
-    color: #111827;
-    font-family: "Times New Roman", "Source Serif 4", Georgia, serif;
-    font-size: 10.5pt;
-    line-height: 1.44;
+    color: #000000;
+    font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
+    font-size: 10.2pt;
+    line-height: 1.37;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  .a4-page {
-    width: 215.9mm;
-    min-height: 279.4mm;
+  .contract-sheet.pb-sheet {
+    width: min(100%, 8.27in);
+    height: 12.40in;
+    min-height: 12.40in;
     margin: 12px auto;
-    padding: 12mm 16mm 13mm 16mm;
+    padding: 0.34in 0.70in 0.32in 0.70in;
     background: #ffffff;
-    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.10);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
+    font-size: 10.2pt;
+    line-height: 1.37;
+    color: #000000;
+    position: relative;
+    overflow: hidden;
   }
 
   @media print {
     html, body {
       background: #ffffff !important;
-    }
-    .a4-page {
-      width: auto;
-      min-height: auto;
-      margin: 0;
-      padding: 0;
-      box-shadow: none;
-    }
-    mark.hris-var {
-      background: transparent !important;
-      border-bottom: none !important;
+      margin: 0 !important;
       padding: 0 !important;
-      color: inherit !important;
+    }
+    .contract-sheet.pb-sheet {
+      width: min(100%, 8.27in) !important;
+      height: 12.38in !important;
+      min-height: 12.38in !important;
+      margin: 0 auto !important;
+      padding: 0.34in 0.70in 0.32in 0.70in !important;
+      box-shadow: none !important;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .contract-sheet.pb-sheet:not(:last-child) {
+      break-after: page;
+      page-break-after: always;
+    }
+    .contract-sheet.pb-sheet:last-child {
+      break-after: auto;
+      page-break-after: auto;
     }
   }
 
-  .letterhead {
-    text-align: center;
-    border-bottom: 2px solid #0f172a;
-    padding-bottom: 6px;
-    margin-bottom: 12px;
+  .pb-page-body {
+    flex: 1 1 auto;
   }
 
-  .letterhead-company {
-    font-size: 13pt;
+  /* ---- KOP SURAT MITRA ---- */
+  .kop-mitra {
+    text-align: center;
+    margin-bottom: 14px;
+  }
+
+  .kop-mitra-company {
+    font-size: 16.5pt;
     font-weight: 700;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.2px;
+    line-height: 1.14;
     text-transform: uppercase;
+    color: #000000;
   }
 
-  .letterhead-meta {
-    font-size: 9pt;
-    color: #334155;
-    line-height: 1.35;
+  .kop-mitra-line {
+    font-size: 9.5pt;
+    line-height: 1.24;
+    color: #000000;
   }
 
-  .doc-title {
-    text-align: center;
-    font-size: 12.5pt;
-    font-weight: 700;
+  .kop-email-link {
+    color: #0563c1;
     text-decoration: underline;
-    text-underline-offset: 3px;
-    margin: 6px 0 2px 0;
+    text-underline-offset: 2px;
   }
 
-  .doc-subtitle {
-    text-align: center;
-    font-size: 11pt;
-    font-weight: 700;
-    margin: 2px 0;
+  .kop-mitra-divider {
+    margin-top: 5px;
+    border-top: 2pt solid #000000;
+    width: 100%;
   }
 
-  .doc-number {
-    text-align: center;
-    font-size: 10.5pt;
-    font-weight: 700;
-    margin: 0 0 10px 0;
+  /* ---- KOP SURAT REHOLZ ---- */
+  .kop-reholz {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
   }
 
-  .pasal-heading {
-    text-align: center;
-    font-weight: 700;
-    font-size: 10.5pt;
-    margin-top: 9px;
+  .kop-reholz-logo {
+    width: 136px;
+    height: auto;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .kop-reholz-info {
+    text-align: right;
+    color: #111111;
+    line-height: 1.3;
+  }
+
+  .kop-reholz-company {
+    font-size: 12pt;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
     margin-bottom: 2px;
-    page-break-after: avoid;
-    break-after: avoid;
   }
 
-  .pasal-subheading {
+  .kop-reholz-meta {
+    font-size: 8.8pt;
+    color: #111111;
+    line-height: 1.26;
+  }
+
+  /* ---- TITLE BLOCK ---- */
+  .pb-title-wrap {
     text-align: center;
-    font-weight: 700;
-    font-size: 10.5pt;
-    margin-top: 0;
-    margin-bottom: 6px;
-    page-break-after: avoid;
-    break-after: avoid;
+    margin: 4px 0 18px 0;
   }
 
-  p {
-    margin: 0 0 7px 0;
+  .pb-title {
+    display: inline-block;
+    font-size: 13.5pt;
+    font-weight: 700;
+    line-height: 1.14;
+    letter-spacing: 0.15px;
+    border-bottom: 1.2pt solid #000000;
+    padding-bottom: 1px;
+  }
+
+  .pb-subtitle {
+    font-size: 10pt;
+    font-weight: 400;
+    margin-top: 3px;
+    line-height: 1.25;
+  }
+
+  .pb-number {
+    font-size: 10pt;
+    font-weight: 400;
+    margin-top: 2px;
+    line-height: 1.25;
+  }
+
+  /* ---- BODY & LISTS ---- */
+  .pb-sheet p {
+    margin: 0 0 8px 0;
     text-align: justify;
   }
 
-  .kv-table {
+  .pb-party-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 6px 0 8px 16px;
+    margin: 2px 0 10px 0;
   }
 
-  .kv-table td {
+  .pb-party-table td {
     vertical-align: top;
-    padding: 1.5px 4px 1.5px 0;
+    padding: 0;
   }
 
-  .kv-label {
-    width: 105px;
+  .pb-party-num {
+    width: 24px;
+    font-weight: 400;
   }
 
-  .kv-sep {
-    width: 14px;
-  }
-
-  ol.legal-list, ul.legal-list {
-    margin: 4px 0 8px 0;
-    padding-left: 22px;
-  }
-
-  ol.legal-list > li {
-    margin-bottom: 4px;
-    text-align: justify;
-    padding-left: 4px;
-  }
-
-  ol.alpha-list {
-    list-style-type: lower-alpha;
-    margin: 4px 0 6px 0;
-    padding-left: 22px;
-  }
-
-  ol.alpha-list > li {
-    margin-bottom: 4px;
-    text-align: justify;
-    padding-left: 4px;
-  }
-
-  .section-label {
+  .pb-party-num-bold {
+    width: 24px;
     font-weight: 700;
-    margin: 8px 0 4px 0;
-    page-break-after: avoid;
-    break-after: avoid;
   }
 
-  .note-box {
+  .pb-party-subline {
+    margin-top: 2px;
+  }
+
+  .pb-kv-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .pb-kv-table td {
+    vertical-align: top;
+    padding: 0.5px 4px 0.5px 0;
+    font-weight: 700;
+  }
+
+  .pb-kv-label {
+    width: 88px;
+  }
+
+  .pb-kv-sep {
+    width: 10px;
+  }
+
+  ol.pb-num-list {
+    margin: 3px 0 5px 0;
+    padding-left: 24px;
+  }
+
+  ol.pb-num-list > li {
+    margin-bottom: 3.5px;
+    text-align: justify;
+    padding-left: 4px;
+  }
+
+  ol.pb-alpha-list {
+    list-style-type: lower-alpha;
+    margin: 4px 0 4px 0;
+    padding-left: 20px;
+  }
+
+  ol.pb-alpha-list > li {
+    margin-bottom: 3.5px;
+    text-align: justify;
+    padding-left: 4px;
+  }
+
+  .pb-note-box {
     border: 1px solid #cbd5e1;
     background: #f8fafc;
-    padding: 8px 12px;
+    padding: 7px 11px;
     margin: 10px 0;
-    font-size: 10.5pt;
+    font-size: 9.4pt;
     text-align: justify;
-    break-inside: avoid;
   }
 
-  .signature-section {
-    margin-top: 18px;
-    page-break-inside: avoid;
-    break-inside: avoid;
+  /* ---- SIGNATURES ---- */
+  .pb-signature-section {
+    margin-top: 16px;
   }
 
-  .signature-date {
-    margin-bottom: 8px;
+  .pb-signature-date {
+    margin-bottom: 14px;
   }
 
-  .signature-table {
+  .pb-signature-table {
     width: 100%;
     border-collapse: collapse;
     text-align: center;
   }
 
-  .signature-table td {
+  .pb-signature-table td {
     width: 50%;
     vertical-align: top;
-    padding: 0 12px;
+    padding: 0 10px;
   }
 
-  .sig-space {
-    height: 54px;
+  .pb-sig-role {
+    font-weight: 700;
+    line-height: 1.28;
   }
 
-  .sig-name {
+  .pb-sig-space {
+    height: 74px;
+  }
+
+  .pb-sig-emp,
+  .pb-sig-hrd {
     font-weight: 700;
     text-decoration: underline;
-    text-underline-offset: 3px;
+    text-underline-offset: 2px;
   }
 
-  .sig-title {
-    font-size: 10pt;
+  .pb-sig-title {
+    font-size: 9.8pt;
+    font-weight: 400;
+    line-height: 1.25;
   }
 
-  mark.hris-var {
-    background: #dbeafe;
-    color: #1e3a8a;
-    padding: 0 3px;
-    border-bottom: 1px solid #60a5fa;
-    border-radius: 2px;
+  /* ---- FOOTER ---- */
+  .pb-footer {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-top: 6px;
+    font-size: 9pt;
+    color: #111111;
+    flex-shrink: 0;
   }
-</style>
+
+  .pb-paraf {
+    font-style: italic;
+    color: #333333;
+  }
+  </style>
 </head>
 <body>
-  <div class="a4-page">
-    <div class="page-content">
-      <header class="letterhead">
-        <div class="letterhead-company">{{nama_perusahaan}}</div>
-        <div class="letterhead-meta">
-          {{alamat_kop_surat}}<br />
-          {{kontak_kop_surat}}
+
+  <!-- ============================ HALAMAN 1 DARI 2 ============================ -->
+  <div class="a4-page contract-sheet pb-sheet {{#if is_reholz}}pb-reholz{{/if}} {{#if is_standard_kop}}pb-mitra{{/if}}">
+    <div class="pb-page-body">
+      {{#if is_standard_kop}}
+      <header class="kop-mitra">
+        <div class="kop-mitra-company">{{nama_perusahaan}}</div>
+        <div class="kop-mitra-line">{{kop_alamat_baris1}}</div>
+        <div class="kop-mitra-line">{{kop_telp}}</div>
+        <div class="kop-mitra-line">E-mail : <span class="kop-email-link">{{kop_email}}</span></div>
+        <div class="kop-mitra-divider"></div>
+      </header>
+      {{/if}}
+      {{#if is_reholz}}
+      <header class="kop-reholz">
+        <img class="kop-reholz-logo" src="{{logo_reholz_url}}" alt="ReHolz More Than Wood" />
+        <div class="kop-reholz-info">
+          <div class="kop-reholz-company">{{nama_perusahaan}}</div>
+          <div class="kop-reholz-meta">
+            <div>{{kop_alamat_baris1}}</div>
+            <div>{{kop_alamat_baris2}}</div>
+            <div>{{kop_telp}}</div>
+          </div>
         </div>
       </header>
-      
-      <div class="doc-title">PERJANJIAN BERSAMA</div>
-      <div class="doc-subtitle">Tentang : Pembayaran Upah Tahun {{tahun_umk_sekarang}}</div>
-      <div class="doc-number">{{no_pb}}</div>
+      {{/if}}
 
-      <p>Yang bertanda tangan di bawah ini :</p>
-      <p>
-        <strong>{{nama_perusahaan}}</strong>, berkedudukan di {{alamat_perusahaan_pb}},
-        dan dalam hal ini diwakili oleh {{nama_hrd}} selaku {{jabatan_hrd_pb}}.
-      </p>
-      <p>Selanjutnya disebut <strong>Pihak Pertama.</strong></p>
+      <div class="pb-title-wrap">
+        <div class="pb-title">PERJANJIAN BERSAMA</div>
+        <div class="pb-subtitle">Tentang : Pembayaran Upah Tahun {{tahun_umk_sekarang}}</div>
+        <div class="pb-number">{{no_pb}}</div>
+      </div>
 
-      <table class="kv-table">
-        <tr><td class="kv-label">Nama</td><td class="kv-sep">:</td><td><strong>{{nama_karyawan}}</strong></td></tr>
-        {{#if nik_karyawan}}<tr><td class="kv-label">NIK</td><td class="kv-sep">:</td><td>{{nik_karyawan}}</td></tr>{{/if}}
-        <tr><td class="kv-label">Pekerjaan</td><td class="kv-sep">:</td><td>Karyawan {{nama_perusahaan_judul}}.</td></tr>
-        <tr><td class="kv-label">Jabatan</td><td class="kv-sep">:</td><td>{{jabatan}}</td></tr>
-        {{#if departemen}}<tr><td class="kv-label">Departemen</td><td class="kv-sep">:</td><td>{{departemen}}</td></tr>{{/if}}
-        <tr><td class="kv-label">Alamat</td><td class="kv-sep">:</td><td>{{alamat_karyawan}}</td></tr>
+      <p style="margin-bottom: 10px;">Yang bertanda tangan di bawah ini :</p>
+
+      <table class="pb-party-table">
+        <tr>
+          <td class="pb-party-num">I.</td>
+          <td style="text-align: justify;">
+            <strong>{{nama_perusahaan}}</strong>, berkedudukan di {{alamat_perusahaan_pb}}, dan dalam hal ini diwakili oleh {{nama_hrd}} selaku {{jabatan_hrd_pkwt}}.
+            <div class="pb-party-subline">Selanjutnya disebut <strong>Pihak Pertama.</strong></div>
+          </td>
+        </tr>
+      </table>
+
+      <table class="pb-party-table" style="margin-bottom: 12px;">
+        <tr>
+          <td class="pb-party-num-bold">II.</td>
+          <td>
+            <table class="pb-kv-table">
+              <tr><td class="pb-kv-label">Nama</td><td class="pb-kv-sep">:</td><td>{{nama_karyawan}}</td></tr>
+              {{#if nik_karyawan}}<tr><td class="pb-kv-label">NIK</td><td class="pb-kv-sep">:</td><td>{{nik_karyawan}}</td></tr>{{/if}}
+              <tr><td class="pb-kv-label">Pekerjaan</td><td class="pb-kv-sep">:</td><td>Karyawan {{nama_perusahaan_judul}}.</td></tr>
+              <tr><td class="pb-kv-label">Jabatan</td><td class="pb-kv-sep">:</td><td>{{jabatan}}</td></tr>
+              {{#if departemen}}<tr><td class="pb-kv-label">Departemen</td><td class="pb-kv-sep">:</td><td>{{departemen}}</td></tr>{{/if}}
+              <tr><td class="pb-kv-label">Alamat</td><td class="pb-kv-sep">:</td><td>{{alamat_karyawan}}</td></tr>
+            </table>
+          </td>
+        </tr>
       </table>
 
       <p>
-        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}}
-        tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), Para Pihak telah mengadakan perundingan dengan kesepakatan
-        pembayaran Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}},
-        yang dituangkan dalam bentuk Perjanjian Bersama ( PB ) dengan kronologis permasalahan serta ketentuan – ketentuan sebagai berikut :
+        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}} tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), Para Pihak telah mengadakan perundingan dengan kesepakatan pembayaran Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}}, yang dituangkan dalam bentuk Perjanjian Bersama ( PB ) dengan kronologis permasalahan serta ketentuan – ketentuan sebagai berikut :
       </p>
 
-      <ol class="legal-list">
+      <ol class="pb-num-list">
         <li>Bahwa Pihak Pertama adalah perusahaan yang bergerak dalam bidang {{bidang_usaha_pb}}, sedangkan Pihak Kedua adalah pekerja pada Pihak Pertama.</li>
         <li>Bahwa hubungan kerja antara Pihak Pertama dengan Pihak Kedua telah berjalan secara harmonis dalam kemitraan kerja.</li>
         <li>
-          Bahwa pada perkembangan selanjutnya, setelah Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}}
-          sebesar Rp {{umk_lalu}},- ( Terbilang : {{umk_lalu_terbilang}} ) menjadi Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan
-          tahun {{tahun_umk_sekarang}} sebesar Rp. {{umk_sekarang}},- ( Terbilang : {{umk_sekarang_terbilang}} ),
-          maka Pihak Pertama menyatakan dirinya tidak mampu untuk melaksanakan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}} tersebut.
+          Bahwa pada perkembangan selanjutnya, setelah Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}} sebesar Rp {{umk_lalu}},- ( Terbilang : {{umk_lalu_terbilang}} ) menjadi Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}} sebesar Rp. {{umk_sekarang}},- ( Terbilang : {{umk_sekarang_terbilang}} ), maka Pihak Pertama menyatakan dirinya tidak mampu untuk melaksanakan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_lalu}} tersebut.
         </li>
         <li>
-          Bahwa meskipun Pihak Pertama merasa tidak mampu melaksanakan ketentuan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}},
-          akan tetapi Pihak Pertama tetap membayar Upah kepada Pihak Kedua sesuai dengan Keputusan Gubernur Jawa Timur, Nomor : {{no_sk_gubernur}}
-          tentang Upah Minimum Kabupaten / Kota di Jawa Timur Tahun {{tahun_umk_sekarang}}, namun agar Pihak Pertama tetap bisa eksis menjalankan usahanya
-          dan Para Karyawan juga tetap mendapatkan pekerjaan, maka Para Pihak sepakat untuk melaksanakan pembayaran upah tersebut dengan cara :
-          <ol class="alpha-list">
-            <li>Secara tunai sebesar <strong>Rp {{gaji_tunai}},- ( Terbilang : {{gaji_tunai_terbilang}} )</strong> dalam setiap bulannya, dan</li>
-            <li>Kekurangannya sebesar <strong>Rp {{selisih_hutang}},- ( Terbilang : {{selisih_hutang_terbilang}} )</strong> disepakati menjadi hutang Pihak Pertama kepada Pihak Kedua.</li>
+          <strong>Bahwa meskipun Pihak Pertama merasa tidak mampu melaksanakan ketentuan Upah Minimum Kabupaten / Kota ( UMK ) Kab. Pasuruan tahun {{tahun_umk_sekarang}}, akan tetapi Pihak Pertama tetap membayar Upah kepada Pihak Kedua sesuai dengan</strong> Keputusan Gubernur Jawa Timur, Nomor : {{no_sk_gubernur}} tentang Upah Minimum Kabupaten / Kota di Jawa Timur Tahun {{tahun_umk_sekarang}}, namun agar Pihak Pertama tetap bisa eksis menjalankan usahanya dan Para Karyawan juga tetap mendapatkan pekerjaan, maka Para Pihak sepakat untuk melaksanakan pembayaran upah tersebut dengan cara :
+          <ol class="pb-alpha-list">
+            <li>Secara tunai sebesar <strong>Rp. {{gaji_tunai}},- ( Terbilang : {{gaji_tunai_terbilang}} )</strong> dalam setiap bulannya, dan</li>
+            <li>Kekurangannya sebesar <strong>Rp. {{selisih_hutang}},- ( Terbilang : {{selisih_hutang_terbilang}} )</strong> disepakati menjadi hutang Pihak Pertama kepada Pihak Kedua.</li>
           </ol>
         </li>
         <li>
-          Bahwa begitupun terhadap karyawan yang penggajiannya dengan sistem borongan, dan ternyata hasil borongan dalam 1 ( satu ) bulan,
-          tidak mencapai UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, maka Pihak Pertama akan memberikan tambahan upah sesuai dengan ketentuan
-          UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, akan tetapi tambahan upah tersebut juga merupakan hutang Pihak Pertama kepada Pihak Kedua.
+          Bahwa begitupun terhadap karyawan yang penggajiannya dengan sistem borongan, dan ternyata hasil borongan dalam 1 ( satu ) bulan, tidak mencapai UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, maka Pihak Pertama akan memberikan tambahan upah sesuai dengan ketentuan UMK Kab. Pasuruan tahun {{tahun_umk_sekarang}}, akan tetapi tambahan upah tersebut juga merupakan hutang Pihak Pertama kepada Pihak Kedua.
         </li>
+      </ol>
+    </div>
+
+    <footer class="pb-footer">
+      <span>Halaman 1 dari 2 halaman</span>
+      <span class="pb-paraf">Paraf_______</span>
+    </footer>
+  </div>
+
+  <!-- ============================ HALAMAN 2 DARI 2 ============================ -->
+  <div class="a4-page contract-sheet pb-sheet {{#if is_reholz}}pb-reholz{{/if}} {{#if is_standard_kop}}pb-mitra{{/if}}">
+    <div class="pb-page-body">
+      {{#if is_standard_kop}}
+      <header class="kop-mitra">
+        <div class="kop-mitra-company">{{nama_perusahaan}}</div>
+        <div class="kop-mitra-line">{{kop_alamat_baris1}}</div>
+        <div class="kop-mitra-line">{{kop_telp}}</div>
+        <div class="kop-mitra-line">E-mail : <span class="kop-email-link">{{kop_email}}</span></div>
+        <div class="kop-mitra-divider"></div>
+      </header>
+      {{/if}}
+      {{#if is_reholz}}
+      <header class="kop-reholz">
+        <img class="kop-reholz-logo" src="{{logo_reholz_url}}" alt="ReHolz More Than Wood" />
+        <div class="kop-reholz-info">
+          <div class="kop-reholz-company">{{nama_perusahaan}}</div>
+          <div class="kop-reholz-meta">
+            <div>{{kop_alamat_baris1}}</div>
+            <div>{{kop_alamat_baris2}}</div>
+            <div>{{kop_telp}}</div>
+          </div>
+        </div>
+      </header>
+      {{/if}}
+
+      <ol class="pb-num-list" start="6" style="margin-top: 2px;">
         <li>
-          Bahwa terhadap hutang Pihak Pertama kepada Pihak Kedua sebagaimana disebutkan pada angka ke – 4 dan / atau ke – 5 diatas,
-          Pihak Pertama dan Pihak Kedua sepakat menyelesaikan secara musyawarah dan penyelesaian dimaksud dituangkan dalam Perjanjian Bersama ( PB ) berikutnya.
+          Bahwa terhadap hutang Pihak Pertama kepada Pihak Kedua sebagaimana disebutkan pada angka ke – 4 dan / atau ke – 5 diatas, Pihak Pertama dan Pihak Kedua sepakat menyelesaikan secara musyawarah dan penyelesaian dimaksud dituangkan dalam Perjanjian Bersama ( PB ) berikutnya.
         </li>
       </ol>
 
       {{#if catatan_tambahan}}
-      <div class="note-box">
+      <div class="pb-note-box">
         <strong>Catatan Tambahan:</strong> {{catatan_tambahan}}
       </div>
       {{/if}}
 
-      <p>
+      <p style="margin-top: 8px; margin-bottom: 14px;">
         Demikian Perjanjian Bersama ( PB ) ini dibuat rangkap 2 ( dua ) dan ditandatangani oleh Para Pihak diatas kertas bermaterai cukup, yang masing – masing mempunyai kekuatan hukum sama.
       </p>
 
-      <div class="signature-section">
-        <div class="signature-date">Kab. {{kota_ttd}}, {{tgl_mulai}}</div>
-        <table class="signature-table">
+      <div class="pb-signature-section">
+        <div class="pb-signature-date">{{kota_ttd}}, {{tgl_mulai}}</div>
+        <table class="pb-signature-table">
           <tr>
             <td>
-              <div><strong>PIHAK KEDUA,</strong></div>
-              <div><strong>KARYAWAN</strong></div>
-              <div class="sig-space"></div>
-              <div class="sig-name">{{nama_karyawan}}</div>
+              <div class="pb-sig-role">PIHAK KEDUA,</div>
+              <div class="pb-sig-role">KARYAWAN</div>
+              <div class="pb-sig-space"></div>
+              <div class="pb-sig-emp">{{nama_karyawan}}</div>
             </td>
             <td>
-              <div><strong>PIHAK PERTAMA,</strong></div>
-              <div><strong>{{nama_perusahaan}}</strong></div>
-              <div class="sig-space"></div>
-              <div class="sig-name">{{nama_hrd_ttd}}</div>
-              <div class="sig-title">{{jabatan_ttd_hrd}}</div>
+              <div class="pb-sig-role">PIHAK PERTAMA,</div>
+              <div class="pb-sig-role">{{nama_perusahaan}}</div>
+              <div class="pb-sig-space"></div>
+              <div class="pb-sig-hrd">{{nama_hrd_ttd}}</div>
+              <div class="pb-sig-title">{{jabatan_ttd_hrd}}</div>
             </td>
           </tr>
         </table>
       </div>
-    
     </div>
+
+    <footer class="pb-footer">
+      <span>Halaman 2 dari 2 halaman</span>
+      <span class="pb-paraf">Paraf_______</span>
+    </footer>
   </div>
+
 </body>
 </html>

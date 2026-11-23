@@ -1040,7 +1040,9 @@ test('PKWT print is print-only with inline Sync to Employee Directory button and
   assert.equal(sync.historyEntry.status, 'applied');
 
   const pkwtTpl = fs.readFileSync('assets/contracts/01-pkwt.html', 'utf8');
-  assert.match(pkwtTpl, /8\.27in\s+12\.6in/, '01-pkwt.html must configure 8.27in x 12.6in paper size');
+  assert.match(pkwtTpl, /size:\s*8\.27in\s+12\.5in/i, '01-pkwt.html must configure 8.27in x 12.5in F4+Legal safe box');
+  assert.match(pkwtTpl, /8\.27in/, '01-pkwt.html must constrain sheet width to F4-safe 8.27in');
+  assert.match(pkwtTpl, /font-family:\s*Arial/i, '01-pkwt.html must use Arial font');
   assert.ok(pkwtTpl.includes('Halaman 1 dari 3 halaman'), '01-pkwt.html must include Page 1 footer');
   assert.ok(pkwtTpl.includes('Halaman 2 dari 3 halaman'), '01-pkwt.html must include Page 2 footer');
   assert.ok(pkwtTpl.includes('Halaman 3 dari 3 halaman'), '01-pkwt.html must include Page 3 footer');
@@ -1104,6 +1106,11 @@ test('PKWT print is print-only with inline Sync to Employee Directory button and
   );
   assert.ok(contractModalJs.includes('bindSafeModalClose'), 'PKWT modal must guard against closing on text drag-selection');
 
+  assert.deepEqual(
+    CONTRACT_DOCUMENTS.map(d => d.title),
+    ['PKWT', 'PB Upah', 'PB Upah Lembur', 'PB Penyelesaian Upah', 'PB Penyelesaian Upah Lembur']
+  );
+
   for (const tpl of [
     'assets/contracts/02-pb-pembayaran-upah.html',
     'assets/contracts/03-pb-pembayaran-upah-lembur.html',
@@ -1111,8 +1118,13 @@ test('PKWT print is print-only with inline Sync to Employee Directory button and
     'assets/contracts/05-pb-penyelesaian-lembur.html'
   ]) {
     const html = fs.readFileSync(tpl, 'utf8');
-    assert.ok(!/Paraf/i.test(html), `${tpl} must not contain Paraf footer`);
-    assert.ok(/letter/i.test(html), `${tpl} must configure US Letter page size`);
+    assert.match(html, /font-family:\s*Arial/i, `${tpl} must use Arial font`);
+    assert.match(html, /size:\s*8\.27in\s+12\.5in/i, `${tpl} must configure 8.27in x 12.5in F4+Legal safe box`);
+    assert.match(html, /8\.27in/, `${tpl} must constrain sheet width to F4-safe 8.27in`);
+    assert.ok(html.includes('Halaman 1 dari 2 halaman'), `${tpl} must include Page 1 footer`);
+    assert.ok(html.includes('Halaman 2 dari 2 halaman'), `${tpl} must include Page 2 footer`);
+    assert.equal((html.match(/Paraf_______/g) || []).length, 2, `${tpl} must include Paraf footer on both pages`);
+    assert.equal((html.match(/HALAMAN \d DARI 2/g) || []).length, 2, `${tpl} must structure exactly 2 pages`);
   }
 });
 

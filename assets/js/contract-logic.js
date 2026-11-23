@@ -22,36 +22,36 @@ export const CONTRACT_DOCUMENTS = [
     key: '01-pkwt',
     code: '01',
     file: '01-pkwt.html',
-    title: 'PKWT Employment Agreement',
+    title: 'PKWT',
     shortTitle: '01 · PKWT'
   },
   {
     key: '02-pb-pembayaran-upah',
     code: '02',
     file: '02-pb-pembayaran-upah.html',
-    title: 'Joint Agreement — Wage Payment',
-    shortTitle: '02 · PB Wage'
+    title: 'PB Upah',
+    shortTitle: '02 · PB Upah'
   },
   {
     key: '03-pb-pembayaran-upah-lembur',
     code: '03',
     file: '03-pb-pembayaran-upah-lembur.html',
-    title: 'Joint Agreement — Overtime Rate',
-    shortTitle: '03 · PB Overtime'
+    title: 'PB Upah Lembur',
+    shortTitle: '03 · PB Upah Lembur'
   },
   {
     key: '04-pb-penyelesaian-upah',
     code: '04',
     file: '04-pb-penyelesaian-upah.html',
-    title: 'Joint Agreement — Wage Settlement',
-    shortTitle: '04 · PB Wage Settlement'
+    title: 'PB Penyelesaian Upah',
+    shortTitle: '04 · PB Penyelesaian Upah'
   },
   {
     key: '05-pb-penyelesaian-lembur',
     code: '05',
     file: '05-pb-penyelesaian-lembur.html',
-    title: 'Joint Agreement — Overtime Settlement',
-    shortTitle: '05 · PB OT Settlement'
+    title: 'PB Penyelesaian Upah Lembur',
+    shortTitle: '05 · PB Penyelesaian Upah Lembur'
   }
 ];
 

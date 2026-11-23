@@ -108,7 +108,7 @@ function decorateScreenPreview(html) {
         padding: 10px !important;
         overflow-x: hidden !important;
       }
-      .a4-page:not(.pkwt-sheet) {
+      .a4-page:not(.contract-sheet):not(.pkwt-sheet) {
         width: 100% !important;
         max-width: 215.9mm !important;
         min-height: auto !important;
@@ -118,11 +118,13 @@ function decorateScreenPreview(html) {
         font-size: 10pt !important;
         line-height: 1.45 !important;
       }
+      .contract-sheet,
       .pkwt-sheet {
         zoom: 0.68;
         margin: 0 auto 14px auto !important;
         box-shadow: 0 3px 12px rgba(15, 23, 42, 0.16) !important;
       }
+      .contract-sheet:last-child,
       .pkwt-sheet:last-child {
         margin-bottom: 0 !important;
       }
