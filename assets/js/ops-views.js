@@ -5,8 +5,10 @@ import {
   DEFAULT_OPS_SETTINGS,
   DEFAULT_WEEKDAY_OVERTIME_TARIFF,
   DEFAULT_HOLIDAY_OVERTIME_TARIFF,
+  STAFF_ATTENDANCE_CODE_ORDER,
+  DEFAULT_STAFF_CODEBOOK,
   normalizeOpsSettings
-} from './ops-settings-logic.js?v=20261124-hrga-workspace-19';
+} from './ops-settings-logic.js?v=20261124-hrga-workspace-20';
 import {
   SEED_EMPLOYEES,
   SEED_STATIONERY_ITEMS,
@@ -22,7 +24,7 @@ import {
   SEED_DRIVER_ADJUSTMENTS,
   SEED_STAFF_REVIEWS,
   SEED_STAFF_MEAL_OVERRIDES
-} from './ops-seed-data.js?v=20261124-hrga-workspace-19';
+} from './ops-seed-data.js?v=20261124-hrga-workspace-20';
 import {
   compactNik,
   parseLaporanTransaksiRows,
@@ -30,6 +32,10 @@ import {
   parseRadinAttendanceRows,
   buildAttendanceBatchResult,
   processStaffAttendancePeriod,
+  processStaffMealAllowanceReport,
+  getWeeklyMealPeriodWindow,
+  shiftIsoDate,
+  normalizeStaffAttendanceCode,
   computeEmployeeDirectoryDelta,
   parseCutiSpreadsheetRows,
   evaluateCutiConfirmationGate,
@@ -38,29 +44,31 @@ import {
   resolveStaffWorkSchedule,
   evaluateStaffArrivalStatus,
   addMinutesToScheduleCutoff
-} from './attendance-logic.js?v=20261124-hrga-workspace-19';
+} from './attendance-logic.js?v=20261124-hrga-workspace-20';
 import {
+  isEligibleDriver,
   getEligibleDrivers,
   normalizeScheduleActivities,
   validateDriverSchedules,
   reconcileDriverSchedulesAndAttendance,
   computeDriverDayMetrics
-} from './driver-logic.js?v=20261124-hrga-workspace-19';
+} from './driver-logic.js?v=20261124-hrga-workspace-20';
 import {
   renderDriverReportsView as renderDriverReportsModule,
-  openDomPrintPreview
-} from './driver-reports.js?v=20261124-hrga-workspace-19';
+  openDomPrintPreview,
+  renderTwoSignatoriesHtml
+} from './driver-reports.js?v=20261124-hrga-workspace-20';
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
   buildStationeryReports
-} from './stationery-logic.js?v=20261124-hrga-workspace-19';
+} from './stationery-logic.js?v=20261124-hrga-workspace-20';
 import {
   parseEmployeeWorksheetAoa,
   paginateRows,
   normalizeCompanyEntity,
   formatCompanyEntityName
-} from './workspace-logic.js?v=20261124-hrga-workspace-19';
+} from './workspace-logic.js?v=20261124-hrga-workspace-20';
 
 const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
@@ -962,12 +970,37 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
 }
 
 // ============================================================================
-// 4. STAFF ATTENDANCE MANAGEMENT & REPORTS (HOLD FULL PAYROLL PHASE, STRUCTURED READY)
+// 4. STAFF ATTENDANCE MANAGEMENT (ADJUSTMENT CENTER) & STAFF REPORTS (ABSENSI + UANG MAKAN)
 // ============================================================================
+function getStaffEmployeesList(ctx, settings, entityFilter = 'ALL', includeDrivers = false) {
+  return getAllKnownEmployees(ctx).filter(e => {
+    if (/ADMIN/i.test(e.employee_no || '')) return false;
+    if (!includeDrivers && isEligibleDriver(e, settings)) return false;
+    if (entityFilter && entityFilter !== 'ALL') {
+      if (normalizeCompanyEntity(e.company_entity || 'MITRA') !== entityFilter) return false;
+    }
+    return true;
+  });
+}
+
+function getStaffCodeClass(code) {
+  if (code === 'H') return 'stf-code-h';
+  if (code === 'T' || code === 'PA' || code === 'DS') return 'stf-code-warn';
+  if (code === 'A') return 'stf-code-danger';
+  if (code === 'S' || code === 'I' || code === 'CT') return 'stf-code-info';
+  if (code === 'L') return 'stf-code-off';
+  return 'stf-code-muted';
+}
+
 export async function renderStaffManagementView(host, ctx) {
   const state = await loadOpsState(ctx);
   const periodKey = host.dataset.staffPeriod || '2026-11';
-  const employees = getAllKnownEmployees(ctx).filter(e => !/ADMIN/i.test(e.employee_no || ''));
+  const entityFilter = host.dataset.staffEntity || 'ALL';
+  const statusFilter = host.dataset.staffStatus || 'ALL';
+  const focusDate = host.dataset.staffFocusDate || 'ALL';
+  const query = (host.dataset.staffQuery || '').trim().toLowerCase();
+
+  const employees = getStaffEmployeesList(ctx, state.settings, entityFilter, false);
   const computed = processStaffAttendancePeriod({
     periodKey,
     employees,
@@ -976,17 +1009,82 @@ export async function renderStaffManagementView(host, ctx) {
     holidaySchedules: state.conditionalHolidays,
     leaveBalances: state.cutiBalances,
     existingReviews: state.staffReviews,
+    mealOverrides: state.staffMealOverrides || [],
     settings: state.settings
   });
 
   const attCfg = state.settings.attendance;
+  const codebook = attCfg.codebook || DEFAULT_STAFF_CODEBOOK;
+  const mealOvMap = new Map(
+    (state.staffMealOverrides || [])
+      .filter(m => m && m.employee_no && m.work_date)
+      .map(m => [`${compactNik(m.employee_no)}|${m.work_date}`, m])
+  );
+
+  let filteredSummaries = computed.summaries;
+  if (query) {
+    filteredSummaries = filteredSummaries.filter(r =>
+      String(r.employee_name || '').toLowerCase().includes(query) ||
+      String(r.employee_no || '').toLowerCase().includes(query) ||
+      String(r.department || '').toLowerCase().includes(query)
+    );
+  }
+  if (statusFilter === 'PENDING') {
+    filteredSummaries = filteredSummaries.filter(r =>
+      focusDate === 'ALL'
+        ? r.counts.PENDING > 0
+        : r.days.some(d => d.work_date === focusDate && d.code === 'PERLU_PEMERIKSAAN_HR')
+    );
+  } else if (statusFilter === 'AUTO_FLAG') {
+    filteredSummaries = filteredSummaries.filter(r =>
+      focusDate === 'ALL'
+        ? (r.counts.T > 0 || r.counts.PA > 0)
+        : r.days.some(d => d.work_date === focusDate && (d.code === 'T' || d.code === 'PA' || d.ruleFlags?.length))
+    );
+  } else if (statusFilter === 'CONFIRMED') {
+    filteredSummaries = filteredSummaries.filter(r =>
+      focusDate === 'ALL'
+        ? r.days.some(d => d.is_confirmed)
+        : r.days.some(d => d.work_date === focusDate && d.is_confirmed)
+    );
+  }
+
   const totalPending = computed.summaries.reduce((s, r) => s + r.counts.PENDING, 0);
-  const totalLate = computed.summaries.reduce((s, r) => s + r.counts.T, 0);
+  const totalAutoFlag = computed.summaries.reduce((s, r) => s + r.counts.T + r.counts.PA, 0);
+  const totalConfirmed = computed.summaries.reduce((s, r) => s + r.days.filter(d => d.is_confirmed).length, 0);
+
   const staffPage = Number(host.dataset.staffPage || 1) || 1;
   const staffSizeRaw = host.dataset.staffPageSize || '50';
   const staffSize = staffSizeRaw === 'all' ? 'all' : (Number(staffSizeRaw) || 50);
-  const staffPaged = paginateRows(computed.summaries, staffPage, staffSize);
+  const staffPaged = paginateRows(filteredSummaries, staffPage, staffSize);
   const empByNik = new Map(employees.map(e => [compactNik(e.employee_no), e]));
+
+  // Lookup cache per NIK|Date for instant client-side row date changes
+  const dayLookup = {};
+  for (const sum of staffPaged.items) {
+    const nk = compactNik(sum.employee_no);
+    dayLookup[nk] = {};
+    for (const d of sum.days) {
+      const ov = mealOvMap.get(`${nk}|${d.work_date}`);
+      dayLookup[nk][d.work_date] = {
+        code: d.code,
+        check_in: d.check_in || '',
+        check_out: d.check_out || '',
+        ruleFlags: d.ruleFlags || [],
+        is_confirmed: Boolean(d.is_confirmed),
+        mealMode: ov ? (ov.eligible ? 'allow' : 'deny') : 'auto',
+        mealReason: ov?.reason || d.review_reason || ''
+      };
+    }
+  }
+
+  const codeSelectOptionsHtml = selectedCode => {
+    const cleanSel = STAFF_ATTENDANCE_CODE_ORDER.includes(selectedCode) ? selectedCode : '';
+    const promptOpt = !cleanSel ? '<option value="" selected disabled>-- Pilih Kode --</option>' : '';
+    return promptOpt + STAFF_ATTENDANCE_CODE_ORDER.map(c =>
+      `<option value="${c}" ${cleanSel === c ? 'selected' : ''}>${c} — ${esc(codebook[c] || c)}</option>`
+    ).join('');
+  };
 
   host.innerHTML = `
     <div class="ops-stack">
@@ -994,85 +1092,121 @@ export async function renderStaffManagementView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Staff Attendance Management</h2>
-            <p class="ops-sub">Periode cutoff <b>${esc(computed.window.startDate)}</b> s/d <b>${esc(computed.window.endDate)}</b>. Aturan umum PT MBM: Terlambat &ge; ${attCfg.lateThresholdMinutes} mnt (<code>07:31:00</code>), Uang Makan hangus &ge; ${attCfg.mealThresholdMinutes} mnt (<code>07:36:00</code>). PT Radin aturan khusus (status hold).</p>
+            <p class="ops-sub">Pusat penyesuaian kode kehadiran &amp; uang makan Staff (Non-Driver). Periode <b>${esc(computed.window.startDate)}</b> s/d <b>${esc(computed.window.endDate)}</b> · Terlambat (<code>T</code>) &ge; ${attCfg.lateThresholdMinutes} mnt · Pulang Awal (<code>PA</code>) &ge; ${attCfg.earlyLeaveThresholdMinutes} mnt · Uang Makan Rp ${Number(attCfg.mealAllowanceAmount || 0).toLocaleString('id-ID')}/hari.</p>
           </div>
           <div class="ops-actions">
             <input id="ops-staff-period" type="month" class="input" value="${esc(periodKey)}" aria-label="Pilih periode payroll staff">
-            <button type="button" class="btn btn-secondary" id="ops-staff-export">Export XLSX</button>
+            <select id="ops-staff-entity" class="input" aria-label="Filter entitas staff">
+              <option value="ALL" ${entityFilter === 'ALL' ? 'selected' : ''}>Semua Perusahaan</option>
+              <option value="MITRA" ${entityFilter === 'MITRA' ? 'selected' : ''}>PT. Mitra Binamandiri Makmur</option>
+              <option value="REHOLZ" ${entityFilter === 'REHOLZ' ? 'selected' : ''}>PT. Radin Mitra Lestari</option>
+            </select>
           </div>
+        </div>
+
+        <div class="ops-form-grid" style="margin-top:12px">
+          <label class="ops-field"><span>Cari Nama / NIK / Departemen</span>
+            <input id="ops-staff-search" type="search" class="input" value="${esc(host.dataset.staffQuery || '')}" placeholder="Ketik nama atau NIK...">
+          </label>
+          <label class="ops-field"><span>Fokus Tanggal Penyesuaian</span>
+            <select id="ops-staff-focus-date" class="input">
+              <option value="ALL" ${focusDate === 'ALL' ? 'selected' : ''}>Semua Tanggal (Pilih per Karyawan)</option>
+              ${computed.window.dayMeta.map(m => `<option value="${m.dateStr}" ${focusDate === m.dateStr ? 'selected' : ''}>${m.dateStr} (${m.dayShort})</option>`).join('')}
+            </select>
+          </label>
+          <label class="ops-field"><span>Filter Status</span>
+            <select id="ops-staff-status" class="input">
+              <option value="ALL" ${statusFilter === 'ALL' ? 'selected' : ''}>Semua Karyawan (${computed.summaries.length})</option>
+              <option value="PENDING" ${statusFilter === 'PENDING' ? 'selected' : ''}>Perlu Penyesuaian HR</option>
+              <option value="AUTO_FLAG" ${statusFilter === 'AUTO_FLAG' ? 'selected' : ''}>Terdeteksi T / PA</option>
+              <option value="CONFIRMED" ${statusFilter === 'CONFIRMED' ? 'selected' : ''}>Sudah Disesuaikan Manual</option>
+            </select>
+          </label>
         </div>
       </div>
 
       <div class="kpi-grid ops-kpi-4">
-        <div class="card kpi-card"><div class="kpi-label">Karyawan Periode</div><div class="kpi-val">${computed.summaries.length}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Total Keterlambatan (T)</div><div class="kpi-val">${totalLate}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Perlu Pemeriksaan HR</div><div class="kpi-val ${totalPending ? 'text-danger' : ''}">${totalPending}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Batas Telat / Uang Makan</div><div class="kpi-val" style="font-size:18px">&ge;${attCfg.lateThresholdMinutes}m / &ge;${attCfg.mealThresholdMinutes}m</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Staff Non-Driver</div><div class="kpi-val">${computed.summaries.length}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Terlambat (T) / PA</div><div class="kpi-val">${totalAutoFlag}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Perlu Penyesuaian</div><div class="kpi-val ${totalPending ? 'text-danger' : ''}">${totalPending}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Disesuaikan Manual</div><div class="kpi-val">${totalConfirmed}</div></div>
       </div>
 
       <div class="card ops-card">
-        <h3>Ringkasan Kehadiran &amp; Jadwal Home Base Staff</h3>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>NIK</th>
-                <th>Nama &amp; Home Base</th>
-                <th>Departemen</th>
-                <th class="num">M</th>
-                <th class="num">T</th>
-                <th class="num">S/I</th>
-                <th class="num">A/ITB</th>
-                <th class="num">CT</th>
-                <th class="num">Perlu HR</th>
-                <th class="num">Dibayar (Cap ${attCfg.maxPaidDaysCap})</th>
-                <th>Evaluasi</th>
-                <th>Koreksi Cepat Tanggal</th>
+                <th>Nama &amp; Jadwal</th>
+                <th>Ringkasan Periode</th>
+                <th>Tanggal</th>
+                <th>Jam Masuk / Pulang</th>
+                <th>Penyesuaian Kehadiran</th>
+                <th>Uang Makan</th>
+                <th>Catatan</th>
+                <th>Aksi</th>
               </tr>
             </thead>
             <tbody>
-              ${staffPaged.items.map(row => {
+              ${staffPaged.items.length ? staffPaged.items.map(row => {
                 const empObj = empByNik.get(compactNik(row.employee_no)) || row;
                 const sch = resolveStaffWorkSchedule(empObj, '2026-11-02', state.settings);
-                const flaggedDay = row.days.find(d => d.code === 'PERLU_PEMERIKSAAN_HR' || d.code === 'T') || row.days.find(d => d.code !== 'O' && d.code !== '-');
+                const validDays = row.days.filter(d => d.code !== '-');
+                const defaultDay = (focusDate !== 'ALL' ? validDays.find(d => d.work_date === focusDate) : null)
+                  || validDays.find(d => d.code === 'PERLU_PEMERIKSAAN_HR' || d.code === 'T' || d.code === 'PA')
+                  || validDays[0];
+                const selDate = defaultDay?.work_date || computed.window.dates[0];
+                const selDay = row.days.find(d => d.work_date === selDate) || {};
+                const selOv = mealOvMap.get(`${compactNik(row.employee_no)}|${selDate}`);
+                const mealMode = selOv ? (selOv.eligible ? 'allow' : 'deny') : 'auto';
+                const noteVal = selOv?.reason || selDay.review_reason || '';
+                const jamLabel = (selDay.check_in || selDay.check_out)
+                  ? `${selDay.check_in || '--:--'} – ${selDay.check_out || '--:--'}`
+                  : 'Belum ada tap';
+
                 return `
-                  <tr>
-                    <td style="white-space:nowrap"><code>${esc(row.employee_no)}</code></td>
-                    <td style="min-width:220px">
-                      <b>${esc(row.employee_name)}</b> ${row.is_driver ? '<span class="pill">Driver</span>' : ''}
-                      <div style="margin-top:3px"><small><span class="pill ${normalizeCompanyEntity(empObj.company_entity || '') === 'REHOLZ' ? 'gold' : 'blue'}">${esc(normalizeCompanyEntity(empObj.company_entity || ''))}</span> ${sch.ruleSource === 'radin_hold' ? `${esc(empObj.home_base || 'PASURUAN')} · Hold (${esc(sch.startTime)}–${esc(sch.endTime)})` : `${esc(sch.homeBase)} (${esc(sch.startTime)}–${esc(sch.endTime)})`}</small></div>
+                  <tr data-staff-nik="${esc(row.employee_no)}">
+                    <td class="nowrap"><code>${esc(row.employee_no)}</code></td>
+                    <td style="min-width:210px">
+                      <b>${esc(row.employee_name)}</b>
+                      <div class="ops-meta-line">${esc(normalizeCompanyEntity(empObj.company_entity || ''))} · ${esc(sch.homeBase)} · ${esc(sch.startTime)}–${esc(sch.endTime)}</div>
                     </td>
-                    <td style="min-width:130px">${esc(row.department)}</td>
-                    <td class="num">${row.counts.M}</td>
-                    <td class="num">${row.counts.T}</td>
-                    <td class="num">${row.counts.S + row.counts.SDR + row.counts.I}</td>
-                    <td class="num">${row.absenPotong}</td>
-                    <td class="num">${row.counts.CT}</td>
-                    <td class="num">${row.counts.PENDING ? `<span class="pill gold">${row.counts.PENDING}</span>` : '0'}</td>
-                    <td class="num"><b>${row.effectivePaidDays}</b></td>
-                    <td style="white-space:nowrap"><span class="pill ${row.evalStatus === 'Baik' ? 'green' : 'danger'}">${esc(row.evalStatus)}</span>${row.leaveCandidate ? ' <span class="pill gold">Kandidat Potong Cuti</span>' : ''}</td>
+                    <td class="nowrap stf-summary-cell" style="font-variant-numeric:tabular-nums">
+                      H:${row.counts.H} · T:${row.counts.T} · PA:${row.counts.PA} · S:${row.counts.S} · I:${row.counts.I} · A:${row.counts.A} · CT:${row.counts.CT} · DS:${row.counts.DS}
+                    </td>
                     <td>
-                      <div class="ops-inline-edit" style="flex-wrap:nowrap">
-                        <select class="input ops-rev-date" style="min-width:165px" data-nik="${esc(row.employee_no)}" aria-label="Tanggal untuk ${esc(row.employee_name)}">
-                          ${row.days.slice(0, 15).map(d => `<option value="${d.work_date}" ${flaggedDay?.work_date === d.work_date ? 'selected' : ''}>${d.work_date} (${d.code === 'PERLU_PEMERIKSAAN_HR' ? 'HR?' : d.code}${d.is_confirmed ? ' ✓' : ''})</option>`).join('')}
-                        </select>
-                        <select class="input ops-rev-code" style="min-width:68px" data-nik="${esc(row.employee_no)}" aria-label="Kode status untuk ${esc(row.employee_name)}">
-                          <option value="M">M</option>
-                          <option value="T">T</option>
-                          <option value="S">S</option>
-                          <option value="SDR">SDR</option>
-                          <option value="I">I</option>
-                          <option value="ITB">ITB</option>
-                          <option value="A">A</option>
-                          <option value="CT">CT</option>
-                          <option value="L">L</option>
-                        </select>
-                        <button type="button" class="btn btn-sm btn-primary ops-rev-confirm" data-nik="${esc(row.employee_no)}">Konfirmasi</button>
-                      </div>
+                      <select class="input ops-rev-date" style="min-width:170px" data-nik="${esc(row.employee_no)}" aria-label="Pilih tanggal untuk ${esc(row.employee_name)}">
+                        ${validDays.map(d => {
+                          const tag = d.code === 'PERLU_PEMERIKSAAN_HR' ? 'Belum' : d.code;
+                          return `<option value="${d.work_date}" ${selDate === d.work_date ? 'selected' : ''}>${d.work_date} (${d.dayShort}) · ${tag}${d.is_confirmed ? ' ✓' : ''}</option>`;
+                        }).join('')}
+                      </select>
+                    </td>
+                    <td class="nowrap ops-rev-punch" data-nik="${esc(row.employee_no)}" style="font-variant-numeric:tabular-nums">
+                      <span>${esc(jamLabel)}</span>${selDay.ruleFlags?.length ? `<div class="ops-meta-line">Aturan: ${esc(selDay.ruleFlags.join(' + '))}</div>` : ''}
+                    </td>
+                    <td>
+                      <select class="input ops-rev-code" style="min-width:185px" data-nik="${esc(row.employee_no)}" aria-label="Pilih kode kehadiran untuk ${esc(row.employee_name)}">
+                        ${codeSelectOptionsHtml(selDay.code)}
+                      </select>
+                    </td>
+                    <td>
+                      <select class="input ops-rev-meal" style="min-width:165px" data-nik="${esc(row.employee_no)}" aria-label="Status uang makan untuk ${esc(row.employee_name)}">
+                        <option value="auto" ${mealMode === 'auto' ? 'selected' : ''}>Auto (Sesuai Jam)</option>
+                        <option value="allow" ${mealMode === 'allow' ? 'selected' : ''}>Dapat (Manual)</option>
+                        <option value="deny" ${mealMode === 'deny' ? 'selected' : ''}>Tidak Dapat (Manual)</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input type="text" class="input ops-rev-note" style="min-width:150px" data-nik="${esc(row.employee_no)}" value="${esc(noteVal)}" placeholder="Catatan / alasan">
+                    </td>
+                    <td>
+                      <button type="button" class="btn btn-sm btn-primary ops-rev-confirm" data-nik="${esc(row.employee_no)}">Simpan</button>
                     </td>
                   </tr>
                 `;
-              }).join('')}
+              }).join('') : '<tr><td colspan="9" class="empty">Tidak ada data karyawan sesuai filter saat ini.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -1089,150 +1223,466 @@ export async function renderStaffManagementView(host, ctx) {
 
   host.querySelector('#ops-staff-period')?.addEventListener('change', e => {
     host.dataset.staffPeriod = e.target.value || '2026-11';
+    host.dataset.staffFocusDate = 'ALL';
     host.dataset.staffPage = '1';
     renderStaffManagementView(host, ctx);
   });
 
-  host.querySelector('#ops-staff-export')?.addEventListener('click', async () => {
-    const aoa = [
-      ['NIK', 'Nama', 'Departemen', 'M', 'T', 'S+I', 'Absen Potong', 'CT', 'Total Hadir', 'Hari Dibayar', 'Kehadiran %', 'Evaluasi'],
-      ...computed.summaries.map(r => [
-        r.employee_no, r.employee_name, r.department, r.counts.M, r.counts.T,
-        r.counts.S + r.counts.I, r.absenPotong, r.counts.CT, r.totalHadir,
-        r.effectivePaidDays, `${r.presencePct}%`, r.evalStatus
-      ])
-    ];
-    await exportSheetXlsx(`Rekap_Absensi_Staff_${periodKey}.xlsx`, 'Staff Attendance', aoa);
+  host.querySelector('#ops-staff-entity')?.addEventListener('change', e => {
+    host.dataset.staffEntity = e.target.value || 'ALL';
+    host.dataset.staffPage = '1';
+    renderStaffManagementView(host, ctx);
+  });
+
+  host.querySelector('#ops-staff-status')?.addEventListener('change', e => {
+    host.dataset.staffStatus = e.target.value || 'ALL';
+    host.dataset.staffPage = '1';
+    renderStaffManagementView(host, ctx);
+  });
+
+  host.querySelector('#ops-staff-focus-date')?.addEventListener('change', e => {
+    host.dataset.staffFocusDate = e.target.value || 'ALL';
+    host.dataset.staffPage = '1';
+    renderStaffManagementView(host, ctx);
+  });
+
+  let searchTimer = null;
+  host.querySelector('#ops-staff-search')?.addEventListener('input', e => {
+    host.dataset.staffQuery = e.target.value || '';
+    host.dataset.staffPage = '1';
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderStaffManagementView(host, ctx), 180);
+  });
+
+  // Sync row inputs live when per-row date changes
+  host.querySelectorAll('.ops-rev-date').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const nik = sel.dataset.nik;
+      const tr = sel.closest('tr');
+      const dInfo = dayLookup[compactNik(nik)]?.[sel.value];
+      if (!tr || !dInfo) return;
+      const codeSel = tr.querySelector('.ops-rev-code');
+      const mealSel = tr.querySelector('.ops-rev-meal');
+      const noteInp = tr.querySelector('.ops-rev-note');
+      const punchCell = tr.querySelector('.ops-rev-punch');
+      if (codeSel) codeSel.innerHTML = codeSelectOptionsHtml(dInfo.code);
+      if (mealSel) mealSel.value = dInfo.mealMode || 'auto';
+      if (noteInp) noteInp.value = dInfo.mealReason || '';
+      if (punchCell) {
+        const jam = (dInfo.check_in || dInfo.check_out) ? `${dInfo.check_in || '--:--'} – ${dInfo.check_out || '--:--'}` : 'Belum ada tap';
+        punchCell.innerHTML = `<span>${esc(jam)}</span>${dInfo.ruleFlags?.length ? `<div class="ops-meta-line">Aturan: ${esc(dInfo.ruleFlags.join(' + '))}</div>` : ''}`;
+      }
+    });
   });
 
   host.querySelectorAll('.ops-rev-confirm').forEach(btn => {
     btn.addEventListener('click', async () => {
       const nik = btn.dataset.nik;
-      const dateSel = host.querySelector(`.ops-rev-date[data-nik="${nik}"]`);
-      const codeSel = host.querySelector(`.ops-rev-code[data-nik="${nik}"]`);
+      const tr = btn.closest('tr');
+      const dateSel = tr?.querySelector('.ops-rev-date');
+      const codeSel = tr?.querySelector('.ops-rev-code');
+      const mealSel = tr?.querySelector('.ops-rev-meal');
+      const noteInp = tr?.querySelector('.ops-rev-note');
       const workDate = dateSel?.value;
-      const finalCode = codeSel?.value || 'M';
-      if (!workDate) return;
+      const finalCode = normalizeStaffAttendanceCode(codeSel?.value || '');
+      const mealMode = mealSel?.value || 'auto';
+      const noteText = noteInp?.value?.trim() || '';
+
+      if (!workDate || !STAFF_ATTENDANCE_CODE_ORDER.includes(finalCode)) {
+        showInlineBanner(host, 'Pilih kode kehadiran yang valid dari dropdown sebelum menyimpan.', 'error');
+        return;
+      }
+
+      const empObj = empByNik.get(compactNik(nik));
       const rev = {
         id: `rev-${compactNik(nik)}-${workDate}`,
         period_key: periodKey,
         employee_no: nik,
         work_date: workDate,
         final_code: finalCode,
-        reason: `Dikonfirmasi HR (${finalCode})`,
+        reason: noteText || `Penyesuaian HR (${finalCode})`,
         is_confirmed: true,
         confirmed_by: ctx.profile?.username || 'ADMIN',
         confirmed_at: new Date().toISOString()
       };
+
+      const mealOvId = `meal-${compactNik(nik)}-${workDate}`;
+      const mealRow = mealMode === 'auto'
+        ? null
+        : {
+            id: mealOvId,
+            employee_no: nik,
+            employee_name: empObj?.full_name || nik,
+            work_date: workDate,
+            eligible: mealMode === 'allow',
+            reason: noteText || (mealMode === 'allow' ? 'Adjust Manual: Dapat' : 'Adjust Manual: Tidak Dapat'),
+            updated_at: new Date().toISOString()
+          };
+
       if (ctx.isDemoMode) {
         const idx = state.staffReviews.findIndex(r => compactNik(r.employee_no) === compactNik(nik) && r.work_date === workDate);
         if (idx >= 0) state.staffReviews[idx] = rev;
         else state.staffReviews.push(rev);
+
+        state.staffMealOverrides = (state.staffMealOverrides || []).filter(
+          m => !(compactNik(m.employee_no) === compactNik(nik) && m.work_date === workDate)
+        );
+        if (mealRow) state.staffMealOverrides.push(mealRow);
         saveDemoOpsState(state);
       } else {
         const { error } = await ctx.supabase.from('staff_attendance_reviews').upsert(rev, { onConflict: 'employee_no,work_date' });
         if (error) {
-          showInlineBanner(host, `Gagal menyimpan koreksi absensi: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal menyimpan penyesuaian absensi: ${error.message}`, 'error');
           return;
+        }
+        if (mealRow) {
+          await ctx.supabase.from('staff_meal_overrides').upsert(mealRow, { onConflict: 'employee_no,work_date' });
+        } else {
+          await ctx.supabase.from('staff_meal_overrides').delete().eq('id', mealOvId);
         }
         invalidateOpsStateCache();
       }
       await renderStaffManagementView(host, ctx);
-      showInlineBanner(host, `Status ${nik} tanggal ${workDate} dikunci sebagai ${finalCode}.`, 'ok');
+      showInlineBanner(host, `Penyesuaian ${empObj?.full_name || nik} (${workDate}) disimpan: ${finalCode}${mealRow ? ` · Uang Makan: ${mealRow.eligible ? 'Dapat' : 'Tidak Dapat'}` : ''}.`, 'ok');
     });
   });
 }
 
 export async function renderStaffReportsView(host, ctx) {
   const state = await loadOpsState(ctx);
+  const attCfg = state.settings.attendance;
+  const codebook = attCfg.codebook || DEFAULT_STAFF_CODEBOOK;
+  const activeCard = host.dataset.staffRepCard || 'absensi';
   const periodKey = host.dataset.staffRepPeriod || '2026-11';
-  const employees = getAllKnownEmployees(ctx).filter(e => !/ADMIN/i.test(e.employee_no || ''));
+  const mealAnchor = host.dataset.staffMealAnchor || '2026-11-06';
+  const entityFilter = host.dataset.staffRepEntity || 'ALL';
+  const query = (host.dataset.staffRepQuery || '').trim().toLowerCase();
+
+  const employeesAll = getStaffEmployeesList(ctx, state.settings, entityFilter, false);
+  const filteredEmployees = query
+    ? employeesAll.filter(e =>
+        String(e.full_name || '').toLowerCase().includes(query) ||
+        String(e.employee_no || '').toLowerCase().includes(query) ||
+        String(e.department || '').toLowerCase().includes(query)
+      )
+    : employeesAll;
+
+  const totalCols = attCfg.includeHInReportTotals && !attCfg.staffReportTotalColumns.includes('H')
+    ? ['H', ...attCfg.staffReportTotalColumns]
+    : [...attCfg.staffReportTotalColumns];
+
   const computed = processStaffAttendancePeriod({
     periodKey,
-    employees,
+    employees: filteredEmployees,
     rawEvents: state.rawEvents,
     calendarDays: state.calendarDays,
     holidaySchedules: state.conditionalHolidays,
     leaveBalances: state.cutiBalances,
     existingReviews: state.staffReviews,
+    mealOverrides: state.staffMealOverrides || [],
     settings: state.settings
   });
 
-  host.innerHTML = `
-    <div class="card ops-card">
-      <div class="ops-head">
-        <div>
-          <h2>Laporan Absensi &amp; Kedisiplinan Staff</h2>
-          <p class="ops-sub">Periode ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)} · Ambang SP: &gt; ${(state.settings.attendance.warningAbsenceThreshold * 100).toFixed(1)}% bobot ketidakhadiran.</p>
-        </div>
-        <div class="ops-actions">
-          <input id="ops-srep-period" type="month" class="input" value="${esc(periodKey)}" aria-label="Pilih bulan laporan staff">
-          <button type="button" class="btn btn-secondary" id="ops-srep-print">Cetak / PDF</button>
-          <button type="button" class="btn btn-primary" id="ops-srep-xlsx">Download Excel</button>
-        </div>
-      </div>
-      <div class="table-wrap" style="margin-top:12px">
-        <table>
-          <thead>
+  const mealRep = processStaffMealAllowanceReport({
+    anchorDateIso: mealAnchor,
+    employees: filteredEmployees,
+    rawEvents: state.rawEvents,
+    calendarDays: state.calendarDays,
+    holidaySchedules: state.conditionalHolidays,
+    existingReviews: state.staffReviews,
+    mealOverrides: state.staffMealOverrides || [],
+    settings: state.settings
+  });
+
+  const absTotals = {};
+  totalCols.forEach(c => {
+    absTotals[c] = computed.summaries.reduce((s, r) => s + Number(r.counts?.[c] || 0), 0);
+  });
+
+  const buildAbsensiTableHtml = ({ forPrint = false } = {}) => {
+    const cls = forPrint ? 'stf-print-table' : 'stf-matrix-table';
+    return `
+      <table class="${cls}">
+        <thead>
+          <tr>
+            <th rowspan="2" class="${forPrint ? 'l' : 'stf-sticky-name l'}">Nama</th>
+            <th rowspan="2" class="${forPrint ? '' : 'stf-sticky-nik'}">NIK</th>
+            <th colspan="${computed.window.dayMeta.length}">Tanggal (${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)})</th>
+            <th colspan="${totalCols.length}">Total</th>
+          </tr>
+          <tr>
+            ${computed.window.dayMeta.map(m => `<th title="${m.dateStr} (${m.dayShort})" class="${m.isSunday ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : ''}">${m.dayNum}</th>`).join('')}
+            ${totalCols.map(c => `<th class="stf-tot-th">${esc(c)}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${computed.summaries.length ? computed.summaries.map(r => `
             <tr>
-              <th>NIK</th>
-              <th>Nama</th>
-              <th>Dept</th>
-              <th class="num">Jadwal</th>
-              <th class="num">Total Hadir</th>
-              <th class="num">Absen Potong</th>
-              <th class="num">Bobot Tidak Hadir</th>
-              <th class="num">Total Potongan Hari</th>
-              <th class="num">Hari Dibayar</th>
-              <th class="num">Kehadiran %</th>
-              <th>Saran Evaluasi</th>
+              <td class="${forPrint ? 'l' : 'stf-sticky-name l'}"><b>${esc(r.employee_name)}</b></td>
+              <td class="${forPrint ? '' : 'stf-sticky-nik nowrap'}"><code>${esc(r.employee_no)}</code></td>
+              ${r.days.map(d => {
+                const disp = d.code === 'PERLU_PEMERIKSAAN_HR' ? '' : (d.code || '');
+                const bgCls = d.isHoliday
+                  ? (forPrint ? 'stf-print-hol' : 'stf-col-hol')
+                  : (d.isSunday ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : '');
+                return `<td class="${bgCls} ${getStaffCodeClass(disp)}" title="${esc(`${d.work_date} · ${disp || 'Belum diisi'}`)}">${esc(disp || '-')}</td>`;
+              }).join('')}
+              ${totalCols.map(c => `<td class="num stf-tot-td">${r.counts[c] || 0}</td>`).join('')}
             </tr>
-          </thead>
-          <tbody>
-            ${computed.summaries.map(r => `
-              <tr>
-                <td><code>${esc(r.employee_no)}</code></td>
-                <td><b>${esc(r.employee_name)}</b></td>
-                <td>${esc(r.department)}</td>
-                <td class="num">${r.scheduled_days}</td>
-                <td class="num">${r.totalHadir}</td>
-                <td class="num">${r.absenPotong}</td>
-                <td class="num">${r.bobotKetidakhadiran}</td>
-                <td class="num">${r.totalPotonganHari}</td>
-                <td class="num"><b>${r.effectivePaidDays}</b></td>
-                <td class="num">${r.presencePct}%</td>
-                <td><span class="pill ${r.evalStatus === 'Baik' ? 'green' : 'danger'}">${esc(r.evalStatus)}</span></td>
-              </tr>
+          `).join('') : `<tr><td colspan="${2 + computed.window.dayMeta.length + totalCols.length}" class="empty">Tidak ada data staff.</td></tr>`}
+        </tbody>
+        ${computed.summaries.length ? `
+          <tfoot>
+            <tr>
+              <th colspan="2" class="l">TOTAL</th>
+              <th colspan="${computed.window.dayMeta.length}"></th>
+              ${totalCols.map(c => `<th class="num">${absTotals[c] || 0}</th>`).join('')}
+            </tr>
+          </tfoot>
+        ` : ''}
+      </table>
+    `;
+  };
+
+  const buildMealTableHtml = ({ forPrint = false } = {}) => {
+    const cls = forPrint ? 'stf-print-table' : 'stf-meal-table';
+    return `
+      <table class="${cls}">
+        <thead>
+          <tr>
+            <th style="width:34px">No</th>
+            <th class="l">Nama</th>
+            <th>NIK</th>
+            ${mealRep.window.dayMeta.map(m => `
+              <th class="${m.isSunday ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : ''}">
+                ${esc(m.dayShort)}<br><small>${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}</small>
+              </th>
             `).join('')}
-          </tbody>
-        </table>
+            <th class="num">Total Hari</th>
+            <th class="num">Total Uang Makan</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${mealRep.rows.length ? mealRep.rows.map((r, idx) => `
+            <tr>
+              <td>${idx + 1}</td>
+              <td class="l"><b>${esc(r.employee_name)}</b></td>
+              <td class="nowrap"><code>${esc(r.employee_no)}</code></td>
+              ${r.days.map(d => {
+                const bgCls = d.isOffDay ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : '';
+                const text = d.eligible
+                  ? `${d.amount.toLocaleString('id-ID')}${d.check_in ? `<br><small>${esc(d.check_in.slice(0, 5))}</small>` : ''}`
+                  : (d.check_in ? `0<br><small>${esc(d.check_in.slice(0, 5))}</small>` : (d.attCode || '-'));
+                return `<td class="${bgCls} ${d.eligible ? 'stf-meal-yes' : 'stf-meal-no'}" title="${esc(d.reason)}">${text}</td>`;
+              }).join('')}
+              <td class="num"><b>${r.totalEligibleDays}</b></td>
+              <td class="num nowrap"><b>${fmtIdr(r.totalAmount)}</b></td>
+            </tr>
+          `).join('') : `<tr><td colspan="${5 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
+        </tbody>
+        ${mealRep.rows.length ? `
+          <tfoot>
+            <tr>
+              <th colspan="3" class="l">TOTAL</th>
+              ${mealRep.dailyTotals.map(dt => `<th>${dt.eligibleCount}</th>`).join('')}
+              <th class="num">${mealRep.grandTotalEligibleDays}</th>
+              <th class="num nowrap">${fmtIdr(mealRep.grandTotalAmount)}</th>
+            </tr>
+          </tfoot>
+        ` : ''}
+      </table>
+    `;
+  };
+
+  const legendHtml = STAFF_ATTENDANCE_CODE_ORDER
+    .map(c => `<span><b>${c}</b> = ${esc(codebook[c] || c)}</span>`)
+    .join('');
+
+  host.innerHTML = `
+    <div class="ops-stack">
+      <div class="card ops-card">
+        <div class="ops-head">
+          <div>
+            <h2>Staff Reports</h2>
+            <p class="ops-sub">Laporan Absensi periode payroll (<b>Tgl ${attCfg.cutoffStartDay} s/d ${attCfg.cutoffEndDay}</b>) dan Laporan Uang Makan mingguan (<b>Jumat s/d Kamis · ${fmtIdr(mealRep.dailyAmount)}/hari</b>).</p>
+          </div>
+          <div class="ops-actions">
+            <select id="ops-srep-entity" class="input" aria-label="Filter perusahaan laporan staff">
+              <option value="ALL" ${entityFilter === 'ALL' ? 'selected' : ''}>Semua Perusahaan</option>
+              <option value="MITRA" ${entityFilter === 'MITRA' ? 'selected' : ''}>PT. Mitra Binamandiri Makmur</option>
+              <option value="REHOLZ" ${entityFilter === 'REHOLZ' ? 'selected' : ''}>PT. Radin Mitra Lestari</option>
+            </select>
+            <input id="ops-srep-search" type="search" class="input" value="${esc(host.dataset.staffRepQuery || '')}" placeholder="Cari Nama / NIK...">
+            <button type="button" class="btn btn-secondary" id="ops-srep-print">Cetak / PDF</button>
+            <button type="button" class="btn btn-primary" id="ops-srep-xlsx">Download Excel</button>
+          </div>
+        </div>
+
+        <div class="drv-report-cards">
+          <button type="button" class="drv-report-card ${activeCard === 'absensi' ? 'is-active' : ''}" data-staff-card="absensi">
+            <div class="drv-report-card-eyebrow">LAPORAN 1</div>
+            <div class="drv-report-card-title">Report Absensi Staff</div>
+            <div class="drv-report-card-meta">Periode ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)} · Kode H, S, I, A, T, PA, CT, L, DS</div>
+          </button>
+          <button type="button" class="drv-report-card ${activeCard === 'uang_makan' ? 'is-active' : ''}" data-staff-card="uang_makan">
+            <div class="drv-report-card-eyebrow">LAPORAN 2</div>
+            <div class="drv-report-card-title">Report Uang Makan</div>
+            <div class="drv-report-card-meta">${esc(mealRep.window.label)} · ${fmtIdr(mealRep.dailyAmount)}/hari (&lt; ${attCfg.mealThresholdMinutes} menit dari jadwal)</div>
+          </button>
+        </div>
       </div>
+
+      ${activeCard === 'absensi' ? `
+        <div class="card ops-card">
+          <div class="drv-upah-toolbar">
+            <div>
+              <h3>1. Report Absensi Staff — ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)}</h3>
+              <div class="stf-legend-row">${legendHtml}</div>
+            </div>
+            <div class="ops-actions">
+              <input id="ops-srep-period" type="month" class="input" value="${esc(periodKey)}" aria-label="Pilih periode payroll absensi staff">
+            </div>
+          </div>
+          <div class="table-wrap stf-matrix-wrap">
+            ${buildAbsensiTableHtml({ forPrint: false })}
+          </div>
+        </div>
+      ` : `
+        <div class="card ops-card">
+          <div class="drv-upah-toolbar">
+            <div>
+              <h3>2. Report Uang Makan Staff — ${esc(mealRep.window.label)}</h3>
+              <p class="ops-sub">Berhak Rp ${Number(mealRep.dailyAmount).toLocaleString('id-ID')}/hari jika tap masuk &lt; ${attCfg.mealThresholdMinutes} menit dari jam masuk jadwal atau mendapat penyesuaian manual.</p>
+            </div>
+            <div class="ops-actions">
+              <button type="button" class="btn btn-sm btn-secondary" id="ops-meal-prev">&lt; Minggu Sebelumnya</button>
+              <input id="ops-meal-anchor" type="date" class="input" value="${esc(mealRep.window.startDate)}" aria-label="Pilih tanggal minggu uang makan">
+              <button type="button" class="btn btn-sm btn-secondary" id="ops-meal-next">Minggu Berikutnya &gt;</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid ops-kpi-4" style="margin-bottom:14px">
+            <div class="card kpi-card"><div class="kpi-label">Karyawan Staff</div><div class="kpi-val">${mealRep.rows.length}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Tarif / Hari</div><div class="kpi-val">${fmtIdr(mealRep.dailyAmount)}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Total Hari Layak</div><div class="kpi-val">${mealRep.grandTotalEligibleDays}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Total Uang Makan</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalAmount)}</div></div>
+          </div>
+
+          <div class="table-wrap">
+            ${buildMealTableHtml({ forPrint: false })}
+          </div>
+        </div>
+      `}
     </div>
   `;
+
+  host.querySelectorAll('[data-staff-card]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      host.dataset.staffRepCard = btn.dataset.staffCard;
+      renderStaffReportsView(host, ctx);
+    });
+  });
 
   host.querySelector('#ops-srep-period')?.addEventListener('change', e => {
     host.dataset.staffRepPeriod = e.target.value || '2026-11';
     renderStaffReportsView(host, ctx);
   });
 
+  host.querySelector('#ops-srep-entity')?.addEventListener('change', e => {
+    host.dataset.staffRepEntity = e.target.value || 'ALL';
+    renderStaffReportsView(host, ctx);
+  });
+
+  let repSearchTimer = null;
+  host.querySelector('#ops-srep-search')?.addEventListener('input', e => {
+    host.dataset.staffRepQuery = e.target.value || '';
+    clearTimeout(repSearchTimer);
+    repSearchTimer = setTimeout(() => renderStaffReportsView(host, ctx), 180);
+  });
+
+  host.querySelector('#ops-meal-anchor')?.addEventListener('change', e => {
+    if (e.target.value) {
+      host.dataset.staffMealAnchor = e.target.value;
+      renderStaffReportsView(host, ctx);
+    }
+  });
+  host.querySelector('#ops-meal-prev')?.addEventListener('click', () => {
+    host.dataset.staffMealAnchor = shiftIsoDate(mealRep.window.startDate, -7);
+    renderStaffReportsView(host, ctx);
+  });
+  host.querySelector('#ops-meal-next')?.addEventListener('click', () => {
+    host.dataset.staffMealAnchor = shiftIsoDate(mealRep.window.startDate, 7);
+    renderStaffReportsView(host, ctx);
+  });
+
   host.querySelector('#ops-srep-xlsx')?.addEventListener('click', async () => {
-    const aoa = [
-      ['NIK', 'Nama', 'Dept', 'Jadwal', 'Total Hadir', 'Absen Potong', 'Bobot Tidak Hadir', 'Potongan Hari', 'Hari Dibayar', 'Kehadiran %', 'Evaluasi'],
-      ...computed.summaries.map(r => [
-        r.employee_no, r.employee_name, r.department, r.scheduled_days,
-        r.totalHadir, r.absenPotong, r.bobotKetidakhadiran, r.totalPotonganHari,
-        r.effectivePaidDays, `${r.presencePct}%`, r.evalStatus
-      ])
-    ];
-    await exportSheetXlsx(`Laporan_Kedisiplinan_Staff_${periodKey}.xlsx`, 'Laporan Staff', aoa);
+    if (activeCard === 'absensi') {
+      const aoa = [
+        ['Nama', 'NIK', ...computed.window.dayMeta.map(m => `${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`), ...totalCols],
+        ...computed.summaries.map(r => [
+          r.employee_name,
+          r.employee_no,
+          ...r.days.map(d => (d.code === 'PERLU_PEMERIKSAAN_HR' ? '' : (d.code || ''))),
+          ...totalCols.map(c => r.counts[c] || 0)
+        ])
+      ];
+      await exportSheetXlsx(`Report_Absensi_Staff_${periodKey}.xlsx`, 'Report Absensi', aoa);
+    } else {
+      const aoa = [
+        ['No', 'Nama', 'NIK', ...mealRep.window.dayMeta.map(m => `${m.dayShort} ${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`), 'Total Hari', 'Total Uang Makan (Rp)'],
+        ...mealRep.rows.map((r, i) => [
+          i + 1,
+          r.employee_name,
+          r.employee_no,
+          ...r.days.map(d => d.amount),
+          r.totalEligibleDays,
+          r.totalAmount
+        ])
+      ];
+      await exportSheetXlsx(`Report_Uang_Makan_${mealRep.window.startDate}_${mealRep.window.endDate}.xlsx`, 'Uang Makan', aoa);
+    }
   });
 
   host.querySelector('#ops-srep-print')?.addEventListener('click', () => {
-    openPrintHtml(`Laporan Absensi Staff - ${periodKey}`, `
-      <h2>PT. MITRA BINAMANDIRI MAKMUR — LAPORAN ABSENSI STAFF</h2>
-      <div class="meta">Periode: ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)}</div>
-      ${host.querySelector('.table-wrap').innerHTML}
-    `);
+    const stfSig = state.settings.driver.signatories.staffReport || state.settings.driver.signatories.summary;
+    const loc = state.settings.driver.reportLocationLabel || 'PASURUAN';
+    if (activeCard === 'absensi') {
+      const sheetHtml = `
+        <div class="stf-pdf-sheet pkwt-print-sheet">
+          <div class="drv-pdf-header">
+            <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+            <div>REPORT ABSENSI STAFF</div>
+            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)}</div>
+          </div>
+          ${buildAbsensiTableHtml({ forPrint: true })}
+          <div class="stf-print-legend">${legendHtml}</div>
+          ${renderTwoSignatoriesHtml(stfSig, loc, computed.window.endDate)}
+        </div>
+      `;
+      openDomPrintPreview({
+        title: `Report Absensi Staff — ${periodKey}`,
+        pagesHtml: sheetHtml,
+        landscape: true
+      });
+    } else {
+      const sheetHtml = `
+        <div class="stf-pdf-sheet pkwt-print-sheet">
+          <div class="drv-pdf-header">
+            <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+            <div>REPORT UANG MAKAN STAFF</div>
+            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(mealRep.window.label)}</div>
+            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">TARIF</span>: ${fmtIdr(mealRep.dailyAmount)} / HARI</div>
+          </div>
+          ${buildMealTableHtml({ forPrint: true })}
+          ${renderTwoSignatoriesHtml(stfSig, loc, mealRep.window.endDate)}
+        </div>
+      `;
+      openDomPrintPreview({
+        title: `Report Uang Makan Staff — ${mealRep.window.startDate} s/d ${mealRep.window.endDate}`,
+        pagesHtml: sheetHtml,
+        landscape: true
+      });
+    }
   });
 }
 
@@ -2148,14 +2598,31 @@ export async function renderOpsSettingsView(host, ctx) {
         </div>
 
         <div class="card ops-card">
-          <h3>5. Ambang Terlambat, Uang Makan &amp; Parameter Absensi Staff</h3>
+          <h3>5. Ambang Terlambat, Pulang Awal, Uang Makan &amp; Parameter Staff</h3>
           <div class="ops-form-grid">
-            <label class="ops-field"><span>Batas Terlambat (&ge; N menit dari jadwal)</span><input id="set-att-late-min" type="number" class="input" value="${s.attendance.lateThresholdMinutes}"></label>
-            <label class="ops-field"><span>Batas Hangus Uang Makan (&ge; N menit dari jadwal)</span><input id="set-att-meal-min" type="number" class="input" value="${s.attendance.mealThresholdMinutes}"></label>
-            <label class="ops-field"><span>Batas Tepat Waktu Mitra (otomatis/manual)</span><input id="set-att-mitra-late" type="text" class="input" value="${esc(addMinutesToScheduleCutoff(ws.pasuruan.weekdayStart, s.attendance.lateThresholdMinutes))}"></label>
+            <label class="ops-field"><span>Batas Terlambat (&ge; N mnt dr masuk)</span><input id="set-att-late-min" type="number" class="input" value="${s.attendance.lateThresholdMinutes}"></label>
+            <label class="ops-field"><span>Batas Pulang Awal PA (&ge; N mnt sblm pulang)</span><input id="set-att-early-min" type="number" class="input" value="${s.attendance.earlyLeaveThresholdMinutes}"></label>
+            <label class="ops-field"><span>Prioritas Jika T &amp; PA Bersamaan</span>
+              <select id="set-att-late-pa-prio" class="input">
+                <option value="T" ${s.attendance.lateAndEarlyPriority === 'T' ? 'selected' : ''}>Terlambat (T) Didahulukan</option>
+                <option value="PA" ${s.attendance.lateAndEarlyPriority === 'PA' ? 'selected' : ''}>Pulang Awal (PA) Didahulukan</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Batas Hangus Uang Makan (&ge; N mnt)</span><input id="set-att-meal-min" type="number" class="input" value="${s.attendance.mealThresholdMinutes}"></label>
+            <label class="ops-field"><span>Tarif Uang Makan / Hari (Rp)</span><input id="set-att-meal-amt" type="number" class="input" value="${s.attendance.mealAllowanceAmount}"></label>
+            <label class="ops-field"><span>Hari Mulai Periode Uang Makan</span>
+              <select id="set-att-meal-start" class="input">
+                <option value="5" ${Number(s.attendance.mealPeriodStartDay) === 5 ? 'selected' : ''}>Jumat (Jumat s/d Kamis)</option>
+                <option value="1" ${Number(s.attendance.mealPeriodStartDay) === 1 ? 'selected' : ''}>Senin (Senin s/d Minggu)</option>
+                <option value="6" ${Number(s.attendance.mealPeriodStartDay) === 6 ? 'selected' : ''}>Sabtu</option>
+                <option value="0" ${Number(s.attendance.mealPeriodStartDay) === 0 ? 'selected' : ''}>Minggu</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Panjang Siklus Uang Makan (hari)</span><input id="set-att-meal-len" type="number" min="1" max="14" class="input" value="${s.attendance.mealPeriodLengthDays}"></label>
+            <label class="ops-field"><span>Batas Tepat Waktu Mitra</span><input id="set-att-mitra-late" type="text" class="input" value="${esc(addMinutesToScheduleCutoff(ws.pasuruan.weekdayStart, s.attendance.lateThresholdMinutes))}"></label>
             <label class="ops-field"><span>Batas Tepat Waktu Radin (HH:MM:SS)</span><input id="set-att-radin-late" type="text" class="input" value="${esc(s.attendance.radinLateCutoffTime)}"></label>
-            <label class="ops-field"><span>Hari Mulai Cutoff</span><input id="set-att-start" type="number" class="input" value="${s.attendance.cutoffStartDay}"></label>
-            <label class="ops-field"><span>Hari Akhir Cutoff</span><input id="set-att-end" type="number" class="input" value="${s.attendance.cutoffEndDay}"></label>
+            <label class="ops-field"><span>Hari Mulai Cutoff Payroll Staff</span><input id="set-att-start" type="number" class="input" value="${s.attendance.cutoffStartDay}"></label>
+            <label class="ops-field"><span>Hari Akhir Cutoff Payroll Staff</span><input id="set-att-end" type="number" class="input" value="${s.attendance.cutoffEndDay}"></label>
             <label class="ops-field"><span>Basis Hari Kerja</span><input id="set-att-basis" type="number" class="input" value="${s.attendance.workingDaysBasis}"></label>
             <label class="ops-field"><span>Batas Maks Hari Dibayar</span><input id="set-att-cap" type="number" class="input" value="${s.attendance.maxPaidDaysCap}"></label>
             <label class="ops-field"><span>Bobot Potongan Terlambat (T)</span><input id="set-att-tweight" type="number" step="0.05" class="input" value="${s.attendance.latePenaltyWeight}"></label>
@@ -2163,12 +2630,24 @@ export async function renderOpsSettingsView(host, ctx) {
             <label class="ops-field"><span>Ambang SP (Rasio Ketidakhadiran)</span><input id="set-att-warn" type="number" step="0.01" class="input" value="${s.attendance.warningAbsenceThreshold}"></label>
             <label class="ops-field"><span>Default Hari Tanpa Tap</span>
               <select id="set-att-nopunch" class="input">
-                <option value="PERLU_PEMERIKSAAN_HR" ${s.attendance.autoMarkNoPunchAs === 'PERLU_PEMERIKSAAN_HR' ? 'selected' : ''}>Perlu Pemeriksaan HR</option>
-                <option value="A" ${s.attendance.autoMarkNoPunchAs === 'A' ? 'selected' : ''}>Alpa (A) Otomatis</option>
+                <option value="PERLU_PEMERIKSAAN_HR" ${s.attendance.autoMarkNoPunchAs === 'PERLU_PEMERIKSAAN_HR' ? 'selected' : ''}>Perlu Penyesuaian HR</option>
+                <option value="A" ${s.attendance.autoMarkNoPunchAs === 'A' ? 'selected' : ''}>Mangkir (A) Otomatis</option>
+                <option value="L" ${s.attendance.autoMarkNoPunchAs === 'L' ? 'selected' : ''}>Libur (L) Otomatis</option>
               </select>
             </label>
             <label class="ops-check"><input id="set-att-exempt-drv" type="checkbox" ${s.attendance.exemptDriverLateFlag ? 'checked' : ''}> <span>Kecualikan Driver dari flag Terlambat (T)</span></label>
-            <label class="ops-check"><input id="set-att-lock-rev" type="checkbox" ${s.attendance.preserveConfirmedReviews ? 'checked' : ''}> <span>Kunci koreksi HR terkonfirmasi</span></label>
+            <label class="ops-check"><input id="set-att-lock-rev" type="checkbox" ${s.attendance.preserveConfirmedReviews ? 'checked' : ''}> <span>Kunci penyesuaian HR terkonfirmasi</span></label>
+            <label class="ops-check"><input id="set-att-meal-manual-h" type="checkbox" ${s.attendance.mealAutoOnManualHadir ? 'checked' : ''}> <span>Otomatis Uang Makan saat manual H tanpa tap</span></label>
+            <label class="ops-check"><input id="set-att-rep-inc-h" type="checkbox" ${s.attendance.includeHInReportTotals ? 'checked' : ''}> <span>Tampilkan kolom Total H pada Report Absensi</span></label>
+          </div>
+          <div class="ops-subbox" style="margin-top:12px">
+            <h4>Kamus Kode Kehadiran Staff (9 Kode Standar)</h4>
+            <p class="ops-sub">Kode <code>T</code> dan <code>PA</code> dideteksi otomatis sesuai jadwal kerja; kode lainnya (<code>S, I, A, CT, L, DS, H</code>) dapat disesuaikan melalui menu Staff Attendance Management.</p>
+            <div class="ops-form-grid" style="margin-top:10px">
+              ${STAFF_ATTENDANCE_CODE_ORDER.map(c => `
+                <label class="ops-field"><span>Kode <code>${c}</code></span><input id="set-att-cb-${c}" type="text" class="input" value="${esc(s.attendance.codebook?.[c] || DEFAULT_STAFF_CODEBOOK[c])}"></label>
+              `).join('')}
+            </div>
           </div>
           <div class="ops-subbox" style="margin-top:12px">
             <h4>Simulasi &amp; Adjust Manual Uang Makan (Case Tertentu)</h4>
@@ -2285,21 +2764,39 @@ export async function renderOpsSettingsView(host, ctx) {
       <!-- TAB 3: PENANDATANGAN LAPORAN -->
       <div class="ops-stack ${activeTab === 'signatories' ? '' : 'hidden'}" data-panel="signatories">
         <div class="card ops-card">
-          <h3>Penandatangan Laporan Summary Driver</h3>
+          <h3>Penandatangan Laporan Summary Driver (2 Kolom)</h3>
           <div class="ops-schedule-blocks" style="margin-top:10px">
             ${renderSigSelector('sig-sum-l', sig.summary.leftLabel, sig.summary.leftNik, sig.summary.leftName, sig.summary.leftTitle)}
             ${renderSigSelector('sig-sum-r', sig.summary.rightLabel, sig.summary.rightNik, sig.summary.rightName, sig.summary.rightTitle)}
           </div>
         </div>
         <div class="card ops-card">
-          <h3>Penandatangan Laporan Support, Indoor &amp; Outdoor</h3>
-          <div class="ops-schedule-blocks" style="margin-top:10px">
-            ${renderSigSelector('sig-dept-l', sig.department.leftLabel, sig.department.leftNik, sig.department.leftName, sig.department.leftTitle)}
-            ${renderSigSelector('sig-dept-r', sig.department.rightLabel, sig.department.rightNik, sig.department.rightName, sig.department.rightTitle)}
+          <h3>Penandatangan Laporan Driver SUPPORT (3 Kolom — Dibuat, Disetujui, Diketahui)</h3>
+          <p class="ops-sub">Pilih karyawan dari Employee Directory atau isi nama &amp; jabatan kolom <b>DIKETAHUI</b> khusus departemen Support.</p>
+          <div class="ops-schedule-blocks-3" style="margin-top:10px">
+            ${renderSigSelector('sig-sup-l', sig.support.leftLabel, sig.support.leftNik, sig.support.leftName, sig.support.leftTitle)}
+            ${renderSigSelector('sig-sup-m', sig.support.midLabel, sig.support.midNik, sig.support.midName, sig.support.midTitle)}
+            ${renderSigSelector('sig-sup-r', sig.support.rightLabel, sig.support.rightNik, sig.support.rightName, sig.support.rightTitle)}
           </div>
         </div>
         <div class="card ops-card">
-          <h3>Penandatangan Laporan Radin (3 Kolom)</h3>
+          <h3>Penandatangan Laporan Driver INDOOR (3 Kolom — Dibuat, Disetujui, Diketahui)</h3>
+          <div class="ops-schedule-blocks-3" style="margin-top:10px">
+            ${renderSigSelector('sig-ind-l', sig.indoor.leftLabel, sig.indoor.leftNik, sig.indoor.leftName, sig.indoor.leftTitle)}
+            ${renderSigSelector('sig-ind-m', sig.indoor.midLabel, sig.indoor.midNik, sig.indoor.midName, sig.indoor.midTitle)}
+            ${renderSigSelector('sig-ind-r', sig.indoor.rightLabel, sig.indoor.rightNik, sig.indoor.rightName, sig.indoor.rightTitle)}
+          </div>
+        </div>
+        <div class="card ops-card">
+          <h3>Penandatangan Laporan Driver OUTDOOR (3 Kolom — Dibuat, Disetujui, Diketahui)</h3>
+          <div class="ops-schedule-blocks-3" style="margin-top:10px">
+            ${renderSigSelector('sig-out-l', sig.outdoor.leftLabel, sig.outdoor.leftNik, sig.outdoor.leftName, sig.outdoor.leftTitle)}
+            ${renderSigSelector('sig-out-m', sig.outdoor.midLabel, sig.outdoor.midNik, sig.outdoor.midName, sig.outdoor.midTitle)}
+            ${renderSigSelector('sig-out-r', sig.outdoor.rightLabel, sig.outdoor.rightNik, sig.outdoor.rightName, sig.outdoor.rightTitle)}
+          </div>
+        </div>
+        <div class="card ops-card">
+          <h3>Penandatangan Laporan Driver RADIN (3 Kolom — Dibuat, Disetujui, Diketahui)</h3>
           <div class="ops-schedule-blocks-3" style="margin-top:10px">
             ${renderSigSelector('sig-rad-l', sig.radin.leftLabel, sig.radin.leftNik, sig.radin.leftName, sig.radin.leftTitle)}
             ${renderSigSelector('sig-rad-m', sig.radin.midLabel, sig.radin.midNik, sig.radin.midName, sig.radin.midTitle)}
@@ -2307,10 +2804,17 @@ export async function renderOpsSettingsView(host, ctx) {
           </div>
         </div>
         <div class="card ops-card">
-          <h3>Penandatangan Time Check Sheet Sopir</h3>
+          <h3>Penandatangan Time Check Sheet Sopir (2 Kolom)</h3>
           <div class="ops-schedule-blocks" style="margin-top:10px">
             ${renderSigSelector('sig-cs-l', sig.checksheet.leftLabel, sig.checksheet.leftNik, sig.checksheet.leftName, sig.checksheet.leftTitle)}
             ${renderSigSelector('sig-cs-r', sig.checksheet.rightLabel, sig.checksheet.rightNik, sig.checksheet.rightName, sig.checksheet.rightTitle)}
+          </div>
+        </div>
+        <div class="card ops-card">
+          <h3>Penandatangan Report Absensi &amp; Uang Makan Staff (2 Kolom)</h3>
+          <div class="ops-schedule-blocks" style="margin-top:10px">
+            ${renderSigSelector('sig-stf-l', sig.staffReport.leftLabel, sig.staffReport.leftNik, sig.staffReport.leftName, sig.staffReport.leftTitle)}
+            ${renderSigSelector('sig-stf-r', sig.staffReport.rightLabel, sig.staffReport.rightNik, sig.staffReport.rightName, sig.staffReport.rightTitle)}
           </div>
         </div>
       </div>
@@ -2537,15 +3041,35 @@ export async function renderOpsSettingsView(host, ctx) {
         name: host.querySelector(`#${prefix}-name`)?.value?.trim() || '',
         title: host.querySelector(`#${prefix}-title`)?.value?.trim() || ''
       });
+      const readThreeSig = p => {
+        const l = readSig(`${p}-l`);
+        const m = readSig(`${p}-m`);
+        const r = readSig(`${p}-r`);
+        return {
+          leftLabel: l.label, leftNik: l.nik, leftName: l.name, leftTitle: l.title,
+          midLabel: m.label, midNik: m.nik, midName: m.name, midTitle: m.title,
+          rightLabel: r.label, rightNik: r.nik, rightName: r.name, rightTitle: r.title
+        };
+      };
       const sumL = readSig('sig-sum-l');
       const sumR = readSig('sig-sum-r');
-      const deptL = readSig('sig-dept-l');
-      const deptR = readSig('sig-dept-r');
-      const radL = readSig('sig-rad-l');
-      const radM = readSig('sig-rad-m');
-      const radR = readSig('sig-rad-r');
+      const supportSig = readThreeSig('sig-sup');
+      const indoorSig = readThreeSig('sig-ind');
+      const outdoorSig = readThreeSig('sig-out');
+      const radinSig = readThreeSig('sig-rad');
       const csL = readSig('sig-cs-l');
       const csR = readSig('sig-cs-r');
+      const stfL = readSig('sig-stf-l');
+      const stfR = readSig('sig-stf-r');
+
+      const codebook = {};
+      for (const c of STAFF_ATTENDANCE_CODE_ORDER) {
+        codebook[c] = host.querySelector(`#set-att-cb-${c}`)?.value?.trim() || DEFAULT_STAFF_CODEBOOK[c];
+      }
+      const includeHInReportTotals = Boolean(host.querySelector('#set-att-rep-inc-h')?.checked);
+      const staffReportTotalColumns = includeHInReportTotals
+        ? ['H', 'S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS']
+        : ['S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS'];
 
       const slocArr = host.querySelector('#set-stk-slocs').value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
       const exclArr = host.querySelector('#set-drv-excl').value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
@@ -2556,7 +3080,16 @@ export async function renderOpsSettingsView(host, ctx) {
           cutoffStartDay: host.querySelector('#set-att-start').value,
           cutoffEndDay: host.querySelector('#set-att-end').value,
           lateThresholdMinutes: host.querySelector('#set-att-late-min').value,
+          earlyLeaveThresholdMinutes: host.querySelector('#set-att-early-min').value,
+          lateAndEarlyPriority: host.querySelector('#set-att-late-pa-prio').value,
           mealThresholdMinutes: host.querySelector('#set-att-meal-min').value,
+          mealAllowanceAmount: host.querySelector('#set-att-meal-amt').value,
+          mealPeriodStartDay: host.querySelector('#set-att-meal-start').value,
+          mealPeriodLengthDays: host.querySelector('#set-att-meal-len').value,
+          mealAutoOnManualHadir: Boolean(host.querySelector('#set-att-meal-manual-h')?.checked),
+          includeHInReportTotals,
+          staffReportTotalColumns,
+          codebook,
           mitraLateCutoffTime: host.querySelector('#set-att-mitra-late').value,
           radinLateCutoffTime: host.querySelector('#set-att-radin-late').value,
           workingDaysBasis: host.querySelector('#set-att-basis').value,
@@ -2618,18 +3151,18 @@ export async function renderOpsSettingsView(host, ctx) {
               leftLabel: sumL.label, leftNik: sumL.nik, leftName: sumL.name, leftTitle: sumL.title,
               rightLabel: sumR.label, rightNik: sumR.nik, rightName: sumR.name, rightTitle: sumR.title
             },
-            department: {
-              leftLabel: deptL.label, leftNik: deptL.nik, leftName: deptL.name, leftTitle: deptL.title,
-              rightLabel: deptR.label, rightNik: deptR.nik, rightName: deptR.name, rightTitle: deptR.title
-            },
-            radin: {
-              leftLabel: radL.label, leftNik: radL.nik, leftName: radL.name, leftTitle: radL.title,
-              midLabel: radM.label, midNik: radM.nik, midName: radM.name, midTitle: radM.title,
-              rightLabel: radR.label, rightNik: radR.nik, rightName: radR.name, rightTitle: radR.title
-            },
+            support: supportSig,
+            indoor: indoorSig,
+            outdoor: outdoorSig,
+            department: supportSig,
+            radin: radinSig,
             checksheet: {
               leftLabel: csL.label, leftNik: csL.nik, leftName: csL.name, leftTitle: csL.title,
               rightLabel: csR.label, rightNik: csR.nik, rightName: csR.name, rightTitle: csR.title
+            },
+            staffReport: {
+              leftLabel: stfL.label, leftNik: stfL.nik, leftName: stfL.name, leftTitle: stfL.title,
+              rightLabel: stfR.label, rightNik: stfR.nik, rightName: stfR.name, rightTitle: stfR.title
             }
           }
         },

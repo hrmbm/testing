@@ -148,6 +148,22 @@ export const DEFAULT_WORK_SCHEDULES = {
   }
 };
 
+export const STAFF_ATTENDANCE_CODE_ORDER = ['H', 'S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS'];
+
+export const DEFAULT_STAFF_REPORT_TOTAL_COLUMNS = ['S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS'];
+
+export const DEFAULT_STAFF_CODEBOOK = {
+  H: 'Hadir',
+  S: 'Sakit',
+  I: 'Ijin tidak masuk kerja',
+  A: 'Mangkir',
+  T: 'Terlambat',
+  PA: 'Pulang Awal',
+  CT: 'Cuti',
+  L: 'LIBUR',
+  DS: 'DATANG SIANG'
+};
+
 export const DEFAULT_SIGNATORIES = {
   summary: {
     leftLabel: 'DIBUAT OLEH',
@@ -159,15 +175,61 @@ export const DEFAULT_SIGNATORIES = {
     rightName: 'DIANA ANITA SARI',
     rightTitle: 'KA. DEPT HR & GA'
   },
+  support: {
+    leftLabel: 'DIBUAT OLEH',
+    leftNik: 'ST 260501',
+    leftName: 'AYUK NUR KHOTIFAH',
+    leftTitle: 'STAFF HR & GA',
+    midLabel: 'DISETUJUI',
+    midNik: 'ST 210608',
+    midName: 'DIANA ANITA SARI',
+    midTitle: 'KA. DEPT HR & GA',
+    rightLabel: 'DIKETAHUI',
+    rightNik: 'ST 060916',
+    rightName: 'ANDRIANTO',
+    rightTitle: 'PURCHASING & MAINTENANCE MANAGER'
+  },
+  indoor: {
+    leftLabel: 'DIBUAT OLEH',
+    leftNik: 'ST 260501',
+    leftName: 'AYUK NUR KHOTIFAH',
+    leftTitle: 'STAFF HR & GA',
+    midLabel: 'DISETUJUI',
+    midNik: 'ST 210608',
+    midName: 'DIANA ANITA SARI',
+    midTitle: 'KA. DEPT HR & GA',
+    rightLabel: 'DIKETAHUI',
+    rightNik: 'ST 150701',
+    rightName: 'MOHAMMAD SOFI',
+    rightTitle: 'KABAG PPC INDOOR'
+  },
+  outdoor: {
+    leftLabel: 'DIBUAT OLEH',
+    leftNik: 'ST 260501',
+    leftName: 'AYUK NUR KHOTIFAH',
+    leftTitle: 'STAFF HR & GA',
+    midLabel: 'DISETUJUI',
+    midNik: 'ST 210608',
+    midName: 'DIANA ANITA SARI',
+    midTitle: 'KA. DEPT HR & GA',
+    rightLabel: 'DIKETAHUI',
+    rightNik: 'ST 110903',
+    rightName: 'YOYOK W',
+    rightTitle: 'KEPALA DEPARTEMEN PPC OUTDOOR'
+  },
   department: {
     leftLabel: 'DIBUAT OLEH',
     leftNik: 'ST 260501',
     leftName: 'AYUK NUR KHOTIFAH',
     leftTitle: 'STAFF HR & GA',
-    rightLabel: 'DISETUJUI',
-    rightNik: 'ST 210608',
-    rightName: 'DIANA ANITA SARI',
-    rightTitle: 'KA. DEPT HR & GA'
+    midLabel: 'DISETUJUI',
+    midNik: 'ST 210608',
+    midName: 'DIANA ANITA SARI',
+    midTitle: 'KA. DEPT HR & GA',
+    rightLabel: 'DIKETAHUI',
+    rightNik: '',
+    rightName: 'DIKETAHUI',
+    rightTitle: 'KA. DEPT TERKAIT'
   },
   radin: {
     leftLabel: 'DIBUAT OLEH',
@@ -192,6 +254,16 @@ export const DEFAULT_SIGNATORIES = {
     rightNik: 'ST 210608',
     rightName: 'DIANA ANITA SARI',
     rightTitle: 'KA. DEPT HR & GA'
+  },
+  staffReport: {
+    leftLabel: 'DIBUAT OLEH',
+    leftNik: 'ST 260501',
+    leftName: 'AYUK NUR KHOTIFAH',
+    leftTitle: 'STAFF HR & GA',
+    rightLabel: 'DISETUJUI',
+    rightNik: 'ST 210608',
+    rightName: 'DIANA ANITA SARI',
+    rightTitle: 'KA. DEPT HR & GA'
   }
 };
 
@@ -203,36 +275,26 @@ export const DEFAULT_OPS_SETTINGS = {
     mitraLateCutoffTime: '07:30:59',
     radinLateCutoffTime: '08:00:59',
     lateThresholdMinutes: 1, // >= 1 menit dari jadwal masuk (07:30:59 tepat, 07:31:00 terlambat)
+    earlyLeaveThresholdMinutes: 1, // >= 1 menit sebelum jam pulang jadwal -> PA (Pulang Awal)
+    lateAndEarlyPriority: 'T', // 'T' | 'PA' saat terlambat dan pulang awal di hari yang sama
     mealThresholdMinutes: 6, // >= 6 menit dari jadwal masuk (07:35:59 dapat uang makan, 07:36:00 tidak)
+    mealAllowanceAmount: 10000, // Rp 10.000 per hari
+    mealPeriodStartDay: 5, // 5 = Jumat (0=Min..6=Sab)
+    mealPeriodLengthDays: 7, // 7 hari -> Jumat s/d Kamis
+    mealAutoOnManualHadir: false, // jika false, manual H tanpa jam masuk butuh override uang makan atau jam masuk <= batas
     exemptDriverLateFlag: true,
     workingDaysBasis: 26,
     maxPaidDaysCap: 25,
     latePenaltyWeight: 0.25,
     holidayCreditWeight: 0.5,
     warningAbsenceThreshold: 0.05,
-    autoMarkNoPunchAs: 'PERLU_PEMERIKSAAN_HR',
+    autoMarkNoPunchAs: 'PERLU_PEMERIKSAAN_HR', // 'PERLU_PEMERIKSAAN_HR' | 'A' | 'L'
     preserveConfirmedReviews: true,
+    includeHInReportTotals: false,
+    staffReportTotalColumns: [...DEFAULT_STAFF_REPORT_TOTAL_COLUMNS],
     sourcePriority: ['mitra_transaksi', 'mitra_presensi', 'radin_xlsx'],
     workSchedules: structuredClone(DEFAULT_WORK_SCHEDULES),
-    codebook: {
-      M: 'Masuk / Hadir Tepat Waktu',
-      T: 'Terlambat (>= 1 menit dari jadwal)',
-      S: 'Sakit (Dengan Surat)',
-      I: 'Izin Pribadi',
-      ITB: 'Ijin Tidak Bekerja (Potong)',
-      A: 'Alpa (Tanpa Keterangan)',
-      CT: 'Cuti Tahunan',
-      CI: 'Cuti Istimewa',
-      DS: 'Datang Siang (Izin)',
-      PA: 'Pulang Awal (Izin)',
-      L: 'Diliburkan / Shift Libur',
-      O: 'Off / Libur Jadwal',
-      SDR: 'Sakit Dengan Resep / Surat Dokter Resmi',
-      PC: 'Pulang Cepat (Terjadwalkan)',
-      BPJS: 'Izin Medis / BPJS',
-      H: 'Hadir (Kode Export Radin)',
-      PERLU_PEMERIKSAAN_HR: 'Perlu Pemeriksaan HR'
-    }
+    codebook: { ...DEFAULT_STAFF_CODEBOOK }
   },
   cuti: {
     defaultAnnualQuota: 12,
@@ -390,18 +452,48 @@ function normalizeSignatories(raw = {}) {
     rightName: String(inp?.rightName || fb.rightName).trim(),
     rightTitle: String(inp?.rightTitle || fb.rightTitle).trim()
   });
-  const normThree = (inp, fb) => ({
-    ...normTwo(inp, fb),
-    midLabel: String(inp?.midLabel || fb.midLabel).trim(),
-    midNik: String(inp?.midNik ?? fb.midNik).trim(),
-    midName: String(inp?.midName || fb.midName).trim(),
-    midTitle: String(inp?.midTitle || fb.midTitle).trim()
-  });
+  const normThree = (inp, fb, legacyTwo = null) => {
+    const merged = inp && typeof inp === 'object'
+      ? inp
+      : (legacyTwo && typeof legacyTwo === 'object'
+          ? {
+              leftLabel: legacyTwo.leftLabel || fb.leftLabel,
+              leftNik: legacyTwo.leftNik ?? fb.leftNik,
+              leftName: legacyTwo.leftName || fb.leftName,
+              leftTitle: legacyTwo.leftTitle || fb.leftTitle,
+              midLabel: legacyTwo.rightLabel || fb.midLabel,
+              midNik: legacyTwo.rightNik ?? fb.midNik,
+              midName: legacyTwo.rightName || fb.midName,
+              midTitle: legacyTwo.rightTitle || fb.midTitle
+            }
+          : {});
+    return {
+      leftLabel: String(merged.leftLabel || fb.leftLabel).trim(),
+      leftNik: String(merged.leftNik ?? fb.leftNik).trim(),
+      leftName: String(merged.leftName || fb.leftName).trim(),
+      leftTitle: String(merged.leftTitle || fb.leftTitle).trim(),
+      midLabel: String(merged.midLabel || fb.midLabel).trim(),
+      midNik: String(merged.midNik ?? fb.midNik).trim(),
+      midName: String(merged.midName || fb.midName).trim(),
+      midTitle: String(merged.midTitle || fb.midTitle).trim(),
+      rightLabel: String(merged.rightLabel || fb.rightLabel).trim(),
+      rightNik: String(merged.rightNik ?? fb.rightNik).trim(),
+      rightName: String(merged.rightName || fb.rightName).trim(),
+      rightTitle: String(merged.rightTitle || fb.rightTitle).trim()
+    };
+  };
+  const support = normThree(src.support, def.support, src.department);
+  const indoor = normThree(src.indoor, def.indoor, src.department);
+  const outdoor = normThree(src.outdoor, def.outdoor, src.department);
   return {
     summary: normTwo(src.summary, def.summary),
-    department: normTwo(src.department, def.department),
+    support,
+    indoor,
+    outdoor,
+    department: normThree(src.department, support),
     radin: normThree(src.radin, def.radin),
-    checksheet: normTwo(src.checksheet, def.checksheet)
+    checksheet: normTwo(src.checksheet, def.checksheet),
+    staffReport: normTwo(src.staffReport, def.staffReport)
   };
 }
 
@@ -421,6 +513,18 @@ export function normalizeOpsSettings(raw = {}) {
   const divisor = sanitizeNum(drv.workingDayDivisor, defDrv.workingDayDivisor, 1, 31);
   const weekdayNormalHours = sanitizeNum(drv.weekdayNormalHours ?? drv.normalWorkHours, defDrv.weekdayNormalHours, 1, 16);
 
+  const normalizedCodebook = {};
+  for (const code of STAFF_ATTENDANCE_CODE_ORDER) {
+    normalizedCodebook[code] = String(att.codebook?.[code] || DEFAULT_STAFF_CODEBOOK[code]).trim() || DEFAULT_STAFF_CODEBOOK[code];
+  }
+  const includeHInReportTotals = Boolean(att.includeHInReportTotals);
+  const defaultCols = includeHInReportTotals
+    ? ['H', ...DEFAULT_STAFF_REPORT_TOTAL_COLUMNS]
+    : [...DEFAULT_STAFF_REPORT_TOTAL_COLUMNS];
+  const rawCols = Array.isArray(att.staffReportTotalColumns)
+    ? [...new Set(att.staffReportTotalColumns.map(c => String(c || '').trim().toUpperCase()).filter(c => STAFF_ATTENDANCE_CODE_ORDER.includes(c)))]
+    : [];
+
   return {
     attendance: {
       timezone: String(att.timezone || defAtt.timezone).trim() || 'Asia/Jakarta',
@@ -428,24 +532,31 @@ export function normalizeOpsSettings(raw = {}) {
       cutoffEndDay: Math.round(sanitizeNum(att.cutoffEndDay, defAtt.cutoffEndDay, 1, 28)),
       mitraLateCutoffTime: sanitizeTimeHms(att.mitraLateCutoffTime, defAtt.mitraLateCutoffTime),
       radinLateCutoffTime: sanitizeTimeHms(att.radinLateCutoffTime, defAtt.radinLateCutoffTime),
-      lateThresholdMinutes: Math.round(sanitizeNum(att.lateThresholdMinutes, defAtt.lateThresholdMinutes, 0, 60)),
-      mealThresholdMinutes: Math.round(sanitizeNum(att.mealThresholdMinutes, defAtt.mealThresholdMinutes, 1, 120)),
+      lateThresholdMinutes: Math.round(sanitizeNum(att.lateThresholdMinutes, defAtt.lateThresholdMinutes, 0, 120)),
+      earlyLeaveThresholdMinutes: Math.round(sanitizeNum(att.earlyLeaveThresholdMinutes, defAtt.earlyLeaveThresholdMinutes, 0, 240)),
+      lateAndEarlyPriority: att.lateAndEarlyPriority === 'PA' ? 'PA' : 'T',
+      mealThresholdMinutes: Math.round(sanitizeNum(att.mealThresholdMinutes, defAtt.mealThresholdMinutes, 1, 180)),
+      mealAllowanceAmount: Math.round(sanitizeNum(att.mealAllowanceAmount, defAtt.mealAllowanceAmount, 0, 1000000)),
+      mealPeriodStartDay: Math.round(sanitizeNum(att.mealPeriodStartDay, defAtt.mealPeriodStartDay, 0, 6)),
+      mealPeriodLengthDays: Math.round(sanitizeNum(att.mealPeriodLengthDays, defAtt.mealPeriodLengthDays, 1, 14)),
+      mealAutoOnManualHadir: Boolean(att.mealAutoOnManualHadir),
       exemptDriverLateFlag: att.exemptDriverLateFlag !== false,
       workingDaysBasis: sanitizeNum(att.workingDaysBasis, defAtt.workingDaysBasis, 1, 31),
       maxPaidDaysCap: sanitizeNum(att.maxPaidDaysCap, defAtt.maxPaidDaysCap, 1, 31),
       latePenaltyWeight: sanitizeNum(att.latePenaltyWeight, defAtt.latePenaltyWeight, 0, 2),
       holidayCreditWeight: sanitizeNum(att.holidayCreditWeight, defAtt.holidayCreditWeight, 0, 2),
       warningAbsenceThreshold: sanitizeNum(att.warningAbsenceThreshold, defAtt.warningAbsenceThreshold, 0, 1),
-      autoMarkNoPunchAs: att.autoMarkNoPunchAs === 'A' ? 'A' : 'PERLU_PEMERIKSAAN_HR',
+      autoMarkNoPunchAs: ['A', 'L', 'PERLU_PEMERIKSAAN_HR'].includes(att.autoMarkNoPunchAs)
+        ? att.autoMarkNoPunchAs
+        : 'PERLU_PEMERIKSAAN_HR',
       preserveConfirmedReviews: att.preserveConfirmedReviews !== false,
+      includeHInReportTotals,
+      staffReportTotalColumns: rawCols.length ? rawCols : defaultCols,
       sourcePriority: Array.isArray(att.sourcePriority) && att.sourcePriority.length
         ? att.sourcePriority.map(s => String(s || '').trim()).filter(Boolean)
         : [...defAtt.sourcePriority],
       workSchedules: normalizeWorkSchedules(att.workSchedules),
-      codebook: {
-        ...defAtt.codebook,
-        ...(att.codebook && typeof att.codebook === 'object' ? att.codebook : {})
-      }
+      codebook: normalizedCodebook
     },
     cuti: {
       defaultAnnualQuota: Math.round(sanitizeNum(cuti.defaultAnnualQuota, defCuti.defaultAnnualQuota, 0, 60)),

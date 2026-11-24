@@ -4,13 +4,13 @@ import {
   normalizeDisplayNik,
   normalizeCompanyEntity,
   normalizeHomeBase
-} from './workspace-logic.js?v=20261124-hrga-workspace-19';
+} from './workspace-logic.js?v=20261124-hrga-workspace-20';
 import {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
   renderAgreementHtml
-} from './hris-renderer.js?v=20261124-hrga-workspace-19';
+} from './hris-renderer.js?v=20261124-hrga-workspace-20';
 
 export {
   computeEndDate,

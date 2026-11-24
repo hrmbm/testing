@@ -1,10 +1,10 @@
-import { $, esc } from './common.js?v=20261124-hrga-workspace-19';
-import { bindSafeModalClose } from './admin-modals.js?v=20261124-hrga-workspace-19';
+import { $, esc } from './common.js?v=20261124-hrga-workspace-20';
+import { bindSafeModalClose } from './admin-modals.js?v=20261124-hrga-workspace-20';
 import {
   CONTRACT_DURATION_OPTIONS,
   preserveCaretCurrencyValue,
   resolveCompanyMasterIdFromEntity
-} from './workspace-logic.js?v=20261124-hrga-workspace-19';
+} from './workspace-logic.js?v=20261124-hrga-workspace-20';
 import {
   CONTRACT_DOCUMENTS,
   DEFAULT_CONTRACT_SETTINGS,
@@ -17,7 +17,7 @@ import {
   renderAgreementHtml,
   resolveDefaultContractStartDate,
   toIsoDate
-} from './contract-logic.js?v=20261124-hrga-workspace-19';
+} from './contract-logic.js?v=20261124-hrga-workspace-20';
 
 export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 

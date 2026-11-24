@@ -3143,7 +3143,8 @@
     print-color-adjust: exact !important;
   }
   #pkwt-print-stage .drv-pdf-sheet,
-  #pkwt-print-stage .cs-landscape-page {
+  #pkwt-print-stage .cs-landscape-page,
+  #pkwt-print-stage .stf-pdf-sheet {
     min-width: 0 !important;
     max-width: none !important;
     width: 100% !important;
@@ -3154,11 +3155,222 @@
     break-after: page;
   }
   #pkwt-print-stage .drv-pdf-sheet:last-child,
-  #pkwt-print-stage .cs-landscape-page:last-child {
+  #pkwt-print-stage .cs-landscape-page:last-child,
+  #pkwt-print-stage .stf-pdf-sheet:last-child {
     page-break-after: auto;
     break-after: auto;
   }
 }
+
+/* ============================================================================
+ * Staff Attendance Management & Staff Reports (Report Absensi + Uang Makan)
+ * ============================================================================ */
+.ops-meta-line {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.stf-summary-cell {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.stf-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.stf-legend-row b {
+  font-family: var(--font-mono);
+  color: var(--teal-dark);
+}
+
+.stf-matrix-wrap {
+  max-height: 68vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.stf-matrix-table,
+.stf-meal-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stf-matrix-table th,
+.stf-matrix-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 5px;
+  text-align: center;
+  vertical-align: middle;
+  min-width: 32px;
+  background: #ffffff;
+}
+
+.stf-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--canvas);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.stf-matrix-table thead tr:nth-child(2) th {
+  top: 30px;
+}
+
+.stf-matrix-table th.l,
+.stf-matrix-table td.l,
+.stf-meal-table th.l,
+.stf-meal-table td.l {
+  text-align: left;
+  padding: 7px 10px;
+}
+
+.stf-sticky-name {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 195px;
+  min-width: 195px;
+  max-width: 195px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stf-sticky-nik {
+  position: sticky;
+  left: 195px;
+  z-index: 3;
+  width: 105px;
+  min-width: 105px;
+  max-width: 105px;
+  white-space: nowrap;
+  box-shadow: 2px 0 4px rgba(15, 23, 42, 0.06);
+}
+
+.stf-matrix-table thead th.stf-sticky-name,
+.stf-matrix-table thead th.stf-sticky-nik {
+  z-index: 5;
+  background: var(--canvas);
+}
+
+.stf-matrix-table tfoot th {
+  background: var(--canvas);
+  font-weight: 700;
+  border-top: 2px solid var(--line-strong);
+}
+
+.stf-col-sun {
+  background: #fef9c3 !important;
+  color: #854d0e !important;
+}
+
+.stf-col-hol {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+}
+
+.stf-tot-th {
+  min-width: 38px !important;
+  background: #f1f5f9 !important;
+  color: var(--ink) !important;
+}
+
+.stf-tot-td {
+  font-weight: 700;
+  background: #f8fafc !important;
+  text-align: center !important;
+}
+
+.stf-code-h {
+  color: #065f46;
+  font-weight: 700;
+}
+
+.stf-code-warn {
+  background: #fffbeb !important;
+  color: #b45309;
+  font-weight: 700;
+}
+
+.stf-code-danger {
+  background: #fef2f2 !important;
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.stf-code-info {
+  background: #f0f9ff !important;
+  color: #0369a1;
+  font-weight: 700;
+}
+
+.stf-code-off {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.stf-code-muted {
+  color: #94a3b8;
+}
+
+.stf-meal-table th,
+.stf-meal-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.stf-meal-table thead th {
+  background: var(--canvas);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.stf-meal-table tfoot th {
+  background: var(--canvas);
+  font-weight: 700;
+  border-top: 2px solid var(--line-strong);
+}
+
+.stf-meal-yes {
+  color: #065f46;
+  font-weight: 700;
+  background: #f0fdf4;
+}
+
+.stf-meal-no {
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .stf-sticky-name,
+  .stf-sticky-nik {
+    position: static;
+    box-shadow: none;
+  }
+}
+
 
 
 

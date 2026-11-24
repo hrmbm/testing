@@ -1,13 +1,13 @@
-import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-19';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261124-hrga-workspace-19';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261124-hrga-workspace-19';
+import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-20';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261124-hrga-workspace-20';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261124-hrga-workspace-20';
 import {
   DEFAULT_STAGE2_SCHEMA,
   STEP_SECTION_DEFAULTS,
   STAGE2_SECTION_META,
   MANDATORY_STAGE2_SECTIONS,
   normalizeStage2Schema
-} from './form-schema.js?v=20261124-hrga-workspace-19';
+} from './form-schema.js?v=20261124-hrga-workspace-20';
 
 function formatKtpAddress(data={}){
   const tidyPart=v=>String(v||'').replace(/\s+/g,' ').replace(/^\s*[:：\-]+\s*/,'').replace(/[,;]+$/,'').trim();
@@ -1201,8 +1201,8 @@ async function runOcr(canvas,generation){
   ktpPhotoDataUrl=canvasToKtpDataUrl(canvas);
   setOcrProgress('Menyiapkan mesin OCR lokal…');
   const [{ recognizeWithPaddle }, { extractKtpText }] = await Promise.all([
-    import('./ocr-engine.js?v=20261124-hrga-workspace-19'),
-    import('./ktp-ocr.js?v=20261124-hrga-workspace-19')
+    import('./ocr-engine.js?v=20261124-hrga-workspace-20'),
+    import('./ktp-ocr.js?v=20261124-hrga-workspace-20')
   ]);
   let result;
   try{

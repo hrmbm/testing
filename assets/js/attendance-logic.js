@@ -1,12 +1,23 @@
 // Pure Attendance Normalization, Upload Deduplication, Cuti, Directory Delta & Staff Payroll Attendance Logic
-import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings } from './ops-settings-logic.js';
+import {
+  DEFAULT_OPS_SETTINGS,
+  STAFF_ATTENDANCE_CODE_ORDER,
+  DEFAULT_STAFF_CODEBOOK,
+  normalizeOpsSettings
+} from './ops-settings-logic.js';
 import {
   normalizeCompanyEntity,
   isReholzCompanyEntity,
   normalizeHomeBase
 } from './workspace-logic.js';
 
-export { normalizeCompanyEntity, isReholzCompanyEntity, normalizeHomeBase };
+export {
+  normalizeCompanyEntity,
+  isReholzCompanyEntity,
+  normalizeHomeBase,
+  STAFF_ATTENDANCE_CODE_ORDER,
+  DEFAULT_STAFF_CODEBOOK
+};
 
 export function normKey(v = '') {
   return String(v || '').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -127,9 +138,30 @@ export function normalizeTimeString(raw) {
   return `${pad2(m[1])}:${pad2(m[2])}:${pad2(m[3] || 0)}`;
 }
 
+export function timeToSeconds(raw) {
+  const norm = normalizeTimeString(raw);
+  if (!norm) return null;
+  const [hh, mm, ss] = norm.split(':').map(Number);
+  return hh * 3600 + mm * 60 + ss;
+}
+
 export function isTimeAfter(hms, cutoffHms) {
   if (!hms || !cutoffHms) return false;
   return normalizeTimeString(hms) > normalizeTimeString(cutoffHms);
+}
+
+export function normalizeStaffAttendanceCode(raw = '') {
+  const code = normKey(raw);
+  if (!code) return '';
+  if (code === 'M' || code === 'H' || code === 'H_LIBUR' || code === 'HADIR') return 'H';
+  if (code === 'O' || code === 'OFF' || code === 'LIBUR') return 'L';
+  if (code === 'SDR') return 'S';
+  if (code === 'ITB' || code === 'BPJS') return 'I';
+  if (code === 'CI') return 'CT';
+  if (code === 'PC') return 'PA';
+  if (STAFF_ATTENDANCE_CODE_ORDER.includes(code)) return code;
+  if (code === 'PERLU_PEMERIKSAAN_HR' || code === '-') return code;
+  return code;
 }
 
 export function computeSimpleHashHex(input = '') {
@@ -391,6 +423,61 @@ export function buildAttendanceBatchResult({
   return { batch, accepted, duplicateCount, exceptions };
 }
 
+export function shiftIsoDate(isoDate = '2026-11-06', deltaDays = 0) {
+  const baseMs = Date.parse(`${String(isoDate || '2026-11-06').slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(baseMs)) return '2026-11-06';
+  const next = new Date(baseMs + Math.round(Number(deltaDays) || 0) * 86400000);
+  return next.toISOString().slice(0, 10);
+}
+
+const ID_DAY_SHORTS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+const ID_DAY_FULL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const ID_MONTH_SHORTS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+function formatShortIdDate(isoDate) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const dow = d.getUTCDay();
+  return `${ID_DAY_FULL[dow]}, ${pad2(d.getUTCDate())} ${ID_MONTH_SHORTS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+export function getWeeklyMealPeriodWindow(anchorDateIso = '2026-11-06', settings = DEFAULT_OPS_SETTINGS) {
+  const cfg = normalizeOpsSettings(settings).attendance;
+  const startDow = cfg.mealPeriodStartDay ?? 5; // Default 5 = Jumat
+  const lengthDays = Math.max(1, cfg.mealPeriodLengthDays ?? 7);
+  const cleanAnchor = /^\d{4}-\d{2}-\d{2}$/.test(String(anchorDateIso || '').trim())
+    ? String(anchorDateIso).trim()
+    : '2026-11-06';
+  const anchorDow = new Date(`${cleanAnchor}T00:00:00Z`).getUTCDay();
+  const backDays = (anchorDow - startDow + 7) % 7;
+  const startDate = shiftIsoDate(cleanAnchor, -backDays);
+
+  const dates = [];
+  const dayMeta = [];
+  for (let i = 0; i < lengthDays; i++) {
+    const dateStr = shiftIsoDate(startDate, i);
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    const dow = d.getUTCDay();
+    dates.push(dateStr);
+    dayMeta.push({
+      dateStr,
+      dayNum: d.getUTCDate(),
+      monthNum: d.getUTCMonth() + 1,
+      dow,
+      dayShort: ID_DAY_SHORTS[dow],
+      dayFull: ID_DAY_FULL[dow],
+      isSunday: dow === 0
+    });
+  }
+  const endDate = dates[dates.length - 1];
+  return {
+    startDate,
+    endDate,
+    dates,
+    dayMeta,
+    label: `${formatShortIdDate(startDate)} s/d ${formatShortIdDate(endDate)}`
+  };
+}
+
 export function getStaffPayrollPeriodWindow(periodKey = '2026-11', settings = DEFAULT_OPS_SETTINGS) {
   const cfg = normalizeOpsSettings(settings).attendance;
   const match = String(periodKey || '').match(/^(\d{4})-(\d{2})$/);
@@ -401,15 +488,25 @@ export function getStaffPayrollPeriodWindow(periodKey = '2026-11', settings = DE
   const startDate = `${startYear}-${pad2(startMonth)}-${pad2(cfg.cutoffStartDay)}`;
   const endDate = `${year}-${pad2(month)}-${pad2(cfg.cutoffEndDay)}`;
 
-  // Generate array of all ISO dates between startDate and endDate inclusive
   const dates = [];
+  const dayMeta = [];
   const cur = new Date(`${startDate}T00:00:00Z`);
   const end = new Date(`${endDate}T00:00:00Z`);
   while (cur <= end) {
-    dates.push(cur.toISOString().slice(0, 10));
+    const iso = cur.toISOString().slice(0, 10);
+    const dow = cur.getUTCDay();
+    dates.push(iso);
+    dayMeta.push({
+      dateStr: iso,
+      dayNum: cur.getUTCDate(),
+      monthNum: cur.getUTCMonth() + 1,
+      dow,
+      dayShort: ID_DAY_SHORTS[dow],
+      isSunday: dow === 0
+    });
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
-  return { periodKey: `${year}-${pad2(month)}`, startDate, endDate, dates };
+  return { periodKey: `${year}-${pad2(month)}`, startDate, endDate, dates, dayMeta };
 }
 
 export function processStaffAttendancePeriod({
@@ -420,6 +517,7 @@ export function processStaffAttendancePeriod({
   holidaySchedules = [],
   leaveBalances = [],
   existingReviews = [],
+  mealOverrides = [],
   settings = DEFAULT_OPS_SETTINGS
 }) {
   const cfg = normalizeOpsSettings(settings);
@@ -431,12 +529,16 @@ export function processStaffAttendancePeriod({
       .filter(r => r && r.work_date && r.employee_no)
       .map(r => [`${compactNik(r.employee_no)}|${r.work_date}`, r])
   );
+  const mealOvMap = new Map(
+    mealOverrides
+      .filter(m => m && m.work_date && m.employee_no)
+      .map(m => [`${compactNik(m.employee_no)}|${m.work_date}`, m])
+  );
   const leaveByNik = new Map(leaveBalances.map(l => [compactNik(l.employee_no), l]));
   const holidayScheduleSet = new Set(
     holidaySchedules.map(h => `${compactNik(h.employee_no)}|${h.work_date}`)
   );
 
-  // Deduplicate events per employee + date using configured source priority
   const eventMap = new Map();
   const priorityIndex = src => {
     const idx = attCfg.sourcePriority.indexOf(src);
@@ -457,75 +559,114 @@ export function processStaffAttendancePeriod({
   for (const emp of employees) {
     const nikKey = compactNik(emp.employee_no);
     const isDriver = /SOPIR|DRIVER/i.test(String(emp.position || '')) || /SOPIR|DRIVER/i.test(String(emp.department || ''));
-    const isRadin = isReholzCompanyEntity(emp.company_entity || '') || /RADIN|REHOLZ/i.test(String(emp.department || ''));
-    const lateCutoff = isRadin ? attCfg.radinLateCutoffTime : attCfg.mitraLateCutoffTime;
 
-    let countM = 0;
-    let countT = 0;
-    let countS = 0;
-    let countSdr = 0;
-    let countI = 0;
-    let countItb = 0;
-    let countA = 0;
-    let countCt = 0;
-    let countCi = 0;
-    let countDs = 0;
-    let countPa = 0;
-    let countHolidayWork = 0;
-    let countPendingReview = 0;
+    const counts = {
+      H: 0,
+      S: 0,
+      I: 0,
+      A: 0,
+      T: 0,
+      PA: 0,
+      CT: 0,
+      L: 0,
+      DS: 0,
+      PENDING: 0
+    };
     let scheduledWorkDays = 0;
-
     const empDays = [];
 
-    for (const dateStr of win.dates) {
+    for (let di = 0; di < win.dates.length; di++) {
+      const dateStr = win.dates[di];
+      const meta = win.dayMeta[di];
       if (emp.join_date && dateStr < emp.join_date) {
-        empDays.push({ work_date: dateStr, code: '-', locked: true, source_type: '', note: 'Belum bergabung' });
+        empDays.push({
+          work_date: dateStr,
+          dayNum: meta.dayNum,
+          dayShort: meta.dayShort,
+          isOffDay: false,
+          isSunday: meta.isSunday,
+          isHoliday: false,
+          code: '-',
+          locked: true,
+          source_type: '',
+          ruleFlags: [],
+          note: 'Belum bergabung'
+        });
         continue;
       }
 
       const cal = calByDate.get(dateStr);
-      const dayOfWeek = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+      const dayOfWeek = meta.dow;
       const isWeekend = dayOfWeek === 0 || cal?.day_type === 'WEEKEND';
       const isHoliday = cal?.day_type === 'HOLIDAY' || cal?.day_type === 'CUTI_BERSAMA';
       const isScheduledHolidayWork = holidayScheduleSet.has(`${nikKey}|${dateStr}`);
       const isOffDay = isWeekend || (isHoliday && !isScheduledHolidayWork);
 
+      const schedule = resolveStaffWorkSchedule(emp, dateStr, cfg);
       const ev = eventMap.get(`${nikKey}|${dateStr}`);
       const review = reviewMap.get(`${nikKey}|${dateStr}`);
+      const mealOverride = mealOvMap.get(`${nikKey}|${dateStr}`) || null;
+
+      const checkIn = ev?.check_in || '';
+      const checkOut = ev?.check_out || '';
+      const arrivalEval = checkIn
+        ? evaluateStaffArrivalStatus({
+            checkInTime: checkIn,
+            scheduleStart: schedule.startTime,
+            settings: cfg,
+            manualMealOverride: mealOverride
+          })
+        : null;
+      const departureEval = checkOut
+        ? evaluateStaffDepartureStatus({
+            checkOutTime: checkOut,
+            scheduleEnd: schedule.endTime,
+            settings: cfg
+          })
+        : null;
+
+      const ruleFlags = [];
+      const isLateByRule = !(isDriver && attCfg.exemptDriverLateFlag) && Boolean(arrivalEval?.isLate);
+      const isEarlyByRule = !(isDriver && attCfg.exemptDriverLateFlag) && Boolean(departureEval?.isEarlyLeave);
+      if (isLateByRule) ruleFlags.push('T');
+      if (isEarlyByRule) ruleFlags.push('PA');
 
       let finalCode = '';
       let isConfirmed = false;
       let needsReview = false;
-      let checkIn = ev?.check_in || '';
-      let checkOut = ev?.check_out || '';
 
-      // Rule: Confirmed HR reviews stay protected across incremental uploads
       if (attCfg.preserveConfirmedReviews && review?.is_confirmed && review.final_code) {
-        finalCode = review.final_code;
+        finalCode = normalizeStaffAttendanceCode(review.final_code);
         isConfirmed = true;
       } else if (ev) {
-        const raw = normKey(ev.source_status || ev.raw_code);
-        if (['S', 'I', 'ITB', 'A', 'CT', 'CI', 'DS', 'PA', 'L', 'O', 'SDR', 'PC', 'BPJS'].includes(raw)) {
-          finalCode = raw;
-        } else if (checkIn) {
+        const rawNorm = normalizeStaffAttendanceCode(ev.source_status || ev.raw_code);
+        if (['S', 'I', 'A', 'CT', 'L', 'DS'].includes(rawNorm)) {
+          finalCode = rawNorm;
+        } else if (checkIn || checkOut) {
           if (isOffDay) {
-            finalCode = 'H_LIBUR';
-          } else if (isDriver && attCfg.exemptDriverLateFlag) {
-            finalCode = 'M';
+            finalCode = 'H';
+          } else if (isLateByRule && isEarlyByRule) {
+            finalCode = attCfg.lateAndEarlyPriority === 'PA' ? 'PA' : 'T';
+          } else if (isLateByRule) {
+            finalCode = 'T';
+          } else if (isEarlyByRule) {
+            finalCode = 'PA';
           } else {
-            finalCode = isTimeAfter(checkIn, lateCutoff) ? 'T' : 'M';
+            finalCode = 'H';
           }
-        } else if (raw === 'H' || raw === 'M') {
-          finalCode = isOffDay ? 'H_LIBUR' : 'M';
+        } else if (rawNorm === 'H') {
+          finalCode = 'H';
+        } else if (['T', 'PA'].includes(rawNorm)) {
+          finalCode = rawNorm;
         } else {
           finalCode = attCfg.autoMarkNoPunchAs;
           needsReview = finalCode === 'PERLU_PEMERIKSAAN_HR';
         }
       } else if (review?.final_code) {
-        finalCode = review.final_code;
+        finalCode = normalizeStaffAttendanceCode(review.final_code);
         isConfirmed = Boolean(review.is_confirmed);
       } else if (isOffDay) {
-        finalCode = cal?.day_type === 'CUTI_BERSAMA' ? 'L' : 'O';
+        finalCode = 'L';
       } else {
         finalCode = attCfg.autoMarkNoPunchAs;
         needsReview = finalCode === 'PERLU_PEMERIKSAAN_HR';
@@ -533,43 +674,47 @@ export function processStaffAttendancePeriod({
 
       if (!isOffDay) scheduledWorkDays++;
 
-      if (finalCode === 'M') countM++;
-      else if (finalCode === 'T') countT++;
-      else if (finalCode === 'S') countS++;
-      else if (finalCode === 'SDR') countSdr++;
-      else if (finalCode === 'I') countI++;
-      else if (finalCode === 'ITB') countItb++;
-      else if (finalCode === 'A') countA++;
-      else if (finalCode === 'CT') countCt++;
-      else if (finalCode === 'CI') countCi++;
-      else if (finalCode === 'DS') countDs++;
-      else if (finalCode === 'PA') countPa++;
-      else if (finalCode === 'H_LIBUR') countHolidayWork++;
-      else if (finalCode === 'PERLU_PEMERIKSAAN_HR') countPendingReview++;
+      if (finalCode === 'PERLU_PEMERIKSAAN_HR') {
+        counts.PENDING++;
+      } else if (Object.prototype.hasOwnProperty.call(counts, finalCode)) {
+        counts[finalCode]++;
+      }
 
       const rec = {
         employee_no: emp.employee_no,
         work_date: dateStr,
+        dayNum: meta.dayNum,
+        dayShort: meta.dayShort,
+        isOffDay,
+        isSunday: meta.isSunday,
+        isHoliday,
         check_in: checkIn,
         check_out: checkOut,
+        scheduleStart: schedule.startTime,
+        scheduleEnd: schedule.endTime,
+        ruleFlags,
+        getsMealAllowance: mealOverride
+          ? Boolean(mealOverride.eligible)
+          : (['H', 'T', 'PA'].includes(finalCode) && Boolean(arrivalEval?.getsMealAllowance)),
+        mealOverridden: Boolean(mealOverride),
         raw_code: ev?.raw_code || '',
         code: finalCode,
         is_confirmed: isConfirmed,
         needs_review: needsReview,
+        review_reason: review?.reason || '',
         source_type: ev?.source_type || (isOffDay ? 'calendar' : 'none')
       };
       empDays.push(rec);
       dailyRecords.push(rec);
     }
 
-    const totalPresent = countM + countT;
-    const totalHadir = Math.round((countM + countT + countCt + countCi) * 100) / 100;
-    const absenPotong = Math.round((countA + countItb) * 100) / 100;
-    const holidayCredit = Math.round((countHolidayWork * attCfg.holidayCreditWeight) * 100) / 100;
-    const totalPotonganHari = Math.round((absenPotong + countT * attCfg.latePenaltyWeight) * 100) / 100;
-    const bobotKetidakhadiran = Math.round((absenPotong + countS + countI + countT * attCfg.latePenaltyWeight) * 100) / 100;
+    const totalPresent = counts.H + counts.T + counts.PA + counts.DS;
+    const totalHadir = Math.round((counts.H + counts.T + counts.PA + counts.DS + counts.CT) * 100) / 100;
+    const absenPotong = counts.A;
+    const totalPotonganHari = Math.round((absenPotong + counts.T * attCfg.latePenaltyWeight) * 100) / 100;
+    const bobotKetidakhadiran = Math.round((absenPotong + counts.S + counts.I + counts.T * attCfg.latePenaltyWeight) * 100) / 100;
     const basis = scheduledWorkDays > 0 ? Math.min(scheduledWorkDays, attCfg.workingDaysBasis) : attCfg.workingDaysBasis;
-    const effectivePaidDays = Math.min(attCfg.maxPaidDaysCap, Math.max(0, totalHadir + holidayCredit - totalPotonganHari));
+    const effectivePaidDays = Math.min(attCfg.maxPaidDaysCap, Math.max(0, totalHadir - totalPotonganHari));
     const presencePct = basis > 0 ? Math.round((totalHadir / basis) * 10000) / 100 : 100;
     const absenceRatio = basis > 0 ? bobotKetidakhadiran / basis : 0;
     const evalStatus = absenceRatio > attCfg.warningAbsenceThreshold ? 'Perhatian / Surat Peringatan' : 'Baik';
@@ -581,39 +726,190 @@ export function processStaffAttendancePeriod({
       employee_name: emp.full_name,
       department: emp.department || '',
       position: emp.position || '',
+      home_base: emp.home_base || 'PASURUAN',
+      company_entity: normalizeCompanyEntity(emp.company_entity || 'MITRA'),
       is_driver: isDriver,
       scheduled_days: scheduledWorkDays,
-      counts: {
-        M: countM,
-        T: countT,
-        S: countS,
-        SDR: countSdr,
-        I: countI,
-        ITB: countItb,
-        A: countA,
-        CT: countCt,
-        CI: countCi,
-        DS: countDs,
-        PA: countPa,
-        H_LIBUR: countHolidayWork,
-        PENDING: countPendingReview
-      },
+      counts,
       totalPresent,
       totalHadir,
       absenPotong,
-      holidayCredit,
       totalPotonganHari,
       bobotKetidakhadiran,
       effectivePaidDays: Math.round(effectivePaidDays * 100) / 100,
       presencePct,
       evalStatus,
       remainingLeave: leaveBal ? leaveBal.remaining_leave : null,
-      leaveCandidate: Boolean(countA > 0 && leaveBal && Number(leaveBal.remaining_leave) > 0),
+      leaveCandidate: Boolean(counts.A > 0 && leaveBal && Number(leaveBal.remaining_leave) > 0),
       days: empDays
     });
   }
 
   return { window: win, summaries, dailyRecords };
+}
+
+export function processStaffMealAllowanceReport({
+  anchorDateIso = '2026-11-06',
+  employees = [],
+  rawEvents = [],
+  calendarDays = [],
+  holidaySchedules = [],
+  existingReviews = [],
+  mealOverrides = [],
+  settings = DEFAULT_OPS_SETTINGS
+} = {}) {
+  const cfg = normalizeOpsSettings(settings);
+  const attCfg = cfg.attendance;
+  const win = getWeeklyMealPeriodWindow(anchorDateIso, cfg);
+  const dailyAmount = Math.round(Number(attCfg.mealAllowanceAmount || 0));
+
+  const calByDate = new Map(calendarDays.map(c => [c.cal_date, c]));
+  const reviewMap = new Map(
+    existingReviews
+      .filter(r => r && r.work_date && r.employee_no)
+      .map(r => [`${compactNik(r.employee_no)}|${r.work_date}`, r])
+  );
+  const mealOvMap = new Map(
+    mealOverrides
+      .filter(m => m && m.work_date && m.employee_no)
+      .map(m => [`${compactNik(m.employee_no)}|${m.work_date}`, m])
+  );
+  const holidayScheduleSet = new Set(
+    holidaySchedules.map(h => `${compactNik(h.employee_no)}|${h.work_date}`)
+  );
+
+  const eventMap = new Map();
+  const priorityIndex = src => {
+    const idx = attCfg.sourcePriority.indexOf(src);
+    return idx >= 0 ? idx : 99;
+  };
+  for (const ev of rawEvents) {
+    if (!ev.work_date || ev.work_date < win.startDate || ev.work_date > win.endDate) continue;
+    const k = `${compactNik(ev.employee_no)}|${ev.work_date}`;
+    const prev = eventMap.get(k);
+    if (!prev || priorityIndex(ev.source_type) < priorityIndex(prev.source_type)) {
+      eventMap.set(k, ev);
+    }
+  }
+
+  const dailyTotals = win.dates.map(dateStr => ({ dateStr, eligibleCount: 0, totalAmount: 0 }));
+  const rows = [];
+  let grandTotalEligibleDays = 0;
+  let grandTotalAmount = 0;
+
+  for (const emp of employees) {
+    const nikKey = compactNik(emp.employee_no);
+    const days = [];
+    let empEligibleDays = 0;
+    let empTotalAmount = 0;
+
+    for (let di = 0; di < win.dates.length; di++) {
+      const dateStr = win.dates[di];
+      const meta = win.dayMeta[di];
+      const cal = calByDate.get(dateStr);
+      const isWeekend = meta.dow === 0 || cal?.day_type === 'WEEKEND';
+      const isHoliday = cal?.day_type === 'HOLIDAY' || cal?.day_type === 'CUTI_BERSAMA';
+      const isScheduledHolidayWork = holidayScheduleSet.has(`${nikKey}|${dateStr}`);
+      const isOffDay = isWeekend || (isHoliday && !isScheduledHolidayWork);
+
+      const schedule = resolveStaffWorkSchedule(emp, dateStr, cfg);
+      const ev = eventMap.get(`${nikKey}|${dateStr}`);
+      const review = reviewMap.get(`${nikKey}|${dateStr}`);
+      const override = mealOvMap.get(`${nikKey}|${dateStr}`) || null;
+      const checkIn = ev?.check_in || '';
+
+      let attCode = '';
+      if (attCfg.preserveConfirmedReviews && review?.is_confirmed && review.final_code) {
+        attCode = normalizeStaffAttendanceCode(review.final_code);
+      } else if (ev) {
+        const rawNorm = normalizeStaffAttendanceCode(ev.source_status || ev.raw_code);
+        if (['S', 'I', 'A', 'CT', 'L', 'DS'].includes(rawNorm)) attCode = rawNorm;
+        else if (checkIn) attCode = 'H';
+      } else if (review?.final_code) {
+        attCode = normalizeStaffAttendanceCode(review.final_code);
+      } else if (isOffDay) {
+        attCode = 'L';
+      }
+
+      let eligible = false;
+      let overridden = false;
+      let reason = '';
+
+      if (emp.join_date && dateStr < emp.join_date) {
+        eligible = false;
+        reason = 'Belum bergabung';
+      } else if (override && typeof override.eligible === 'boolean') {
+        eligible = override.eligible;
+        overridden = true;
+        reason = override.reason || (eligible ? 'Override Manual: Dapat' : 'Override Manual: Tidak Dapat');
+      } else if (['S', 'I', 'A', 'CT', 'DS'].includes(attCode)) {
+        eligible = false;
+        reason = `Status ${attCode}`;
+      } else if (attCode === 'L' && !checkIn) {
+        eligible = false;
+        reason = 'Libur';
+      } else if (checkIn) {
+        const arrival = evaluateStaffArrivalStatus({
+          checkInTime: checkIn,
+          scheduleStart: schedule.startTime,
+          settings: cfg
+        });
+        eligible = arrival.getsMealAllowance;
+        reason = arrival.mealReason;
+      } else if (attCode === 'H' && attCfg.mealAutoOnManualHadir) {
+        eligible = true;
+        reason = 'Hadir Manual (H)';
+      } else {
+        eligible = false;
+        reason = isOffDay ? 'Libur' : 'Tidak ada jam masuk';
+      }
+
+      const amount = eligible ? dailyAmount : 0;
+      if (eligible) {
+        empEligibleDays++;
+        empTotalAmount += amount;
+        dailyTotals[di].eligibleCount++;
+        dailyTotals[di].totalAmount += amount;
+      }
+
+      days.push({
+        work_date: dateStr,
+        dayShort: meta.dayShort,
+        dayNum: meta.dayNum,
+        isOffDay,
+        check_in: checkIn,
+        scheduleStart: schedule.startTime,
+        attCode: attCode || (isOffDay ? 'L' : ''),
+        eligible,
+        amount,
+        overridden,
+        reason
+      });
+    }
+
+    grandTotalEligibleDays += empEligibleDays;
+    grandTotalAmount += empTotalAmount;
+
+    rows.push({
+      employee_no: emp.employee_no,
+      employee_name: emp.full_name,
+      department: emp.department || '',
+      home_base: emp.home_base || 'PASURUAN',
+      company_entity: normalizeCompanyEntity(emp.company_entity || 'MITRA'),
+      days,
+      totalEligibleDays: empEligibleDays,
+      totalAmount: empTotalAmount
+    });
+  }
+
+  return {
+    window: win,
+    dailyAmount,
+    rows,
+    dailyTotals,
+    grandTotalEligibleDays,
+    grandTotalAmount
+  };
 }
 
 export function computeEmployeeDirectoryDelta(incomingRows = [], existingEmployees = []) {
@@ -898,6 +1194,28 @@ export function resolveStaffWorkSchedule(emp = {}, workDate = '2026-11-02', sett
   };
 }
 
+export function evaluateStaffDepartureStatus({
+  checkOutTime = '',
+  scheduleEnd = '17:00',
+  settings = DEFAULT_OPS_SETTINGS
+} = {}) {
+  const cfg = normalizeOpsSettings(settings).attendance;
+  const normOut = normalizeTimeString(checkOutTime);
+  const endSec = timeToSeconds(scheduleEnd);
+  if (!normOut || endSec === null) {
+    return { hasPunch: false, isEarlyLeave: false, code: '' };
+  }
+  const outSec = timeToSeconds(normOut);
+  const thrSec = Math.max(0, Math.round(Number(cfg.earlyLeaveThresholdMinutes ?? 1))) * 60;
+  const isEarlyLeave = thrSec === 0 ? (outSec < endSec) : (outSec <= endSec - thrSec);
+  return {
+    hasPunch: true,
+    isEarlyLeave,
+    code: isEarlyLeave ? 'PA' : 'H',
+    earlyCutoffSec: endSec - thrSec
+  };
+}
+
 export function evaluateStaffArrivalStatus({
   checkInTime = '',
   scheduleStart = '07:30',
@@ -931,7 +1249,7 @@ export function evaluateStaffArrivalStatus({
   return {
     hasPunch: true,
     isLate,
-    code: isLate ? 'T' : 'M',
+    code: isLate ? 'T' : 'H',
     lateCutoff,
     mealCutoff,
     getsMealAllowance,

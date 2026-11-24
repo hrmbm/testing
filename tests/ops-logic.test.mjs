@@ -11,6 +11,8 @@ import {
 } from '../assets/js/vacancy-logic.js';
 import {
   DEFAULT_OPS_SETTINGS,
+  STAFF_ATTENDANCE_CODE_ORDER,
+  DEFAULT_STAFF_REPORT_TOTAL_COLUMNS,
   normalizeOpsSettings
 } from '../assets/js/ops-settings-logic.js';
 import {
@@ -32,15 +34,19 @@ import {
   parseRadinAttendanceRows,
   buildAttendanceBatchResult,
   getStaffPayrollPeriodWindow,
+  getWeeklyMealPeriodWindow,
   processStaffAttendancePeriod,
+  processStaffMealAllowanceReport,
   computeEmployeeDirectoryDelta,
   parseCutiSpreadsheetRows,
   evaluateCutiConfirmationGate,
   resolveStaffWorkSchedule,
   evaluateStaffArrivalStatus,
+  evaluateStaffDepartureStatus,
   getIndonesianNationalHolidaysPreset,
   parseHolidayImportRows
 } from '../assets/js/attendance-logic.js';
+import { buildDeptPdfSheetHtml } from '../assets/js/driver-reports.js';
 import {
   isEligibleDriver,
   getEligibleDrivers,
@@ -174,16 +180,16 @@ test('Attendance parsers, Cuti #REF! handling, DK 174 canonical seeds, and clear
 
 test('Attendance deduplication, late cutoff 07:30:59, Driver exemption, and confirmed HR review lock work properly', () => {
   const emp = [
-    { employee_no: 'ST 130116', full_name: 'ABD. KHAMID', position: 'MMD', company_entity: 'PT MBM', join_date: '2004-11-05' },
-    { employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', position: 'SOPIR', company_entity: 'PT MBM', join_date: '2019-04-12' }
+    { employee_no: 'ST 130117', full_name: 'ABDUL AJIS', position: 'QC', home_base: 'PASURUAN', company_entity: 'PT MBM', join_date: '2013-01-17' },
+    { employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', position: 'SOPIR', home_base: 'PASURUAN', company_entity: 'PT MBM', join_date: '2019-04-12' }
   ];
 
   const firstBatch = buildAttendanceBatchResult({
     filename: 'batch1.xls',
     sourceType: 'mitra_transaksi',
     rawPunches: [
-      { employee_no: 'ST 130116', work_date: '2026-11-02', punch_time: '07:30:59', raw_code: 'IN' },
-      { employee_no: 'ST 130116', work_date: '2026-11-03', punch_time: '07:31:00', raw_code: 'IN' },
+      { employee_no: 'ST 130117', work_date: '2026-11-02', punch_time: '07:30:59', raw_code: 'IN' },
+      { employee_no: 'ST 130117', work_date: '2026-11-03', punch_time: '07:31:00', raw_code: 'IN' },
       { employee_no: 'KT 190403', work_date: '2026-11-03', punch_time: '08:15:00', raw_code: 'IN' },
       { employee_no: 'UNKNOWN-99', work_date: '2026-11-03', punch_time: '07:20:00', raw_code: 'IN' }
     ],
@@ -198,8 +204,8 @@ test('Attendance deduplication, late cutoff 07:30:59, Driver exemption, and conf
     filename: 'batch1-retry.xls',
     sourceType: 'mitra_transaksi',
     rawPunches: [
-      { employee_no: 'ST 130116', work_date: '2026-11-02', punch_time: '07:30:59', raw_code: 'IN' },
-      { employee_no: 'ST 130116', work_date: '2026-11-03', punch_time: '07:31:00', raw_code: 'IN' },
+      { employee_no: 'ST 130117', work_date: '2026-11-02', punch_time: '07:30:59', raw_code: 'IN' },
+      { employee_no: 'ST 130117', work_date: '2026-11-03', punch_time: '07:31:00', raw_code: 'IN' },
       { employee_no: 'KT 190403', work_date: '2026-11-03', punch_time: '08:15:00', raw_code: 'IN' },
       { employee_no: 'UNKNOWN-99', work_date: '2026-11-03', punch_time: '07:20:00', raw_code: 'IN' }
     ],
@@ -220,16 +226,16 @@ test('Attendance deduplication, late cutoff 07:30:59, Driver exemption, and conf
     rawEvents: firstBatch.accepted,
     calendarDays: [{ cal_date: '2026-11-01', day_type: 'WEEKEND' }],
     existingReviews: [
-      { employee_no: 'ST 130116', work_date: '2026-11-04', final_code: 'CT', is_confirmed: true }
+      { employee_no: 'ST 130117', work_date: '2026-11-04', final_code: 'CT', is_confirmed: true }
     ]
   });
 
-  const staffSum = processed.summaries.find(s => s.employee_no === 'ST 130116');
+  const staffSum = processed.summaries.find(s => s.employee_no === 'ST 130117');
   const drvSum = processed.summaries.find(s => s.employee_no === 'KT 190403');
   const day2 = staffSum.days.find(d => d.work_date === '2026-11-02');
   const day3 = staffSum.days.find(d => d.work_date === '2026-11-03');
   const day4 = staffSum.days.find(d => d.work_date === '2026-11-04');
-  assert.equal(day2.code, 'M');
+  assert.equal(day2.code, 'H');
   assert.equal(day3.code, 'T');
   assert.equal(day4.code, 'CT');
   assert.equal(day4.is_confirmed, true);
@@ -237,7 +243,7 @@ test('Attendance deduplication, late cutoff 07:30:59, Driver exemption, and conf
 
   // Driver exempt from late flag T
   const drvDay3 = drvSum.days.find(d => d.work_date === '2026-11-03');
-  assert.equal(drvDay3.code, 'M');
+  assert.equal(drvDay3.code, 'H');
 });
 
 test('Employee Directory delta computes diff cleanly and Cuti gate respects threshold', () => {
@@ -298,10 +304,10 @@ test('General Staff Work Schedules, exact late/meal cutoffs (07:30:59 vs 07:31:0
   assert.equal(exRes.ruleSource, 'manual_exception');
   assert.equal(exRes.startTime, '06:30');
 
-  // Exact cutoffs for 07:30 schedule: 07:30:59 on-time, 07:31:00 late; 07:35:59 gets meal, 07:36:00 loses meal
+  // Exact cutoffs for 07:30 schedule: 07:30:59 on-time (H), 07:31:00 late (T); 07:35:59 gets meal, 07:36:00 loses meal
   const onTime = evaluateStaffArrivalStatus({ checkInTime: '07:30:59', scheduleStart: '07:30' });
   assert.equal(onTime.isLate, false);
-  assert.equal(onTime.code, 'M');
+  assert.equal(onTime.code, 'H');
   assert.equal(onTime.getsMealAllowance, true);
 
   const lateButMeal = evaluateStaffArrivalStatus({ checkInTime: '07:31:00', scheduleStart: '07:30' });
@@ -562,4 +568,106 @@ test('normalizeOpsSettings enforces immutable safety locks on negative stock and
   assert.equal(s.cuti.confirmationDaysThreshold, 45);
   assert.equal(s.driver.defaultDailyWage, 160000);
   assert.equal(DEFAULT_OPS_SETTINGS.driver.defaultMonthlyWage, 3675000);
+});
+
+test('Driver Support/Indoor/Outdoor have independent 3-column signatories (including DIKETAHUI)', () => {
+  const customSettings = normalizeOpsSettings({
+    driver: {
+      signatories: {
+        support: { rightName: 'KEPALA SUPPORT BARU', rightTitle: 'MGR SUPPORT' },
+        indoor: { rightName: 'KEPALA INDOOR BARU', rightTitle: 'KABAG INDOOR' },
+        outdoor: { rightName: 'KEPALA OUTDOOR BARU', rightTitle: 'KADEPT OUTDOOR' }
+      }
+    }
+  });
+
+  assert.equal(customSettings.driver.signatories.support.rightName, 'KEPALA SUPPORT BARU');
+  assert.equal(customSettings.driver.signatories.indoor.rightName, 'KEPALA INDOOR BARU');
+  assert.equal(customSettings.driver.signatories.outdoor.rightName, 'KEPALA OUTDOOR BARU');
+
+  const payroll = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: getEligibleDrivers(SEED_DRIVERS, customSettings),
+    schedules: [],
+    rawEvents: [],
+    settings: customSettings
+  });
+
+  const supHtml = buildDeptPdfSheetHtml('Support', payroll, customSettings);
+  const indHtml = buildDeptPdfSheetHtml('Indoor', payroll, customSettings);
+  const outHtml = buildDeptPdfSheetHtml('Outdoor', payroll, customSettings);
+
+  assert.ok(supHtml.includes('drv-pdf-footer-3'));
+  assert.ok(supHtml.includes('KEPALA SUPPORT BARU'));
+  assert.ok(!supHtml.includes('KEPALA INDOOR BARU'));
+  assert.ok(indHtml.includes('drv-pdf-footer-3'));
+  assert.ok(indHtml.includes('KEPALA INDOOR BARU'));
+  assert.ok(outHtml.includes('drv-pdf-footer-3'));
+  assert.ok(outHtml.includes('KEPALA OUTDOOR BARU'));
+});
+
+test('Staff PA (Pulang Awal) detection, 9-code Report Absensi totals, and Friday-Thursday Rp 10.000 Report Uang Makan', () => {
+  assert.deepEqual(STAFF_ATTENDANCE_CODE_ORDER, ['H', 'S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS']);
+  assert.deepEqual(DEFAULT_STAFF_REPORT_TOTAL_COLUMNS, ['S', 'I', 'A', 'T', 'PA', 'CT', 'L', 'DS']);
+
+  // Early departure >= 1 minute before schedule end -> PA
+  const paHit = evaluateStaffDepartureStatus({ checkOutTime: '16:59:00', scheduleEnd: '17:00' });
+  const paOk = evaluateStaffDepartureStatus({ checkOutTime: '16:59:30', scheduleEnd: '17:00' });
+  const satPa = evaluateStaffDepartureStatus({ checkOutTime: '11:58:00', scheduleEnd: '12:00' });
+  assert.equal(paHit.isEarlyLeave, true);
+  assert.equal(paOk.isEarlyLeave, false);
+  assert.equal(satPa.isEarlyLeave, true);
+
+  // Weekly meal period anchored on any day snaps to Friday -> Thursday
+  const mealWin = getWeeklyMealPeriodWindow('2026-11-10'); // Tuesday
+  assert.equal(mealWin.startDate, '2026-11-06'); // Friday
+  assert.equal(mealWin.endDate, '2026-11-12'); // Thursday
+  assert.equal(mealWin.dates.length, 7);
+
+  const ajis = SEED_STAFF_SAMPLES.find(e => e.employee_no === 'ST 130117'); // Pasuruan 07:30-17:00
+  const events = [
+    // 2026-11-06 Fri: on time + normal out -> H, gets Rp 10,000
+    { employee_no: 'ST 130117', work_date: '2026-11-06', check_in: '07:25:00', check_out: '17:05:00', source_type: 'mitra_transaksi' },
+    // 2026-11-07 Sat: late 07:35:59 (<6 min) + early out 11:50:00 -> T (prio T), gets Rp 10,000
+    { employee_no: 'ST 130117', work_date: '2026-11-07', check_in: '07:35:59', check_out: '11:50:00', source_type: 'mitra_transaksi' },
+    // 2026-11-09 Mon: on-time in + PA out 16:40:00 -> PA, gets Rp 10,000
+    { employee_no: 'ST 130117', work_date: '2026-11-09', check_in: '07:28:00', check_out: '16:40:00', source_type: 'mitra_transaksi' },
+    // 2026-11-10 Tue: late >= 6m 07:36:00 -> T, Rp 0 (no override)
+    { employee_no: 'ST 130117', work_date: '2026-11-10', check_in: '07:36:00', check_out: '17:00:00', source_type: 'mitra_transaksi' },
+    // 2026-11-11 Wed: late >= 6m 07:45:00 -> T, manual meal allow override -> Rp 10,000
+    { employee_no: 'ST 130117', work_date: '2026-11-11', check_in: '07:45:00', check_out: '17:00:00', source_type: 'mitra_transaksi' }
+  ];
+  const reviews = [
+    { employee_no: 'ST 130117', work_date: '2026-11-12', final_code: 'CT', is_confirmed: true }
+  ];
+  const mealOverrides = [
+    { employee_no: 'ST 130117', work_date: '2026-11-11', eligible: true, reason: 'Tugas luar pagi' }
+  ];
+
+  const attReport = processStaffAttendancePeriod({
+    periodKey: '2026-12', // 2026-11-06..2026-12-05 covers 2026-11-06..12
+    employees: [ajis],
+    rawEvents: events,
+    existingReviews: reviews,
+    mealOverrides
+  });
+  const sum = attReport.summaries[0];
+  assert.equal(sum.counts.H, 1);
+  assert.equal(sum.counts.T, 3);
+  assert.equal(sum.counts.PA, 1);
+  assert.equal(sum.counts.CT, 1);
+  assert.equal(sum.days.find(d => d.work_date === '2026-11-08').code, 'L'); // Sunday
+
+  const mealReport = processStaffMealAllowanceReport({
+    anchorDateIso: '2026-11-06',
+    employees: [ajis],
+    rawEvents: events,
+    existingReviews: reviews,
+    mealOverrides
+  });
+  assert.equal(mealReport.dailyAmount, 10000);
+  // Eligible days: Nov 6 (H on time), Nov 7 (<6m late), Nov 9 (PA on time arrival), Nov 11 (manual allow) = 4 days
+  assert.equal(mealReport.rows[0].totalEligibleDays, 4);
+  assert.equal(mealReport.rows[0].totalAmount, 40000);
 });

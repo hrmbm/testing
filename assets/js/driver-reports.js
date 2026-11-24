@@ -4,7 +4,7 @@ import {
   CHECKSHEET_TIME_SLOTS,
   getEligibleDrivers,
   calculateDriverPayrollPeriod
-} from './driver-logic.js?v=20261124-hrga-workspace-19';
+} from './driver-logic.js?v=20261124-hrga-workspace-20';
 
 function esc(v) {
   return String(v ?? '')
@@ -295,6 +295,48 @@ const STANDALONE_PRINT_CSS = `
   .cs-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
   .cs-sig-title { font-weight: 700; margin-top: 1px; }
 
+  .stf-pdf-sheet {
+    width: 297mm;
+    min-height: 210mm;
+    max-width: calc(100vw - 32px);
+    padding: 10mm 9mm;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(0,0,0,.38);
+    font-size: 9px;
+    line-height: 1.25;
+    color: #000000;
+  }
+  .stf-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+    color: #000000;
+  }
+  .stf-print-table th,
+  .stf-print-table td {
+    border: 1px solid #000000;
+    padding: 3px 3px;
+    text-align: center;
+    vertical-align: middle;
+    color: #000000;
+    background: #ffffff;
+  }
+  .stf-print-table th.l, .stf-print-table td.l { text-align: left; white-space: nowrap; padding: 3px 5px; }
+  .stf-print-table th.num, .stf-print-table td.num { text-align: right; white-space: nowrap; padding: 3px 5px; }
+  .stf-print-table thead th { font-weight: 700; background: #f8fafc; }
+  .stf-print-table tfoot th { font-weight: 700; background: #f8fafc; }
+  .stf-print-sun { background: #fef9c3 !important; }
+  .stf-print-hol { background: #fee2e2 !important; }
+  .stf-print-legend {
+    margin-top: 8px;
+    font-size: 8px;
+    color: #111827;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
   @page drvPortrait { size: A4 portrait; margin: 10mm 8mm; }
   @page drvLandscape { size: A4 landscape; margin: 7mm 7mm; }
   @media print {
@@ -324,7 +366,18 @@ const STANDALONE_PRINT_CSS = `
       page-break-after: always;
       break-after: page;
     }
-    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child {
+    .stf-pdf-sheet {
+      page: drvLandscape;
+      width: 100% !important;
+      min-height: 0 !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      page-break-after: always;
+      break-after: page;
+    }
+    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child, .stf-pdf-sheet:last-child {
       page-break-after: auto;
       break-after: auto;
     }
@@ -436,7 +489,7 @@ export function openDomPrintPreview({ title = 'Cetak Laporan', pagesHtml = '', l
   });
 }
 
-function renderTwoSignatoriesHtml(sig, locationLabel, printDateLabel) {
+export function renderTwoSignatoriesHtml(sig, locationLabel, printDateLabel) {
   return `
     <div class="drv-pdf-footer">
       <div class="drv-pdf-sig-col">
@@ -457,7 +510,7 @@ function renderTwoSignatoriesHtml(sig, locationLabel, printDateLabel) {
   `;
 }
 
-function renderThreeSignatoriesHtml(sig, locationLabel, printDateLabel) {
+export function renderThreeSignatoriesHtml(sig, locationLabel, printDateLabel) {
   return `
     <div class="drv-pdf-footer drv-pdf-footer-3">
       <div class="drv-pdf-sig-col">
@@ -636,10 +689,12 @@ function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } =
   `;
 }
 
-function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
+export function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
   const drvCfg = settings.driver;
   const win = payroll.window;
-  const isRadin = sectionName.toUpperCase() === 'RADIN';
+  const key = String(sectionName || '').trim().toLowerCase();
+  const sigKey = ['support', 'indoor', 'outdoor', 'radin'].includes(key) ? key : 'support';
+  const sectionSig = drvCfg.signatories?.[sigKey] || drvCfg.signatories?.department || drvCfg.signatories?.radin;
   return `
     <div class="drv-pdf-sheet pkwt-print-sheet">
       <div class="drv-pdf-header">
@@ -649,9 +704,7 @@ function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(win.headerLabel)}</div>
       </div>
       ${buildDeptTableHtml(sectionName, payroll, { includeFillerRows: true })}
-      ${isRadin
-        ? renderThreeSignatoriesHtml(drvCfg.signatories.radin, drvCfg.reportLocationLabel, win.printDateLabel)
-        : renderTwoSignatoriesHtml(drvCfg.signatories.department, drvCfg.reportLocationLabel, win.printDateLabel)}
+      ${renderThreeSignatoriesHtml(sectionSig, drvCfg.reportLocationLabel, win.printDateLabel)}
     </div>
   `;
 }

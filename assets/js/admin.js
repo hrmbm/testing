@@ -1,8 +1,8 @@
-import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-19';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-19';
-import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-19';
-import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-19';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-19';
+import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-20';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-20';
+import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-20';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-20';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-20';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -46,7 +46,7 @@ import {
   getMemoizedDiscResult,
   paginateRows,
   preserveCaretCurrencyValue
-} from './workspace-logic.js?v=20261124-hrga-workspace-19';
+} from './workspace-logic.js?v=20261124-hrga-workspace-20';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -58,7 +58,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261124-hrga-workspace-19';
+} from './admin-modals.js?v=20261124-hrga-workspace-20';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -69,7 +69,7 @@ import {
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261124-hrga-workspace-19';
+} from './contract-logic.js?v=20261124-hrga-workspace-20';
 import {
   DISTRICTS_BY_CITY,
   APPLY_INFO_SOURCES,
@@ -85,7 +85,7 @@ import {
   normalizeDistrictToken,
   calculateVacancyMaxScore,
   buildShareUrl
-} from './vacancy-logic.js?v=20261124-hrga-workspace-19';
+} from './vacancy-logic.js?v=20261124-hrga-workspace-20';
 import {
   APPLY_CUSTOM_FIELD_TYPES,
   FORM_CUSTOM_FIELD_TYPES,
@@ -98,8 +98,8 @@ import {
   STAGE2_SECTION_META,
   normalizeApplySchema,
   normalizeStage2Schema
-} from './form-schema.js?v=20261124-hrga-workspace-19';
-import { SEED_EMPLOYEES } from './ops-seed-data.js?v=20261124-hrga-workspace-19';
+} from './form-schema.js?v=20261124-hrga-workspace-20';
+import { SEED_EMPLOYEES } from './ops-seed-data.js?v=20261124-hrga-workspace-20';
 
 const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -137,17 +137,17 @@ function writeSavedContractSettings(settings = {}) {
 }
 
 let printModPromise = null;
-const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261124-hrga-workspace-19'));
+const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261124-hrga-workspace-20'));
 
 let applicantModPromise = null;
-const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261124-hrga-workspace-19'));
+const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261124-hrga-workspace-20'));
 
 let contractModalPromise = null;
-const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261124-hrga-workspace-19'));
+const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261124-hrga-workspace-20'));
 
 let opsViewsPromise = null;
 let opsViewsModuleRef = null;
-const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261124-hrga-workspace-19').then(mod => {
+const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261124-hrga-workspace-20').then(mod => {
   opsViewsModuleRef = mod;
   return mod;
 }));
