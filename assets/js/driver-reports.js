@@ -1,5 +1,5 @@
 // Driver Payroll Reports (Summary, Support, Indoor, Outdoor, Radin), Manual Kurang Gaji Input,
-// PDF-faithful Landscape 2-up Time Checksheet, Audit Perhitungan, and Multi-Path Print Engine
+// Time Check Sheet, Audit, and Cetak-Lamaran-style Standalone Print Window
 import {
   CHECKSHEET_TIME_SLOTS,
   getEligibleDrivers,
@@ -38,91 +38,303 @@ function fmtFixed1(val) {
 
 const STANDALONE_PRINT_CSS = `
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  html, body { margin: 0; padding: 0; background: #e2e8f0; color: #111827; font-family: Arial, Helvetica, sans-serif; }
-  .drv-print-toolbar {
-    position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 10px 20px; background: #0f172a; color: #f8fafc;
-    font-family: 'Plus Jakarta Sans', Arial, sans-serif; border-bottom: 1px solid rgba(255,255,255,0.14);
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #1e293b;
+    color: #000000;
+    font-family: Arial, Helvetica, sans-serif;
   }
-  .drv-print-toolbar-title { font-size: 13px; font-weight: 600; }
-  .drv-print-toolbar-actions { display: flex; gap: 8px; }
-  .drv-print-toolbar button {
-    border: 1px solid rgba(255,255,255,0.24); border-radius: 7px; padding: 7px 14px;
-    font: 600 12.5px inherit; cursor: pointer; background: rgba(255,255,255,0.08); color: #fff;
+  .print-app-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 22px;
+    background: #0f172a;
+    color: #f8fafc;
+    border-bottom: 1px solid rgba(255,255,255,.14);
+    font-family: 'Plus Jakarta Sans', Arial, sans-serif;
   }
-  .drv-print-toolbar button.primary { background: #0d5c6b; border-color: #0d5c6b; }
+  .print-app-toolbar-title { font-size: 13px; font-weight: 600; }
+  .print-app-toolbar-actions { display: flex; gap: 8px; }
+  .print-app-toolbar button {
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 7px;
+    padding: 7px 14px;
+    font: 600 12.5px inherit;
+    cursor: pointer;
+    background: rgba(255,255,255,.08);
+    color: #fff;
+  }
+  .print-app-toolbar button.primary { background: #0d5c6b; border-color: #0d5c6b; }
   .drv-print-canvas {
-    padding: 18px 16px 36px; display: flex; flex-direction: column; align-items: center; gap: 18px;
+    padding: 20px 16px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
   }
   .drv-pdf-sheet {
-    width: 194mm; max-width: 100%; padding: 14px 16px; background: #ffffff;
-    box-shadow: 0 8px 24px rgba(15,23,42,0.14); font-size: 10px; line-height: 1.3;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: calc(100vw - 32px);
+    padding: 14mm 10mm;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(0,0,0,.38);
+    font-size: 9.5px;
+    line-height: 1.28;
+    color: #000000;
   }
-  .drv-pdf-header { font-weight: 700; font-size: 10.5px; text-transform: uppercase; margin-bottom: 10px; line-height: 1.45; }
-  .drv-pdf-table { width: 100%; border-collapse: collapse; font-size: 9.5px; font-variant-numeric: tabular-nums; }
-  .drv-pdf-table th, .drv-pdf-table td { border: 1px solid #111827; padding: 4px 5px; vertical-align: middle; color: #111827; }
-  .drv-pdf-table thead th { background: #f1f5f9; font-weight: 700; text-align: center; line-height: 1.25; }
-  .drv-pdf-table tfoot th { background: #f8fafc; font-weight: 700; }
+  .drv-pdf-header {
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    line-height: 1.4;
+    color: #000000;
+  }
+  .drv-pdf-header-line {
+    display: flex;
+    align-items: baseline;
+  }
+  .drv-pdf-header-lbl {
+    display: inline-block;
+    width: 96px;
+  }
+  .drv-pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    color: #000000;
+  }
+  .drv-pdf-table th,
+  .drv-pdf-table td {
+    border: 1px solid #000000;
+    padding: 4px 5px;
+    vertical-align: middle;
+    color: #000000;
+    background: #ffffff;
+  }
+  .drv-pdf-table thead th {
+    background: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.22;
+  }
+  .drv-pdf-table tfoot th {
+    background: #ffffff;
+    font-weight: 700;
+  }
   .drv-pdf-table td.c, .drv-pdf-table th.c { text-align: center; }
   .drv-pdf-table td.nowrap { white-space: nowrap; }
   .drv-pdf-table td.num, .drv-pdf-table th.num { text-align: right; white-space: nowrap; }
-  .drv-rp-val, .drv-rp-zero { display: flex; justify-content: space-between; gap: 6px; width: 100%; white-space: nowrap; }
-  .drv-rp-val.is-bold { font-weight: 700; }
-  .drv-rp-zero { color: #4b5563; }
-  .drv-empty-row td { height: 21px; }
-  .drv-pdf-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 22px; font-size: 10px; }
-  .drv-pdf-footer-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .drv-pdf-sig-col { display: flex; flex-direction: column; }
-  .drv-pdf-sig-right { text-align: right; align-items: flex-end; }
-  .drv-pdf-sig-center { text-align: center; align-items: center; }
-  .drv-pdf-loc { margin-bottom: 2px; }
-  .drv-pdf-sig-space { height: 48px; }
-  .drv-pdf-sig-name { font-weight: 700; text-decoration: underline; }
-  .drv-pdf-sig-title { font-weight: 600; }
-  .cs-landscape-page {
-    width: 280mm; max-width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-    padding: 10px; background: #ffffff; box-shadow: 0 8px 24px rgba(15,23,42,0.14);
+  .drv-rp-val, .drv-rp-zero {
+    display: flex;
+    justify-content: space-between;
+    gap: 5px;
+    width: 100%;
+    white-space: nowrap;
   }
-  .cs-sheet-box { border: 1px solid #cbd5e1; padding: 10px; background: #ffffff; color: #111827; font-size: 9.5px; }
+  .drv-rp-val.is-bold { font-weight: 700; }
+  .drv-rp-zero { color: #000000; }
+  .drv-empty-row td { height: 21px; }
+  .drv-pdf-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 26px;
+    font-size: 9.5px;
+    color: #000000;
+  }
+  .drv-pdf-footer-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .drv-pdf-sig-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .drv-pdf-sig-right {
+    align-items: center;
+    text-align: center;
+    min-width: 140px;
+  }
+  .drv-pdf-sig-center {
+    align-items: center;
+    text-align: center;
+  }
+  .drv-pdf-loc { margin-bottom: 2px; }
+  .drv-pdf-sig-role { font-weight: 400; }
+  .drv-pdf-sig-space { height: 50px; }
+  .drv-pdf-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+  .drv-pdf-sig-title { font-weight: 400; margin-top: 1px; }
+
+  .cs-landscape-page {
+    width: 297mm;
+    min-height: 210mm;
+    max-width: calc(100vw - 32px);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8mm;
+    padding: 8mm 8mm;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(0,0,0,.38);
+    align-items: start;
+  }
+  .cs-sheet-box {
+    border: 1px solid #333333;
+    padding: 4mm 4mm 5mm;
+    background: #ffffff;
+    color: #000000;
+    font-size: 8.5px;
+  }
   .cs-sheet-empty { border: 0; background: transparent; }
-  .cs-sheet-title { text-align: center; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; margin-bottom: 7px; }
-  .cs-sheet-meta { font-size: 10px; margin-bottom: 7px; line-height: 1.4; }
-  .cs-sheet-meta div span { display: inline-block; width: 78px; font-weight: 700; }
-  .cs-grid-table { width: 100%; border-collapse: collapse; font-size: 9px; font-variant-numeric: tabular-nums; }
-  .cs-grid-table th, .cs-grid-table td { border: 1px solid #111827; padding: 2px 3px; text-align: center; height: 17px; color: #111827; }
-  .cs-th-waktu { width: 92px; }
-  .cs-th-day { min-width: 16px; font-weight: 700; }
-  .cs-th-total { width: 32px; }
-  .cs-waktu { text-align: left !important; white-space: nowrap; padding-left: 4px !important; font-weight: 600; }
-  .cs-cell { font-weight: 700; }
-  .cs-vlabel { width: 22px; font-size: 7.5px; font-weight: 700; line-height: 1.15; background: #f8fafc; }
-  .cs-sec-label { text-align: left !important; font-weight: 700; padding-left: 4px !important; width: 58px; background: #f8fafc; }
-  .cs-tot-col { background: #f8fafc; }
-  .cs-col-sun { background: #fde047 !important; }
+  .cs-sheet-title {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+  }
+  .cs-sheet-meta {
+    font-size: 8.5px;
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+  .cs-sheet-meta div span {
+    display: inline-block;
+    width: 72px;
+    font-weight: 700;
+  }
+  .cs-grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+    color: #000000;
+  }
+  .cs-grid-table th,
+  .cs-grid-table td {
+    border: 1px solid #000000;
+    padding: 1.5px 2px;
+    text-align: center;
+    height: 16px;
+    color: #000000;
+    background: #ffffff;
+  }
+  .cs-th-waktu { width: 88px; font-weight: 700; }
+  .cs-th-day { min-width: 15px; font-weight: 700; background: #ffffff !important; }
+  .cs-th-total { width: 28px; font-weight: 700; }
+  .cs-waktu {
+    text-align: center !important;
+    white-space: nowrap;
+    font-weight: 400;
+    background: #ffffff;
+  }
+  .cs-cell { font-weight: 400; }
+  .cs-vlabel {
+    width: 24px;
+    padding: 2px 1px !important;
+    background: #ffffff;
+    vertical-align: middle;
+  }
+  .cs-vlabel span {
+    display: inline-block;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 7px;
+    font-weight: 700;
+    line-height: 1.1;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .cs-sec-label {
+    text-align: center !important;
+    font-weight: 400;
+    width: 50px;
+    font-size: 7.5px;
+    background: #ffffff;
+  }
+  .cs-tot-col { background: #ffffff; font-weight: 400; }
+  .cs-col-sun { background: #ffff00 !important; }
   .cs-col-hol { background: #fca5a5 !important; }
-  .cs-note-row { margin-top: 6px; font-size: 9px; line-height: 1.45; }
-  .cs-note-grid { display: inline-grid; grid-template-columns: auto auto; column-gap: 18px; row-gap: 2px; vertical-align: top; }
-  .cs-sig-row { display: flex; justify-content: space-between; margin-top: 10px; font-size: 9px; }
+  .cs-note-row {
+    margin-top: 6px;
+    font-size: 8px;
+    line-height: 1.45;
+  }
+  .cs-note-row > b {
+    display: inline-block;
+    width: 44px;
+    vertical-align: top;
+  }
+  .cs-note-grid {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    column-gap: 24px;
+    row-gap: 2px;
+    vertical-align: top;
+  }
+  .cs-sig-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 12px;
+    font-size: 8.5px;
+  }
   .cs-sig-block { min-width: 120px; }
-  .cs-sig-right { text-align: right; }
+  .cs-sig-right { text-align: center; }
   .cs-sig-gap { height: 34px; }
-  .cs-sig-name { font-weight: 700; text-decoration: underline; }
-  @page drvPortrait { size: A4 portrait; margin: 9mm 8mm; }
-  @page drvLandscape { size: A4 landscape; margin: 7mm 8mm; }
+  .cs-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+  .cs-sig-title { font-weight: 700; margin-top: 1px; }
+
+  @page drvPortrait { size: A4 portrait; margin: 10mm 8mm; }
+  @page drvLandscape { size: A4 landscape; margin: 7mm 7mm; }
   @media print {
     html, body { background: #ffffff !important; height: auto !important; overflow: visible !important; }
-    .drv-print-toolbar { display: none !important; }
+    .print-app-toolbar { display: none !important; }
     .drv-print-canvas { padding: 0 !important; gap: 0 !important; display: block !important; }
-    .drv-pdf-sheet { page: drvPortrait; width: 100% !important; max-width: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; page-break-after: always; break-after: page; }
-    .cs-landscape-page { page: drvLandscape; width: 100% !important; max-width: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; page-break-after: always; break-after: page; }
-    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child { page-break-after: auto; break-after: auto; }
+    .drv-pdf-sheet {
+      page: drvPortrait;
+      width: 100% !important;
+      min-height: 0 !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      page-break-after: always;
+      break-after: page;
+    }
+    .cs-landscape-page {
+      page: drvLandscape;
+      width: 100% !important;
+      min-height: 0 !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      gap: 6mm !important;
+      page-break-after: always;
+      break-after: page;
+    }
+    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
   }
 `;
 
 export function buildStandalonePrintHtml({ title = 'Cetak Laporan', pagesHtml = '', landscape = false, mixed = false }) {
   const defaultPageRule = mixed
     ? ''
-    : `@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '7mm 8mm' : '9mm 8mm'}; }`;
+    : `@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '7mm 7mm' : '10mm 8mm'}; }`;
   return `<!doctype html>
 <html lang="id">
 <head>
@@ -131,20 +343,28 @@ export function buildStandalonePrintHtml({ title = 'Cetak Laporan', pagesHtml = 
   <style>${STANDALONE_PRINT_CSS}\n${defaultPageRule}</style>
 </head>
 <body>
-  <div class="drv-print-toolbar">
-    <span class="drv-print-toolbar-title">${esc(title)}</span>
-    <div class="drv-print-toolbar-actions">
-      <button type="button" onclick="window.close()">Tutup</button>
-      <button type="button" class="primary" onclick="window.print()">Cetak / Simpan PDF</button>
+  <div class="print-app-toolbar">
+    <span class="print-app-toolbar-title">${esc(title)}</span>
+    <div class="print-app-toolbar-actions">
+      <button type="button" onclick="window.close()">Close</button>
+      <button type="button" class="primary" onclick="window.print()">Print / Save PDF ↗</button>
     </div>
   </div>
   <main class="drv-print-canvas">${pagesHtml}</main>
   <script>
     (function () {
-      requestAnimationFrame(function () {
-        setTimeout(function () {
-          try { window.print(); } catch (_) {}
-        }, 120);
+      var fontWait = (document.fonts && document.fonts.ready)
+        ? document.fonts.ready.catch(function () {})
+        : Promise.resolve();
+      Promise.race([
+        fontWait,
+        new Promise(function (resolve) { setTimeout(resolve, 200); })
+      ]).then(function () {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            try { window.print(); } catch (_) {}
+          });
+        });
       });
     })();
   </script>
@@ -152,7 +372,32 @@ export function buildStandalonePrintHtml({ title = 'Cetak Laporan', pagesHtml = 
 </html>`;
 }
 
-function triggerStagePrint({ pagesHtml, landscape = false, mixed = false }) {
+// Replicates Cetak Lamaran (printApplication) & Tracking Report (printTrackingReport):
+// Opens clean standalone print tab directly with sticky Print/Save PDF toolbar and auto-print,
+// falling back to #pkwt-print-stage if browser popup blocker blocks window.open.
+export function openDomPrintPreview({ title = 'Cetak Laporan', pagesHtml = '', landscape = false, mixed = false }) {
+  const fullHtml = buildStandalonePrintHtml({ title, pagesHtml, landscape, mixed });
+  let tab = null;
+  try {
+    tab = window.open('', '_blank');
+  } catch {
+    tab = null;
+  }
+
+  if (tab && !tab.closed) {
+    try {
+      tab.document.open();
+      tab.document.write(fullHtml);
+      tab.document.close();
+      tab.document.title = title;
+      try { tab.focus(); } catch {}
+      return;
+    } catch {
+      try { tab.close(); } catch {}
+    }
+  }
+
+  // Fallback to in-page #pkwt-print-stage if popup was blocked
   let stage = document.getElementById('pkwt-print-stage');
   if (!stage) {
     stage = document.createElement('div');
@@ -167,107 +412,27 @@ function triggerStagePrint({ pagesHtml, landscape = false, mixed = false }) {
   }
   pageRule.textContent = mixed
     ? `@media print {
-        @page drvPortrait { size: A4 portrait; margin: 9mm 8mm; }
-        @page drvLandscape { size: A4 landscape; margin: 7mm 8mm; }
+        @page drvPortrait { size: A4 portrait; margin: 10mm 8mm; }
+        @page drvLandscape { size: A4 landscape; margin: 7mm 7mm; }
         #pkwt-print-stage .drv-pdf-sheet { page: drvPortrait; }
         #pkwt-print-stage .cs-landscape-page { page: drvLandscape; }
       }`
-    : `@media print { @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '7mm 8mm' : '9mm 8mm'}; } }`;
+    : `@media print { @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '7mm 7mm' : '10mm 8mm'}; } }`;
 
   stage.innerHTML = pagesHtml;
   document.body.classList.add('pkwt-printing');
 
-  let cleaned = false;
-  let fallbackTimer = null;
   const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    if (fallbackTimer) clearTimeout(fallbackTimer);
     document.body.classList.remove('pkwt-printing');
     stage.innerHTML = '';
     if (pageRule) pageRule.textContent = '';
   };
-
   window.addEventListener('afterprint', cleanup, { once: true });
-
-  return new Promise(resolve => {
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const t0 = performance.now();
-        try {
-          window.print();
-        } catch (_) {}
-        const elapsed = performance.now() - t0;
-        fallbackTimer = setTimeout(cleanup, 30000);
-        // If Chrome iframe sandbox blocks window.print(), it returns synchronously in < 35ms
-        resolve({ possiblyBlockedInIframe: elapsed < 35 && window.self !== window.top });
-      }, 60);
-    });
-  });
-}
-
-export function openDomPrintPreview({ title = 'Cetak Laporan', pagesHtml = '', landscape = false, mixed = false }) {
-  const old = document.getElementById('ops-print-modal');
-  if (old) old.remove();
-
-  const standaloneHtml = buildStandalonePrintHtml({ title, pagesHtml, landscape, mixed });
-  const blob = new Blob([standaloneHtml], { type: 'text/html;charset=utf-8' });
-  const blobUrl = URL.createObjectURL(blob);
-  const safeFileBase = String(title || 'laporan-driver').replace(/[^a-z0-9\-_]+/gi, '_').replace(/^_+|_+$/g, '');
-
-  let inIframe = false;
-  try { inIframe = window.self !== window.top; } catch { inIframe = true; }
-
-  const orientationLabel = mixed ? 'A4 PORTRAIT & LANDSCAPE' : (landscape ? 'A4 LANDSCAPE' : 'A4 PORTRAIT');
-  const modal = document.createElement('div');
-  modal.id = 'ops-print-modal';
-  modal.className = 'modal-backdrop ops-print-modal-backdrop';
-  modal.innerHTML = `
-    <div class="ops-print-modal-card" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <div class="ops-print-modal-head">
-        <div>
-          <small>PRINT PREVIEW (${orientationLabel})</small>
-          <h3>${esc(title)}</h3>
-        </div>
-        <div class="ops-actions">
-          <a href="${blobUrl}" download="${esc(safeFileBase)}.html" class="btn btn-secondary" id="ops-print-download">Unduh File Cetak</a>
-          <a href="${blobUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" id="ops-print-newtab">Buka Tab Cetak</a>
-          <button type="button" class="btn btn-primary" id="ops-print-trigger">Cetak / Simpan PDF</button>
-          <button type="button" class="btn btn-secondary" id="ops-print-close">Tutup</button>
-        </div>
-      </div>
-      <div id="ops-print-hint" class="ops-print-hint ${inIframe ? '' : 'hidden'}">
-        Jika dialog cetak tidak muncul di dalam bingkai pratinjau, gunakan <b>Buka Tab Cetak</b> atau <b>Unduh File Cetak</b> lalu tekan Print / Simpan PDF.
-      </div>
-      <div class="ops-print-modal-body ${landscape ? 'is-landscape' : 'is-portrait'}">
-        <div class="ops-print-preview-canvas">${pagesHtml}</div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  const close = () => {
-    URL.revokeObjectURL(blobUrl);
-    modal.remove();
-  };
-  modal.querySelector('#ops-print-close')?.addEventListener('click', close);
-  modal.addEventListener('click', e => {
-    if (e.target === modal) close();
-  });
-
-  modal.querySelector('#ops-print-trigger')?.addEventListener('click', async () => {
-    const newTabLink = modal.querySelector('#ops-print-newtab');
-    const hintBox = modal.querySelector('#ops-print-hint');
-    if (inIframe && newTabLink) {
-      // Open standalone print tab first via user-gesture anchor so browser outside iframe prints cleanly
-      newTabLink.click();
-      return;
-    }
-    const res = await triggerStagePrint({ pagesHtml, landscape, mixed });
-    if (res?.possiblyBlockedInIframe && hintBox) {
-      hintBox.classList.remove('hidden');
-      hintBox.innerHTML = 'Dialog cetak diblokir oleh sandbox iframe browser. Klik <b>Buka Tab Cetak</b> atau <b>Unduh File Cetak</b> di atas untuk mencetak / menyimpan PDF.';
-    }
+  setTimeout(cleanup, 12000);
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try { window.print(); } catch {}
+    }, 60);
   });
 }
 
@@ -320,12 +485,11 @@ function renderThreeSignatoriesHtml(sig, locationLabel, printDateLabel) {
   `;
 }
 
-function buildSummaryPdfSheetHtml(payroll, settings) {
-  const drvCfg = settings.driver;
+function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
   const win = payroll.window;
   const rows = payroll.summaryRows;
-  const minRows = Math.max(rows.length, 7);
-  const fillerCount = minRows - rows.length;
+  const minRows = includeFillerRows ? Math.max(rows.length, 7) : rows.length;
+  const fillerCount = Math.max(0, minRows - rows.length);
   const tot = payroll.summaryTotals;
 
   const bodyRows = rows.map((r, idx) => `
@@ -341,7 +505,7 @@ function buildSummaryPdfSheetHtml(payroll, settings) {
       <td class="num">${fmtRpCell(r.priorShortfall)}</td>
       <td class="num">${fmtRpCell(r.grossPay)}</td>
       <td class="num">${fmtRpCell(r.bpjsDeduction)}</td>
-      <td class="num">${fmtRpCell(r.netPay, true)}</td>
+      <td class="num">${fmtRpCell(r.netPay)}</td>
     </tr>
   `).join('') + Array.from({ length: fillerCount }, () => `
     <tr class="drv-empty-row">
@@ -350,65 +514,71 @@ function buildSummaryPdfSheetHtml(payroll, settings) {
   `).join('');
 
   return `
+    <table class="drv-pdf-table drv-pdf-table-summary">
+      <thead>
+        <tr>
+          <th rowspan="3" style="width:26px">NO</th>
+          <th rowspan="3">NAMA</th>
+          <th rowspan="3" style="width:72px">NIK</th>
+          <th rowspan="3" style="width:84px">UPAH PER<br>BULAN</th>
+          <th colspan="4">${esc(win.headerLabel)}</th>
+          <th rowspan="3" style="width:74px">KURANG<br>GAJI</th>
+          <th rowspan="3" style="width:82px">UPAH BRUTO</th>
+          <th rowspan="3" style="width:80px">JUMLAH<br>POT. BPJS</th>
+          <th rowspan="3" style="width:82px">UPAH NETTO</th>
+        </tr>
+        <tr>
+          <th colspan="2">TOTAL</th>
+          <th colspan="2">TOTAL UPAH</th>
+        </tr>
+        <tr>
+          <th style="width:44px">HADIR</th>
+          <th style="width:50px">LEMBUR</th>
+          <th style="width:74px">HADIR (RP)</th>
+          <th style="width:74px">LEMBUR</th>
+        </tr>
+      </thead>
+      <tbody>${bodyRows}</tbody>
+      <tfoot>
+        <tr>
+          <th colspan="4" class="c">TOTAL</th>
+          <th class="c">${fmtFixed1(tot.presentDays)}</th>
+          <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
+          <th class="num">${fmtRpCell(tot.normalPay, true)}</th>
+          <th class="num">${fmtRpCell(tot.overtimePay, true)}</th>
+          <th class="num">${fmtRpCell(tot.priorShortfall, true)}</th>
+          <th class="num">${fmtRpCell(tot.grossPay, true)}</th>
+          <th class="num">${fmtRpCell(tot.bpjsDeduction, true)}</th>
+          <th class="num">${fmtRpCell(tot.netPay, true)}</th>
+        </tr>
+      </tfoot>
+    </table>
+  `;
+}
+
+function buildSummaryPdfSheetHtml(payroll, settings) {
+  const drvCfg = settings.driver;
+  const win = payroll.window;
+  return `
     <div class="drv-pdf-sheet pkwt-print-sheet">
       <div class="drv-pdf-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
         <div>LAPORAN GAJI DRIVER</div>
         <div>SUMMARY</div>
-        <div>PERIODE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : ${esc(win.headerLabel)}</div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(win.headerLabel)}</div>
       </div>
-      <table class="drv-pdf-table drv-pdf-table-summary">
-        <thead>
-          <tr>
-            <th rowspan="3" style="width:26px">NO</th>
-            <th rowspan="3">NAMA</th>
-            <th rowspan="3" style="width:72px">NIK</th>
-            <th rowspan="3" style="width:86px">UPAH PER<br>BULAN</th>
-            <th colspan="4">${esc(win.headerLabel)}</th>
-            <th rowspan="3" style="width:78px">KURANG<br>GAJI</th>
-            <th rowspan="3" style="width:84px">UPAH BRUTO</th>
-            <th rowspan="3" style="width:82px">JUMLAH<br>POT. BPJS</th>
-            <th rowspan="3" style="width:86px">UPAH NETTO</th>
-          </tr>
-          <tr>
-            <th colspan="2">TOTAL</th>
-            <th colspan="2">TOTAL UPAH</th>
-          </tr>
-          <tr>
-            <th style="width:46px">HADIR</th>
-            <th style="width:52px">LEMBUR</th>
-            <th style="width:78px">HADIR (RP)</th>
-            <th style="width:78px">LEMBUR</th>
-          </tr>
-        </thead>
-        <tbody>${bodyRows}</tbody>
-        <tfoot>
-          <tr>
-            <th colspan="4" class="c">TOTAL</th>
-            <th class="c">${fmtFixed1(tot.presentDays)}</th>
-            <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
-            <th class="num">${fmtRpCell(tot.normalPay)}</th>
-            <th class="num">${fmtRpCell(tot.overtimePay)}</th>
-            <th class="num">${fmtRpCell(tot.priorShortfall)}</th>
-            <th class="num">${fmtRpCell(tot.grossPay)}</th>
-            <th class="num">${fmtRpCell(tot.bpjsDeduction)}</th>
-            <th class="num">${fmtRpCell(tot.netPay, true)}</th>
-          </tr>
-        </tfoot>
-      </table>
+      ${buildSummaryTableHtml(payroll, { includeFillerRows: true })}
       ${renderTwoSignatoriesHtml(drvCfg.signatories.summary, drvCfg.reportLocationLabel, win.printDateLabel)}
     </div>
   `;
 }
 
-function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
-  const drvCfg = settings.driver;
+function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } = {}) {
   const win = payroll.window;
   const rows = payroll.deptTables[sectionName] || [];
   const tot = payroll.deptTotals[sectionName] || { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, priorShortfall: 0, grossPay: 0 };
-  const isRadin = sectionName.toUpperCase() === 'RADIN';
-  const minRows = Math.max(rows.length, 6);
-  const fillerCount = minRows - rows.length;
+  const minRows = includeFillerRows ? Math.max(rows.length, 6) : Math.max(rows.length, 1);
+  const fillerCount = Math.max(0, minRows - rows.length);
 
   const bodyRows = rows.map((r, idx) => `
     <tr>
@@ -420,7 +590,7 @@ function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
       <td class="num">${fmtRpCell(r.normalPay)}</td>
       <td class="num">${fmtRpCell(r.overtimePay)}</td>
       <td class="num">${fmtRpCell(r.priorShortfall)}</td>
-      <td class="num">${fmtRpCell(r.grossPay, true)}</td>
+      <td class="num">${fmtRpCell(r.grossPay)}</td>
     </tr>
   `).join('') + Array.from({ length: fillerCount }, () => `
     <tr class="drv-empty-row">
@@ -429,47 +599,56 @@ function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
   `).join('');
 
   return `
+    <table class="drv-pdf-table drv-pdf-table-dept">
+      <thead>
+        <tr>
+          <th rowspan="3" style="width:28px">NO</th>
+          <th rowspan="3">NAMA</th>
+          <th rowspan="3" style="width:80px">NIK</th>
+          <th colspan="4">${esc(win.headerLabel)}</th>
+          <th rowspan="3" style="width:88px">KURANG<br>GAJI</th>
+          <th rowspan="3" style="width:94px">UPAH BRUTO</th>
+        </tr>
+        <tr>
+          <th colspan="2">TOTAL</th>
+          <th colspan="2">TOTAL UPAH</th>
+        </tr>
+        <tr>
+          <th style="width:54px">HADIR</th>
+          <th style="width:60px">LEMBUR</th>
+          <th style="width:88px">HADIR (RP)</th>
+          <th style="width:88px">LEMBUR (RP)</th>
+        </tr>
+      </thead>
+      <tbody>${bodyRows}</tbody>
+      <tfoot>
+        <tr>
+          <th colspan="3" class="c">TOTAL</th>
+          <th class="c">${fmtFixed1(tot.presentDays)}</th>
+          <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
+          <th class="num">${fmtRpCell(tot.normalPay, true)}</th>
+          <th class="num">${fmtRpCell(tot.overtimePay, true)}</th>
+          <th class="num">${fmtRpCell(tot.priorShortfall, true)}</th>
+          <th class="num">${fmtRpCell(tot.grossPay, true)}</th>
+        </tr>
+      </tfoot>
+    </table>
+  `;
+}
+
+function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
+  const drvCfg = settings.driver;
+  const win = payroll.window;
+  const isRadin = sectionName.toUpperCase() === 'RADIN';
+  return `
     <div class="drv-pdf-sheet pkwt-print-sheet">
       <div class="drv-pdf-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
         <div>LAPORAN GAJI DRIVER</div>
         <div>${esc(sectionName.toUpperCase())}</div>
-        <div>PERIODE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : ${esc(win.headerLabel)}</div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(win.headerLabel)}</div>
       </div>
-      <table class="drv-pdf-table drv-pdf-table-dept">
-        <thead>
-          <tr>
-            <th rowspan="3" style="width:28px">NO</th>
-            <th rowspan="3">NAMA</th>
-            <th rowspan="3" style="width:80px">NIK</th>
-            <th colspan="4">${esc(win.headerLabel)}</th>
-            <th rowspan="3" style="width:90px">KURANG<br>GAJI</th>
-            <th rowspan="3" style="width:98px">UPAH BRUTO</th>
-          </tr>
-          <tr>
-            <th colspan="2">TOTAL</th>
-            <th colspan="2">TOTAL UPAH</th>
-          </tr>
-          <tr>
-            <th style="width:56px">HADIR</th>
-            <th style="width:62px">LEMBUR</th>
-            <th style="width:90px">HADIR (RP)</th>
-            <th style="width:90px">LEMBUR (RP)</th>
-          </tr>
-        </thead>
-        <tbody>${bodyRows}</tbody>
-        <tfoot>
-          <tr>
-            <th colspan="3" class="c">TOTAL</th>
-            <th class="c">${fmtFixed1(tot.presentDays)}</th>
-            <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
-            <th class="num">${fmtRpCell(tot.normalPay)}</th>
-            <th class="num">${fmtRpCell(tot.overtimePay)}</th>
-            <th class="num">${fmtRpCell(tot.priorShortfall)}</th>
-            <th class="num">${fmtRpCell(tot.grossPay, true)}</th>
-          </tr>
-        </tfoot>
-      </table>
+      ${buildDeptTableHtml(sectionName, payroll, { includeFillerRows: true })}
       ${isRadin
         ? renderThreeSignatoriesHtml(drvCfg.signatories.radin, drvCfg.reportLocationLabel, win.printDateLabel)
         : renderTwoSignatoriesHtml(drvCfg.signatories.department, drvCfg.reportLocationLabel, win.printDateLabel)}
@@ -477,7 +656,7 @@ function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
   `;
 }
 
-function buildSingleChecksheetCardHtml(cs, settings) {
+function buildSingleChecksheetCardHtml(cs, settings, { forPrint = true } = {}) {
   const sig = settings.driver.signatories.checksheet;
   const colClass = mark => (mark === 'yellow' ? 'cs-col-sun' : (mark === 'red' ? 'cs-col-hol' : ''));
   const dayCount = cs.dayMeta.length;
@@ -495,7 +674,7 @@ function buildSingleChecksheetCardHtml(cs, settings) {
       ${idx === 0 ? `<td rowspan="${cs.normalRows.length}" class="cs-vlabel"><span>TOTAL JAM<br>NORMAL</span></td>` : ''}
       <td class="cs-sec-label">${esc(nr.label)}</td>
       ${nr.dailyValues.map((v, i) => `<td class="cs-cell ${colClass(cs.dayMeta[i]?.colorMark)}">${v > 0 ? esc(fmtNum(v, 2)) : ''}</td>`).join('')}
-      <td class="cs-cell cs-tot-col"><b>${esc(fmtNum(nr.total, 2) || '0')}</b></td>
+      <td class="cs-cell cs-tot-col">${esc(fmtNum(nr.total, 2) || '0')}</td>
     </tr>
   `).join('');
 
@@ -504,36 +683,13 @@ function buildSingleChecksheetCardHtml(cs, settings) {
       ${idx === 0 ? `<td rowspan="${cs.overtimeRows.length}" class="cs-vlabel"><span>TOTAL<br>LEMBUR</span></td>` : ''}
       <td class="cs-sec-label">${esc(or.label)}</td>
       ${or.dailyValues.map((v, i) => `<td class="cs-cell ${colClass(cs.dayMeta[i]?.colorMark)}">${v > 0 ? esc(fmtNum(v, 1)) : ''}</td>`).join('')}
-      <td class="cs-cell cs-tot-col"><b>${esc(fmtNum(or.total, 1) || '0')}</b></td>
+      <td class="cs-cell cs-tot-col">${esc(fmtNum(or.total, 1) || '0')}</td>
     </tr>
   `).join('');
 
-  return `
-    <div class="cs-sheet-box">
-      <div class="cs-sheet-title">TIME CHECKSHEET SOPIR</div>
-      <div class="cs-sheet-meta">
-        <div><span>NAMA SOPIR</span> : <b>${esc(cs.driver.full_name)}</b></div>
-        <div><span>PERIODE</span> : <b>${esc(cs.periodWindow.checksheetLabel)}</b></div>
-      </div>
-      <table class="cs-grid-table">
-        <thead>
-          <tr>
-            <th rowspan="2" colspan="2" class="cs-th-waktu">WAKTU</th>
-            <th colspan="${dayCount}">TANGGAL</th>
-            <th rowspan="2" class="cs-th-total">TOTAL</th>
-          </tr>
-          <tr>
-            ${cs.dayMeta.map(d => `<th class="cs-th-day ${colClass(d.colorMark)}">${d.dayNum}</th>`).join('')}
-          </tr>
-        </thead>
-        <tbody>
-          ${slotRowsHtml}
-          ${normalRowsHtml}
-          ${otRowsHtml}
-        </tbody>
-      </table>
+  const footerPrintHtml = forPrint ? `
       <div class="cs-note-row">
-        <b>NOTE :</b>&nbsp;
+        <b>NOTE :</b>
         <div class="cs-note-grid">
           <span>I = INDOOR</span><span>S = SUPPORT</span>
           <span>O = OUTDOOR</span><span>R = RADIN</span>
@@ -553,6 +709,33 @@ function buildSingleChecksheetCardHtml(cs, settings) {
           <div class="cs-sig-title">${esc(sig.rightTitle)}</div>
         </div>
       </div>
+  ` : '';
+
+  return `
+    <div class="cs-sheet-box">
+      <div class="cs-sheet-title">TIME CHECKSHEET SOPIR</div>
+      <div class="cs-sheet-meta">
+        <div><span>NAMA SOPIR</span>: ${esc(cs.driver.full_name)}</div>
+        <div><span>PERIODE</span>: ${esc(cs.periodWindow.checksheetLabel)}</div>
+      </div>
+      <table class="cs-grid-table">
+        <thead>
+          <tr>
+            <th rowspan="2" colspan="2" class="cs-th-waktu">WAKTU</th>
+            <th colspan="${dayCount}">TANGGAL</th>
+            <th rowspan="2" class="cs-th-total">TOTAL</th>
+          </tr>
+          <tr>
+            ${cs.dayMeta.map(d => `<th class="cs-th-day">${d.dayNum}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${slotRowsHtml}
+          ${normalRowsHtml}
+          ${otRowsHtml}
+        </tbody>
+      </table>
+      ${footerPrintHtml}
     </div>
   `;
 }
@@ -560,8 +743,8 @@ function buildSingleChecksheetCardHtml(cs, settings) {
 function buildChecksheetsPrintHtml(checksheets, settings) {
   const pairs = [];
   for (let i = 0; i < checksheets.length; i += 2) {
-    const a = buildSingleChecksheetCardHtml(checksheets[i], settings);
-    const b = checksheets[i + 1] ? buildSingleChecksheetCardHtml(checksheets[i + 1], settings) : '<div class="cs-sheet-box cs-sheet-empty"></div>';
+    const a = buildSingleChecksheetCardHtml(checksheets[i], settings, { forPrint: true });
+    const b = checksheets[i + 1] ? buildSingleChecksheetCardHtml(checksheets[i + 1], settings, { forPrint: true }) : '<div class="cs-sheet-box cs-sheet-empty"></div>';
     pairs.push(`<div class="cs-landscape-page pkwt-print-sheet">${a}${b}</div>`);
   }
   return pairs.join('');
@@ -615,15 +798,15 @@ export async function renderDriverReportsView(host, ctx, helpers) {
     }
     const deptSumGross = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((s, k) => s + (payroll.deptTotals[k]?.grossPay || 0), 0);
     const matchedAll = deptSumGross === payroll.summaryTotals.grossPay;
-    return `<span class="pill ${matchedAll ? 'green' : 'danger'}">${matchedAll ? 'Rekonsiliasi Cocok 100%' : 'Selisih Rekonsiliasi'}</span>`;
+    return `<span class="pill ${matchedAll ? 'green' : 'danger'}">${matchedAll ? 'Rekonsiliasi Cocok' : 'Selisih Rekonsiliasi'}</span>`;
   };
 
   const renderUpahBodyHtml = () => {
     if (activeUpahTab === 'summary') {
-      return `<div class="drv-pdf-preview-wrap">${buildSummaryPdfSheetHtml(payroll, state.settings)}</div>`;
+      return `<div class="table-wrap">${buildSummaryTableHtml(payroll, { includeFillerRows: false })}</div>`;
     }
     if (['Support', 'Indoor', 'Outdoor', 'Radin'].includes(activeUpahTab)) {
-      return `<div class="drv-pdf-preview-wrap">${buildDeptPdfSheetHtml(activeUpahTab, payroll, state.settings)}</div>`;
+      return `<div class="table-wrap">${buildDeptTableHtml(activeUpahTab, payroll, { includeFillerRows: false })}</div>`;
     }
     if (activeUpahTab === 'kurang_gaji') {
       const isP2 = win.halfPeriod === 'P2';
@@ -673,17 +856,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
       `;
     }
 
-    const deptSumNormalPay = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((s, k) => s + (payroll.deptTotals[k]?.normalPay || 0), 0);
-    const deptSumOtPay = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((s, k) => s + (payroll.deptTotals[k]?.overtimePay || 0), 0);
-    const deptSumGross = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((s, k) => s + (payroll.deptTotals[k]?.grossPay || 0), 0);
-
     return `
-      <div class="kpi-grid ops-kpi-4" style="margin-bottom:14px">
-        <div class="card kpi-card"><div class="kpi-label">Nilai Hadir</div><div class="kpi-val" style="font-size:18px">Rp ${payroll.summaryTotals.normalPay.toLocaleString('id-ID')}</div><small>S+I+O+R: Rp ${deptSumNormalPay.toLocaleString('id-ID')}</small></div>
-        <div class="card kpi-card"><div class="kpi-label">Nilai Lembur</div><div class="kpi-val" style="font-size:18px">Rp ${payroll.summaryTotals.overtimePay.toLocaleString('id-ID')}</div><small>S+I+O+R: Rp ${deptSumOtPay.toLocaleString('id-ID')}</small></div>
-        <div class="card kpi-card"><div class="kpi-label">Upah Bruto</div><div class="kpi-val" style="font-size:18px">Rp ${payroll.summaryTotals.grossPay.toLocaleString('id-ID')}</div><small>S+I+O+R: Rp ${deptSumGross.toLocaleString('id-ID')}</small></div>
-        <div class="card kpi-card"><div class="kpi-label">Potongan BPJS (${win.halfPeriod})</div><div class="kpi-val" style="font-size:18px">Rp ${payroll.summaryTotals.bpjsDeduction.toLocaleString('id-ID')}</div><small>Netto: Rp ${payroll.summaryTotals.netPay.toLocaleString('id-ID')}</small></div>
-      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -731,7 +904,6 @@ export async function renderDriverReportsView(host, ctx, helpers) {
         <div class="ops-head">
           <div>
             <h2>Laporan Driver</h2>
-            <p class="ops-sub">${eligibleDrivers.length} Driver · Periode ${esc(win.headerLabel)}</p>
           </div>
           <div class="ops-actions">
             <input type="month" id="drv-rep-month" class="input" value="${esc(monthKey)}" aria-label="Pilih bulan laporan driver">
@@ -745,19 +917,17 @@ export async function renderDriverReportsView(host, ctx, helpers) {
         </div>
 
         ${anomalies.length ? `
-          <div class="ops-flash-banner ops-flash-warn" role="alert">
-            <b>${anomalies.length} Data Janggal belum diselesaikan</b> di Attendance Management.
+          <div class="ops-flash-banner ops-flash-error" role="alert">
+            <b>Peringatan (${anomalies.length} Data Janggal):</b> Masih ada absensi driver belum diselesaikan di Attendance Management.
           </div>
         ` : ''}
 
         <div class="drv-report-cards">
           <button type="button" class="drv-report-card ${activeCard === 'upah' ? 'is-active' : ''}" data-card="upah">
             <div class="drv-report-card-title">1. Laporan Upah Driver</div>
-            <div class="drv-report-card-meta">Total Netto: <b>Rp ${payroll.summaryTotals.netPay.toLocaleString('id-ID')}</b></div>
           </button>
           <button type="button" class="drv-report-card ${activeCard === 'checksheet' ? 'is-active' : ''}" data-card="checksheet">
             <div class="drv-report-card-title">2. Time Check Sheet</div>
-            <div class="drv-report-card-meta">${payroll.checksheets.length} Lembar Checksheet</div>
           </button>
         </div>
       </div>
@@ -781,10 +951,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
       ` : `
         <div class="card ops-card">
           <div class="drv-upah-toolbar">
-            <div class="cs-filter-meta">
-              <span class="cs-legend-sun">Minggu</span>
-              <span class="cs-legend-hol">Hari Besar</span>
-            </div>
+            <div></div>
             <div class="ops-actions">
               <select id="drv-cs-filter" class="input" aria-label="Filter sopir checksheet">
                 <option value="ALL" ${csFilterNik === 'ALL' ? 'selected' : ''}>Semua Sopir (${payroll.checksheets.length})</option>
@@ -794,7 +961,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
             </div>
           </div>
           <div class="cs-screen-grid">
-            ${shownChecksheets.map(c => buildSingleChecksheetCardHtml(c, state.settings)).join('')}
+            ${shownChecksheets.map(c => buildSingleChecksheetCardHtml(c, state.settings, { forPrint: false })).join('')}
           </div>
         </div>
       `}
