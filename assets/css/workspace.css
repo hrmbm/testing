@@ -1187,13 +1187,17 @@
 }
 
 @media print {
-  body.pkwt-printing > *:not(#pkwt-print-stage) {
-    display: none !important;
-  }
+  html:has(body.pkwt-printing),
   body.pkwt-printing {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
+  }
+  body.pkwt-printing > *:not(#pkwt-print-stage) {
+    display: none !important;
   }
   body.pkwt-printing #pkwt-print-stage {
     display: block !important;
@@ -2483,6 +2487,657 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--ink-2);
+}
+
+/* ============================================================================
+ * HR&GA Overhaul v7: General Schedules, Calendar Colors, Driver Flow & PDF Sheets
+ * ============================================================================ */
+.ops-stack table thead th::after,
+.ops-card table thead th::after,
+.drv-pdf-table thead th::after,
+.cs-grid-table thead th::after,
+.ops-print-modal-card table thead th::after {
+  content: none !important;
+  display: none !important;
+}
+
+.ops-actions .input,
+.ops-actions select {
+  width: auto;
+  min-width: 150px;
+  max-width: 280px;
+}
+
+.ops-cal-row-sun td {
+  background: #fefce8;
+}
+
+.ops-cal-row-hol td {
+  background: #fef2f2;
+}
+
+.ops-subhead-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ops-subhead-row h3 {
+  margin: 0 0 4px;
+}
+
+.ops-schedule-blocks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ops-schedule-blocks-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ops-subbox,
+.ops-sig-editor-box {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+}
+
+.ops-subbox h4,
+.ops-sig-editor-box h4 {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.drv-activities-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+}
+
+.drv-activities-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.drv-act-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.drv-act-row {
+  display: grid;
+  grid-template-columns: 120px 120px auto minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.drv-act-home-wrap {
+  min-height: 38px;
+  padding-bottom: 2px;
+  white-space: nowrap;
+}
+
+.drv-act-pill-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+}
+
+.drv-act-pill-line:last-child {
+  margin-bottom: 0;
+}
+
+.drv-anomaly-card {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.drv-anomaly-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drv-anomaly-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.drv-abnormal-editor {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.drv-abn-preview-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #7dd3fc;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.drv-report-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.drv-report-card {
+  text-align: left;
+  padding: 14px 16px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--canvas);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.drv-report-card:hover {
+  border-color: var(--teal);
+  background: #ffffff;
+}
+
+.drv-report-card.is-active {
+  border-color: var(--teal);
+  background: #f0fdfa;
+  box-shadow: 0 0 0 3px rgba(13, 92, 107, 0.12);
+}
+
+.drv-report-card-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+}
+
+.drv-report-card-title {
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.drv-report-card-meta {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.drv-upah-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.drv-upah-toolbar .tab-bar {
+  margin-bottom: 0;
+}
+
+.cs-filter-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* PDF-faithful Driver Payroll Sheet (SUMMARY, SUPPORT, INDOOR, OUTDOOR, RADIN) */
+.drv-pdf-preview-wrap {
+  overflow-x: auto;
+  padding: 6px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.drv-pdf-sheet {
+  width: 100%;
+  min-width: 760px;
+  margin: 0 auto;
+  padding: 18px 20px;
+  background: #ffffff;
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.drv-pdf-header {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  line-height: 1.45;
+}
+
+.drv-pdf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.drv-pdf-table th,
+.drv-pdf-table td {
+  border: 1px solid #111827;
+  padding: 4px 6px;
+  vertical-align: middle;
+  color: #111827;
+}
+
+.drv-pdf-table thead th {
+  background: #f1f5f9;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.drv-pdf-table tfoot th {
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+.drv-pdf-table td.c,
+.drv-pdf-table th.c {
+  text-align: center;
+}
+
+.drv-pdf-table td.nowrap {
+  white-space: nowrap;
+}
+
+.drv-pdf-table td.num,
+.drv-pdf-table th.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.drv-rp-val,
+.drv-rp-zero {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.drv-rp-val.is-bold {
+  font-weight: 700;
+}
+
+.drv-rp-zero {
+  color: #4b5563;
+}
+
+.drv-empty-row td {
+  height: 22px;
+}
+
+.drv-pdf-footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 20px;
+  font-size: 10.5px;
+}
+
+.drv-pdf-footer-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.drv-pdf-sig-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.drv-pdf-sig-right {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.drv-pdf-sig-center {
+  text-align: center;
+  align-items: center;
+}
+
+.drv-pdf-loc {
+  margin-bottom: 2px;
+}
+
+.drv-pdf-sig-space {
+  height: 54px;
+}
+
+.drv-pdf-sig-name {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.drv-pdf-sig-title {
+  font-weight: 600;
+}
+
+/* Time Check Sheet (Screen 2-col Grid + Landscape 2-up Print) */
+.cs-screen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 14px;
+}
+
+.cs-landscape-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 10px;
+  background: #ffffff;
+  margin-bottom: 14px;
+}
+
+.cs-sheet-box {
+  border: 1px solid #cbd5e1;
+  padding: 12px;
+  background: #ffffff;
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10px;
+  overflow-x: auto;
+}
+
+.cs-sheet-empty {
+  border: 0;
+  background: transparent;
+}
+
+.cs-sheet-title {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.cs-sheet-meta {
+  font-size: 10.5px;
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+.cs-sheet-meta div span {
+  display: inline-block;
+  width: 82px;
+  font-weight: 700;
+}
+
+.cs-grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-grid-table th,
+.cs-grid-table td {
+  border: 1px solid #111827;
+  padding: 2px 3px;
+  text-align: center;
+  height: 18px;
+  color: #111827;
+}
+
+.cs-th-waktu {
+  width: 96px;
+}
+
+.cs-th-day {
+  min-width: 18px;
+  font-weight: 700;
+}
+
+.cs-th-total {
+  width: 34px;
+}
+
+.cs-waktu {
+  text-align: left !important;
+  white-space: nowrap;
+  padding-left: 5px !important;
+  font-weight: 600;
+}
+
+.cs-cell {
+  font-weight: 700;
+}
+
+.cs-vlabel {
+  width: 24px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.15;
+  background: #f8fafc;
+}
+
+.cs-sec-label {
+  text-align: left !important;
+  font-weight: 700;
+  padding-left: 4px !important;
+  width: 60px;
+  background: #f8fafc;
+}
+
+.cs-tot-col {
+  background: #f8fafc;
+}
+
+.cs-col-sun {
+  background: #fde047 !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cs-col-hol {
+  background: #fca5a5 !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cs-note-row {
+  margin-top: 6px;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.cs-note-grid {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  column-gap: 20px;
+  row-gap: 2px;
+  vertical-align: top;
+}
+
+.cs-legend-sun {
+  background: #fde047;
+  padding: 2px 8px;
+  border: 1px solid #ca8a04;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.cs-legend-hol {
+  background: #fca5a5;
+  padding: 2px 8px;
+  border: 1px solid #dc2626;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.cs-sig-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 9.5px;
+}
+
+.cs-sig-block {
+  min-width: 130px;
+}
+
+.cs-sig-right {
+  text-align: right;
+}
+
+.cs-sig-gap {
+  height: 36px;
+}
+
+.cs-sig-name {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* In-Page DOM Print Preview Modal */
+.ops-print-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  background: rgba(15, 23, 42, 0.56);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ops-print-modal-card {
+  width: min(1160px, 96vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.25);
+  overflow: hidden;
+}
+
+.ops-print-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--canvas);
+}
+
+.ops-print-modal-head small {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+}
+
+.ops-print-modal-head h3 {
+  margin: 2px 0 0;
+  font-size: 16px;
+}
+
+.ops-print-hint {
+  padding: 8px 20px;
+  font-size: 12.5px;
+  color: #1e3a8a;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.ops-print-modal-body {
+  padding: 18px;
+  overflow: auto;
+  background: #e2e8f0;
+  flex: 1;
+}
+
+.ops-print-preview-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+}
+
+.ops-print-preview-canvas .drv-pdf-sheet,
+.ops-print-preview-canvas .cs-landscape-page {
+  width: 100%;
+  max-width: 1040px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+}
+
+@media (max-width: 960px) {
+  .ops-schedule-blocks,
+  .ops-schedule-blocks-3,
+  .drv-report-cards,
+  .cs-landscape-page,
+  .cs-screen-grid {
+    grid-template-columns: 1fr;
+  }
+  .drv-act-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media print {
+  .cs-col-sun,
+  .cs-col-hol {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #pkwt-print-stage .drv-pdf-sheet,
+  #pkwt-print-stage .cs-landscape-page {
+    min-width: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  #pkwt-print-stage .drv-pdf-sheet:last-child,
+  #pkwt-print-stage .cs-landscape-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
 }
 
 

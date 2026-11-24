@@ -1,6 +1,0 @@
-Input ini akan diolah di oleh processing baik di drivers maupun di staff, boleh diupload setiap hari, boleh juga per periode.
-Yang jelas jika Staff atau Driver membutuhkan data disini, dia tidak bisa menghapus database ini, dia harus mengcopy dari state terakhir mereka
-
-Input Utama : Karyawan Mitra, Karyawan Radin
-Input Opsional : Karyawan Mitra (kadang hasil dari Laporan Transaksi kurang lengkap karena aturan yang dibuat mesin dan terpaksa mengambil data dari Data Presensi di mesin Fingerprint)
-

@@ -29,15 +29,25 @@ import {
   processStaffAttendancePeriod,
   computeEmployeeDirectoryDelta,
   parseCutiSpreadsheetRows,
-  evaluateCutiConfirmationGate
+  evaluateCutiConfirmationGate,
+  resolveStaffWorkSchedule,
+  evaluateStaffArrivalStatus,
+  getIndonesianNationalHolidaysPreset,
+  parseHolidayImportRows
 } from '../assets/js/attendance-logic.js';
 import {
+  isEligibleDriver,
+  getEligibleDrivers,
+  getDriverPeriodWindow,
+  computeDriverDayMetrics,
   computeDriverWorkHours,
   validateDriverSchedules,
   generateDriverChecksheetGrid,
   lookupOvertimeTariff,
+  reconcileDriverSchedulesAndAttendance,
+  buildDriverTimeChecksheetData,
   terbilangRupiah,
-  calculateDriverPayroll
+  calculateDriverPayrollPeriod
 } from '../assets/js/driver-logic.js';
 import {
   resolveCanonicalSloc,
@@ -221,26 +231,146 @@ test('Employee Directory delta computes diff cleanly and Cuti gate respects thre
   assert.equal(gateFar.requiresConfirmation, false);
 });
 
-test('Driver schedule validation, checksheet grid, OT tariffs, Payroll, BKK/BKM & Terbilang match formulas', () => {
-  const work = computeDriverWorkHours('07:00', '20:00', { normalWorkHours: 8, isHoliday: false });
-  assert.equal(work.totalHours, 13);
-  assert.equal(work.normalHours, 8);
-  assert.equal(work.overtimeHours, 5);
+test('General Staff Work Schedules, exact late/meal cutoffs (07:30:59 vs 07:31:00; 07:35:59 vs 07:36:00), and National Holidays work accurately', () => {
+  const staffPasuruan = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 130117');
+  const staffKilnDry = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 130116'); // ABD. KHAMID MMD
+  const staffSby = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 210202');
+  const staffRadin = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 000002');
 
-  const holWork = computeDriverWorkHours('07:00', '15:00', { normalWorkHours: 8, isHoliday: true });
-  assert.equal(holWork.normalHours, 0);
-  assert.equal(holWork.overtimeHours, 8);
+  // Mon-Fri vs Saturday for Pasuruan & Surabaya
+  assert.equal(resolveStaffWorkSchedule(staffPasuruan, '2026-11-02').startTime, '07:30');
+  assert.equal(resolveStaffWorkSchedule(staffPasuruan, '2026-11-07').endTime, '12:00');
+  assert.equal(resolveStaffWorkSchedule(staffSby, '2026-11-02').startTime, '08:00');
+  assert.equal(resolveStaffWorkSchedule(staffSby, '2026-11-07').endTime, '12:00');
 
+  // Kiln Dry MMD per-person schedule (ABD. KHAMID starts 07:00)
+  const kdMon = resolveStaffWorkSchedule(staffKilnDry, '2026-11-02');
+  assert.equal(kdMon.ruleSource, 'kiln_dry_mmd');
+  assert.equal(kdMon.startTime, '07:00');
+
+  // Radin stays on radin_hold
+  assert.equal(resolveStaffWorkSchedule(staffRadin, '2026-11-02').ruleSource, 'radin_hold');
+
+  // Manual exception override beats Pasuruan/Kiln Dry defaults
+  const withExceptionSettings = normalizeOpsSettings({
+    attendance: {
+      workSchedules: {
+        manualExceptions: [
+          { id: 'ex-1', employee_no: 'ST 130117', full_name: 'ABDUL AJIS', homeBase: 'Shift Khusus QC', weekdayStart: '06:30', weekdayEnd: '15:30', saturdayStart: '06:30', saturdayEnd: '11:30', reason: 'Pengecekan awal container' }
+        ]
+      }
+    }
+  });
+  const exRes = resolveStaffWorkSchedule(staffPasuruan, '2026-11-02', withExceptionSettings);
+  assert.equal(exRes.ruleSource, 'manual_exception');
+  assert.equal(exRes.startTime, '06:30');
+
+  // Exact cutoffs for 07:30 schedule: 07:30:59 on-time, 07:31:00 late; 07:35:59 gets meal, 07:36:00 loses meal
+  const onTime = evaluateStaffArrivalStatus({ checkInTime: '07:30:59', scheduleStart: '07:30' });
+  assert.equal(onTime.isLate, false);
+  assert.equal(onTime.code, 'M');
+  assert.equal(onTime.getsMealAllowance, true);
+
+  const lateButMeal = evaluateStaffArrivalStatus({ checkInTime: '07:31:00', scheduleStart: '07:30' });
+  assert.equal(lateButMeal.isLate, true);
+  assert.equal(lateButMeal.code, 'T');
+  assert.equal(lateButMeal.getsMealAllowance, true);
+
+  const mealEdge = evaluateStaffArrivalStatus({ checkInTime: '07:35:59', scheduleStart: '07:30' });
+  assert.equal(mealEdge.isLate, true);
+  assert.equal(mealEdge.getsMealAllowance, true);
+
+  const mealLost = evaluateStaffArrivalStatus({ checkInTime: '07:36:00', scheduleStart: '07:30' });
+  assert.equal(mealLost.isLate, true);
+  assert.equal(mealLost.getsMealAllowance, false);
+
+  // Manual meal allowance override
+  const mealManualYes = evaluateStaffArrivalStatus({
+    checkInTime: '07:45:00',
+    scheduleStart: '07:30',
+    manualMealOverride: { eligible: true, reason: 'Tugas luar pagi' }
+  });
+  assert.equal(mealManualYes.isLate, true);
+  assert.equal(mealManualYes.getsMealAllowance, true);
+
+  // National Holiday Preset & Import parsing
+  const preset2026 = getIndonesianNationalHolidaysPreset(2026);
+  assert.ok(preset2026.some(h => h.cal_date === '2026-08-17' && h.day_type === 'HOLIDAY'));
+  const impHols = parseHolidayImportRows([
+    ['Tanggal', 'Keterangan Libur', 'Tipe', 'Alasan'],
+    ['2026-11-10', 'Hari Pahlawan (Koreksi)', 'HOLIDAY', 'Keputusan Manajemen']
+  ]);
+  assert.equal(impHols.length, 1);
+  assert.equal(impHols[0].cal_date, '2026-11-10');
+});
+
+test('Driver eligibility (SIKUS excluded), period rules, overtime flooring/break, overnight reconciliation & department payroll audit match exact formulas', () => {
+  // SIKUS ST 140807 is SOPIR in directory but MUST be excluded from Driver module
+  const sikus = SEED_DRIVERS.find(d => d.full_name === 'SIKUS');
+  assert.ok(sikus);
+  assert.equal(isEligibleDriver(sikus), false);
+  const eligible = getEligibleDrivers([...SEED_DRIVERS, ...SEED_STAFF_SAMPLES]);
+  assert.equal(eligible.length, 7);
+  assert.ok(!eligible.some(d => d.full_name === 'SIKUS'));
+
+  // Period windows P1 (1-15) and P2 (16-end of month)
+  const p1Win = getDriverPeriodWindow('2026-11', 'P1');
+  const p2Win = getDriverPeriodWindow('2026-11', 'P2');
+  assert.equal(p1Win.startDate, '2026-11-01');
+  assert.equal(p1Win.endDate, '2026-11-15');
+  assert.equal(p2Win.startDate, '2026-11-16');
+  assert.equal(p2Win.endDate, '2026-11-30');
+
+  // Overtime tariffs & floor 0.5h rule
   assert.equal(lookupOvertimeTariff(5, false), 104000);
+  assert.equal(lookupOvertimeTariff(5.4, false), 104000); // floor 0.5 -> 5.0
   assert.equal(lookupOvertimeTariff(15, false), 364000);
   assert.equal(lookupOvertimeTariff(16, false), 390000);
   assert.equal(lookupOvertimeTariff(8, true), 193000);
+
+  // Proportional < 8h floored to 1h step
+  const partialDay = computeDriverDayMetrics({ workDate: '2026-11-02', startTime: '07:00', endTime: '14:45' });
+  assert.equal(partialDay.normalHours, 7);
+  assert.equal(partialDay.presentDays, 0.875);
+  assert.equal(partialDay.normalPay, Math.round(0.875 * 147000));
+  assert.equal(partialDay.overtimeHours, 0);
+
+  // Saturday: 5h normal quota, excess > 8h deducted by 1h break (05:48 - 20:09 = 14h21m -> excess 9h21m -> floor 9h -> break -1h = 8h OT)
+  const satDay = computeDriverDayMetrics({ workDate: '2026-11-07', startTime: '05:48', endTime: '20:09' });
+  assert.equal(satDay.presentDays, 1);
+  assert.equal(satDay.normalHours, 5);
+  assert.equal(satDay.rawOvertimeHours, 9);
+  assert.equal(satDay.breakDeductionHours, 1);
+  assert.equal(satDay.overtimeHours, 8);
+  assert.equal(satDay.normalPay, 147000);
+  assert.equal(satDay.overtimePay, 182000);
+
+  // Sunday: 0 normal days, all hours paid on Holiday OT tariff
+  const sunDay = computeDriverDayMetrics({ workDate: '2026-11-08', startTime: '07:00', endTime: '15:00' });
+  assert.equal(sunDay.presentDays, 0);
+  assert.equal(sunDay.normalPay, 0);
+  assert.equal(sunDay.overtimeHours, 8);
+  assert.equal(sunDay.overtimePay, 193000);
+
+  // National Holiday on Weekday (2026-11-10): normal 8h = 1 day + overtime on Holiday OT tariff
+  const calMap = new Map([['2026-11-10', { cal_date: '2026-11-10', day_type: 'HOLIDAY', label: 'Hari Pahlawan' }]]);
+  const natHol = computeDriverDayMetrics({ workDate: '2026-11-10', startTime: '07:00', endTime: '18:00', calendarMap: calMap });
+  assert.equal(natHol.presentDays, 1);
+  assert.equal(natHol.normalHours, 8);
+  assert.equal(natHol.overtimeHours, 3);
+  assert.equal(natHol.normalPay, 147000);
+  assert.equal(natHol.overtimePay, 63000); // Holiday 3h tariff
+
+  // Backward-compat helper still behaves accurately
+  const work = computeDriverWorkHours('07:00', '20:00', { normalWorkHours: 8, isHoliday: false });
+  assert.equal(work.normalHours, 8);
+  assert.equal(work.overtimeHours, 5);
 
   const val = validateDriverSchedules([
     { id: '1', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', work_date: '2026-11-02', start_time: '07:00', end_time: '17:00', section: 'Support' },
     { id: '2', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', work_date: '2026-11-02', start_time: '12:00', end_time: '18:00', section: 'Indoor' },
     { id: '3', employee_no: 'ST 190905', driver_name: 'TEGUH SUSANTO', work_date: '2026-11-03', start_time: '07:00', end_time: '15:00', section: 'Radin' }
-  ], SEED_DRIVERS);
+  ], eligible);
   assert.equal(val.valid, false);
   assert.equal(val.conflicts.length, 1);
   assert.equal(val.nikWarnings.length, 1);
@@ -250,37 +380,90 @@ test('Driver schedule validation, checksheet grid, OT tariffs, Payroll, BKK/BKM 
     { id: '1', employee_no: 'KT 190403', work_date: '2026-11-02', start_time: '07:00', end_time: '18:00', normal_hours: 8, ritase_flag: true, is_holiday: false }
   ]);
   assert.ok(grid.rows[0].cells.includes('R'));
-  assert.ok(grid.rows[0].cells.includes('I'));
-  assert.ok(grid.rows[0].cells.includes('L'));
-  assert.ok(grid.rows[0].cells.includes('O'));
 
-  const payroll = calculateDriverPayroll({
-    periodKey: '2026-11-P1',
-    periodStart: '2026-11-01',
-    periodEnd: '2026-11-15',
-    employees: SEED_DRIVERS,
-    schedules: [
-      { id: 's1', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', work_date: '2026-11-02', section: 'Support', normal_hours: 8, overtime_hours: 5, is_holiday: false },
-      { id: 's2', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', work_date: '2026-11-03', section: 'Support', normal_hours: 8, overtime_hours: 2, is_holiday: false }
-    ],
-    adjustmentsByNik: {
-      'KT 190403': { priorShortfall: 50000, bpjsDeduction: 40000, claimHours: 7 }
-    }
+  // Missing checkout anomaly -> resolved as overnight (+1 day) -> included cleanly
+  const driverSubset = eligible.filter(d => ['KT 190403', 'KT 021010'].includes(d.employee_no));
+  const rawEvents = [
+    { id: 'e1', employee_no: 'KT 190403', work_date: '2026-11-02', check_in: '07:00:00', check_out: '20:00:00', source_type: 'mitra_transaksi' },
+    { id: 'e2', employee_no: 'KT 021010', work_date: '2026-11-13', check_in: '06:30:00', check_out: '', source_type: 'mitra_transaksi' }
+  ];
+  const schedules = [
+    {
+      id: 's1',
+      employee_no: 'KT 190403',
+      driver_name: 'ACHMAD FAUZI',
+      work_date: '2026-11-02',
+      section: 'Support',
+      activities: [
+        { start_time: '07:00', end_time: '12:00', is_until_home: false, activity: 'Antar barang' },
+        { start_time: '12:00', end_time: '', is_until_home: true, activity: 'Bantu kirim' }
+      ]
+    },
+    { id: 's2', employee_no: 'KT 021010', driver_name: 'SUGENG PURWANTO', work_date: '2026-11-13', section: 'Outdoor', start_time: '06:30', end_time: '' }
+  ];
+
+  const anomalyRec = reconcileDriverSchedulesAndAttendance({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: driverSubset,
+    schedules,
+    rawEvents,
+    reconciliations: [],
+    calendarDays: [{ cal_date: '2026-11-10', day_type: 'HOLIDAY', label: 'Hari Pahlawan' }]
   });
+  assert.equal(anomalyRec.anomalies.length, 1);
+  assert.equal(anomalyRec.anomalies[0].anomalyType, 'MISSING_CHECKOUT');
 
-  const d = payroll.drivers[0];
-  // 2 * 147000 + (104000 + 36000) + 50000 = 484000 gross
-  assert.equal(d.dailyWage, 147000);
-  assert.equal(d.basicPay, 294000);
-  assert.equal(d.overtimePay, 140000);
-  assert.equal(d.grossPay, 484000);
-  assert.equal(d.claimDeduction, 36900);
-  assert.equal(d.netPay, 484000 - 40000 - 36900);
+  // Resolve Sugeng Purwanto overnight 06:30 -> +1 day 01:30 (19 hours total -> 8h normal + 11h raw OT - 1h break = 10h OT)
+  const reconciliations = [
+    { employee_no: 'KT 021010', work_date: '2026-11-13', checkout_date: '2026-11-14', actual_check_in: '06:30', actual_check_out: '01:30', is_overnight: true, resolved: true, notes: 'Lembur luar kota lewat hari' }
+  ];
 
-  const bkk = payroll.bkkRows[0];
-  assert.equal(bkk.feeAmount, Math.round(bkk.subtotalGaji * 0.1));
-  assert.equal(bkk.totalBkk, bkk.subtotalGaji + bkk.feeAmount);
-  assert.equal(bkk.pphAmount, Math.round(bkk.feeAmount * 0.02));
+  // Period 1 (no BPJS) + Kurang Gaji per-dept
+  const payrollP1 = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: driverSubset,
+    schedules,
+    rawEvents,
+    reconciliations,
+    adjustmentsByPeriod: {
+      '2026-11-P1': {
+        'KT 190403': { priorShortfall: 50000, bySection: { Support: 50000, Indoor: 0, Outdoor: 0, Radin: 0 } }
+      }
+    },
+    calendarDays: [{ cal_date: '2026-11-10', day_type: 'HOLIDAY', label: 'Hari Pahlawan' }]
+  });
+  assert.equal(payrollP1.reconciliation.anomalies.length, 0);
+  const fauziP1 = payrollP1.summaryRows.find(r => r.employee_no === 'KT 190403');
+  const sugengP1 = payrollP1.summaryRows.find(r => r.employee_no === 'KT 021010');
+  assert.equal(fauziP1.bpjsDeduction, 0);
+  assert.equal(fauziP1.grossPay, 147000 + 104000 + 50000); // 301,000
+  assert.equal(fauziP1.netPay, 301000);
+  assert.equal(sugengP1.overtimeHours, 10); // 19h - 8h = 11h OT -> >8 deduct 1h = 10h OT (Rp 234,000)
+  assert.equal(sugengP1.overtimePay, 234000);
+
+  // Summary gross MUST equal sum of Support + Indoor + Outdoor + Radin gross
+  const deptGrossSum = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((acc, sec) => acc + payrollP1.deptTotals[sec].grossPay, 0);
+  assert.equal(deptGrossSum, payrollP1.summaryTotals.grossPay);
+
+  // Time checksheet Sunday yellow + Holiday red marking
+  const csSugeng = payrollP1.checksheets.find(c => c.driver.employee_no === 'KT 021010');
+  assert.equal(csSugeng.dayMeta.find(d => d.dateStr === '2026-11-08').colorMark, 'yellow');
+  assert.equal(csSugeng.dayMeta.find(d => d.dateStr === '2026-11-10').colorMark, 'red');
+
+  // Period 2 applies default BPJS 207,507 automatically
+  const payrollP2 = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'P2',
+    drivers: driverSubset,
+    schedules: [],
+    rawEvents: []
+  });
+  assert.equal(payrollP2.summaryRows[0].bpjsDeduction, 207507);
+
+  // Check buildDriverTimeChecksheetData exports cleanly
+  assert.equal(typeof buildDriverTimeChecksheetData, 'function');
   assert.equal(terbilangRupiah(1532500), 'Satu Juta Lima Ratus Tiga Puluh Dua Ribu Lima Ratus Rupiah');
 });
 

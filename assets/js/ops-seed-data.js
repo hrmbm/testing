@@ -1,4 +1,4 @@
-// Deterministic demo seed data grounded in real /Project Tambahan/ workbooks
+// Deterministic demo seed data grounded in real /Project Tambahan/ & PDF report references
 
 const ATK_COMPACT_121 = [
   [1, 'AMPLOP COKLAT UKURAN A3', 'PCS', 69],
@@ -10,7 +10,7 @@ const ATK_COMPACT_121 = [
   [7, 'BINDER CLIP 105', 'PACK', 7],
   [8, 'BINDER CLIP 107', 'PACK', 4],
   [9, 'BINDER CLIP 111', 'PACK', 3],
-  [10, 'BINDER CLIP 155', 'PACK', 2], // Excel had -1 because opening 2 < out 3 without IN; seeded cleanly at 2 prior to blocked out-of-stock test
+  [10, 'BINDER CLIP 155', 'PACK', 2],
   [11, 'BINDER CLIP 200', 'PACK', 2],
   [12, 'BINDER CLIP 260', 'PACK', 3],
   [13, 'BINDER CLIP 280', 'PACK', 4],
@@ -146,35 +146,40 @@ export const SEED_STATIONERY_MOVEMENTS = [
   { id: 'mv-08', tx_date: '2026-11-16', tx_type: 'OUT', item_id: 'atk-016', item_code: 'ATK-016', item_name: 'BOLPOINT HITAM', qty: 12, unit: 'PCS', sloc_raw: 'HR GA', sloc_canonical: 'HR GA', reference_no: 'REQ-07', notes: 'Pengambilan rutin HR GA', created_by: 'ADMIN', created_at: '2026-11-16T08:45:00Z' }
 ];
 
+// Dari Data_Karyawan_2026-11-23.xlsx — Jabatan SOPIR (SIKUS ST 140807 ada di direktori tapi dikecualikan dari modul Driver)
 export const SEED_DRIVERS = [
-  { id: 'drv-1', employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', join_date: '2019-04-12', phone: '81556636256' },
-  { id: 'drv-2', employee_no: 'KT 120509', full_name: 'BUDI HARTOYO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', join_date: '2013-02-04', phone: '6285536582306' },
-  { id: 'drv-3', employee_no: 'KT 260401', full_name: 'M. KHUSEN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', join_date: '2026-04-27', phone: '8892855334' },
-  { id: 'drv-4', employee_no: 'KT 200303', full_name: 'MUHAMMAD FATKHAN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', join_date: '2020-03-12', phone: '85853020834' },
-  { id: 'drv-5', employee_no: 'ST 140807', full_name: 'SIKUS', department: 'HR GA', position: 'SOPIR', employment_status: 'TETAP', company_entity: 'PT MBM', join_date: '2007-08-14', phone: '6281325339928' },
-  { id: 'drv-6', employee_no: 'KT 021010', full_name: 'SUGENG PURWANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', join_date: '2010-10-11', phone: '85852024564' },
-  { id: 'drv-7', employee_no: 'KT 051164', full_name: 'SURYANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', join_date: '2005-04-01', phone: '816996881' },
-  { id: 'drv-8', employee_no: 'KT 190905', full_name: 'TEGUH SUSANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', join_date: '2019-09-13', phone: '6283157160063' }
+  { id: 'drv-1', employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-04-12', phone: '81556636256' },
+  { id: 'drv-2', employee_no: 'KT 120509', full_name: 'BUDI HARTOYO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2013-02-04', phone: '6285536582306' },
+  { id: 'drv-3', employee_no: 'KT 260401', full_name: 'M. KHUSEN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2026-04-27', phone: '8892855334' },
+  { id: 'drv-4', employee_no: 'KT 200303', full_name: 'MUHAMMAD FATKHAN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2020-03-12', phone: '85853020834' },
+  { id: 'drv-5', employee_no: 'ST 140807', full_name: 'SIKUS', department: 'HR GA', position: 'SOPIR', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2007-08-14', phone: '6281325339928' },
+  { id: 'drv-6', employee_no: 'KT 021010', full_name: 'SUGENG PURWANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2010-10-11', phone: '85852024564' },
+  { id: 'drv-7', employee_no: 'KT 051164', full_name: 'SURYANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2005-04-01', phone: '816996881' },
+  { id: 'drv-8', employee_no: 'KT 190905', full_name: 'TEGUH SUSANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-09-13', phone: '6283157160063' }
 ];
 
 export const SEED_STAFF_SAMPLES = [
-  { id: 'stf-1', employee_no: 'ST 130116', full_name: 'ABD. KHAMID', department: 'PURCHASING', position: 'MMD', employment_status: 'TETAP', company_entity: 'PT MBM', join_date: '2004-11-05', phone: '82230164498' },
-  { id: 'stf-2', employee_no: 'ST 130117', full_name: 'ABDUL AJIS', department: 'QC OUTDOOR', position: 'QC INSPEKTUR FRAME OUTDOOR', employment_status: 'TETAP', company_entity: 'PT MBM', join_date: '2005-12-29', phone: '85755468848' },
-  { id: 'stf-3', employee_no: 'ST 130607', full_name: 'ABDUL KHAKIM', department: 'R & D', position: 'SAMPLE MAKER OUTDOOR', employment_status: 'KONTRAK', company_entity: 'PT MBM', join_date: '2013-06-12', phone: '85755749957' },
-  { id: 'stf-4', employee_no: 'ST 120115', full_name: 'SULIYANTO', department: 'PRODUKSI INDOOR', position: 'OPERATOR PRODUKSI', employment_status: 'TETAP', company_entity: 'PT MBM', join_date: '2012-01-15', phone: '81234567890' },
-  { id: 'stf-5', employee_no: 'ST 170702', full_name: 'HERMANTO', department: 'HARIAN INDOOR', position: 'PRODUKSI INDOOR', employment_status: 'HARIAN', company_entity: 'PT MBM', join_date: '2017-07-02', phone: '81299887766' },
-  { id: 'stf-6', employee_no: 'ST 191103', full_name: 'ELIAN PURBONEGORO', department: 'CONSTRUCTION INSTALATION', position: 'SITE SUPERVISOR', employment_status: 'TETAP', company_entity: 'PT RADIN', join_date: '2019-11-28', phone: '81355667788' },
-  { id: 'stf-7', employee_no: 'ST 210202', full_name: 'NATHANIA DEVI K', department: 'MARKETING & OPERATIONANL', position: 'SALES CONSULTANT', employment_status: 'TETAP', company_entity: 'PT RADIN', join_date: '2021-02-01', phone: '81987654321' }
+  { id: 'stf-1', employee_no: 'ST 130116', full_name: 'ABD. KHAMID', department: 'PURCHASING', position: 'MMD', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Kiln Dry', join_date: '2004-11-05', phone: '82230164498' },
+  { id: 'stf-8', employee_no: 'ST 061105', full_name: 'CHOIRIL', department: 'PURCHASING', position: 'MMD', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Kiln Dry', join_date: '2006-11-05', phone: '81330112201' },
+  { id: 'stf-9', employee_no: 'ST 061107', full_name: 'JUWADI', department: 'PURCHASING', position: 'MMD', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Kiln Dry', join_date: '2006-11-07', phone: '81330112202' },
+  { id: 'stf-2', employee_no: 'ST 130117', full_name: 'ABDUL AJIS', department: 'QC OUTDOOR', position: 'QC INSPEKTUR FRAME OUTDOOR', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2005-12-29', phone: '85755468848' },
+  { id: 'stf-3', employee_no: 'ST 130607', full_name: 'ABDUL KHAKIM', department: 'R & D', position: 'SAMPLE MAKER OUTDOOR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2013-06-12', phone: '85755749957' },
+  { id: 'stf-4', employee_no: 'ST 120115', full_name: 'SULIYANTO', department: 'PRODUKSI INDOOR', position: 'OPERATOR PRODUKSI', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2012-01-15', phone: '81234567890' },
+  { id: 'stf-5', employee_no: 'ST 170702', full_name: 'HERMANTO', department: 'HARIAN INDOOR', position: 'PRODUKSI INDOOR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2017-07-02', phone: '81299887766' },
+  { id: 'stf-10', employee_no: 'ST 260501', full_name: 'AYUK NUR KHOTIFAH', department: 'HR GA', position: 'STAFF HR & GA', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2021-05-01', phone: '81230004501' },
+  { id: 'stf-11', employee_no: 'ST 210608', full_name: 'DIANA ANITA SARI', department: 'HR GA', position: 'KA. DEPT HR & GA', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2015-06-08', phone: '8133193313' },
+  { id: 'stf-12', employee_no: 'ST 000002', full_name: 'FLORENCIA IRENA', department: 'MARKETING & OPERATION', position: 'MARKETING, OPERATION MANAGER', employment_status: 'TETAP', company_entity: 'PT RADIN', home_base: 'Surabaya', join_date: '2018-01-10', phone: '8113100002' },
+  { id: 'stf-6', employee_no: 'ST 191103', full_name: 'ELIAN PURBONEGORO', department: 'CONSTRUCTION INSTALATION', position: 'SITE SUPERVISOR', employment_status: 'TETAP', company_entity: 'PT RADIN', home_base: 'Surabaya', join_date: '2019-11-28', phone: '81355667788' },
+  { id: 'stf-7', employee_no: 'ST 210202', full_name: 'NATHANIA DEVI K', department: 'MARKETING & OPERATIONANL', position: 'SALES CONSULTANT', employment_status: 'TETAP', company_entity: 'PT RADIN', home_base: 'Surabaya', join_date: '2021-02-01', phone: '81987654321' }
 ];
 
 export const SEED_CALENDAR_DAYS = [
-  { cal_date: '2026-11-01', day_type: 'WEEKEND', label: 'Hari Minggu', notes: '' },
-  { cal_date: '2026-11-07', day_type: 'WEEKEND', label: 'Sabtu Libur / Half', notes: '' },
-  { cal_date: '2026-11-08', day_type: 'WEEKEND', label: 'Hari Minggu', notes: '' },
-  { cal_date: '2026-11-10', day_type: 'HOLIDAY', label: 'Hari Pahlawan (Conditional)', notes: 'Jadwal operasional khusus' },
-  { cal_date: '2026-11-15', day_type: 'WEEKEND', label: 'Hari Minggu', notes: '' },
-  { cal_date: '2026-11-22', day_type: 'WEEKEND', label: 'Hari Minggu', notes: '' },
-  { cal_date: '2026-11-29', day_type: 'WEEKEND', label: 'Hari Minggu', notes: '' },
+  { cal_date: '2026-11-01', day_type: 'WEEKEND', label: 'Hari Minggu', notes: 'Libur Mingguan' },
+  { cal_date: '2026-11-08', day_type: 'WEEKEND', label: 'Hari Minggu', notes: 'Libur Mingguan' },
+  { cal_date: '2026-11-10', day_type: 'HOLIDAY', label: 'Hari Pahlawan', notes: 'Hari Besar — Driver tarif lembur hari besar' },
+  { cal_date: '2026-11-15', day_type: 'WEEKEND', label: 'Hari Minggu', notes: 'Libur Mingguan' },
+  { cal_date: '2026-11-22', day_type: 'WEEKEND', label: 'Hari Minggu', notes: 'Libur Mingguan' },
+  { cal_date: '2026-11-29', day_type: 'WEEKEND', label: 'Hari Minggu', notes: 'Libur Mingguan' },
   { cal_date: '2026-12-25', day_type: 'HOLIDAY', label: 'Hari Raya Natal', notes: 'Libur Nasional' }
 ];
 
@@ -192,9 +197,9 @@ export const SEED_ATTENDANCE_BATCHES = [
     filename: 'Input Utama - Laporan Transaksi.xls',
     file_hash: 'demo-sha-laporan-transaksi-202611',
     period_start: '2026-11-01',
-    period_end: '2026-11-12',
-    row_count: 10,
-    inserted_count: 10,
+    period_end: '2026-11-20',
+    row_count: 17,
+    inserted_count: 17,
     duplicate_count: 0,
     exception_count: 1,
     status: 'completed',
@@ -208,28 +213,218 @@ export const SEED_ATTENDANCE_EVENTS = [
   { id: 'ev-03', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'ST 130116', employee_name: 'ABD. KHAMID', work_date: '2026-11-02', check_in: '07:30:59', check_out: '16:32:00', source_status: 'M', raw_code: 'M', fingerprint: 'st130116|2026-11-02|07:30:59', is_exception: false },
   { id: 'ev-04', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'ST 130117', employee_name: 'ABDUL AJIS', work_date: '2026-11-02', check_in: '07:31:00', check_out: '16:35:00', source_status: 'T', raw_code: 'T', fingerprint: 'st130117|2026-11-02|07:31:00', is_exception: false },
   { id: 'ev-05', batch_id: 'batch-demo-01', source_type: 'mitra_presensi', source_priority: 2, employee_no: 'ST 170702', employee_name: 'HERMANTO', work_date: '2026-11-02', check_in: '07:23:01', check_out: '17:08:26', source_status: 'M', raw_code: 'M', fingerprint: 'st170702|2026-11-02|07:23:01', is_exception: false },
-  { id: 'ev-06', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 190403', employee_name: 'ACHMAD FAUZI', work_date: '2026-11-02', check_in: '08:12:00', check_out: '17:30:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt190403|2026-11-02|08:12:00', is_exception: false },
+  { id: 'ev-06', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 190403', employee_name: 'ACHMAD FAUZI', work_date: '2026-11-02', check_in: '07:02:00', check_out: '17:35:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt190403|2026-11-02|07:02:00', is_exception: false },
+  { id: 'ev-10', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 190403', employee_name: 'ACHMAD FAUZI', work_date: '2026-11-03', check_in: '07:05:00', check_out: '19:12:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt190403|2026-11-03|07:05:00', is_exception: false },
+  { id: 'ev-11', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 120509', employee_name: 'BUDI HARTOYO', work_date: '2026-11-02', check_in: '06:28:00', check_out: '16:40:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt120509|2026-11-02|06:28:00', is_exception: false },
+  { id: 'ev-12', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 120509', employee_name: 'BUDI HARTOYO', work_date: '2026-11-08', check_in: '07:55:00', check_out: '13:10:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt120509|2026-11-08|07:55:00', is_exception: false },
+  { id: 'ev-13', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 021010', employee_name: 'SUGENG PURWANTO', work_date: '2026-11-02', check_in: '07:00:00', check_out: '20:30:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt021010|2026-11-02|07:00:00', is_exception: false },
+  { id: 'ev-14', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 021010', employee_name: 'SUGENG PURWANTO', work_date: '2026-11-07', check_in: '05:48:00', check_out: '20:09:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt021010|2026-11-07|05:48:00', is_exception: false },
+  { id: 'ev-15', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 021010', employee_name: 'SUGENG PURWANTO', work_date: '2026-11-13', check_in: '06:30:00', check_out: '', source_status: 'M', raw_code: 'M', fingerprint: 'kt021010|2026-11-13|06:30:00', is_exception: false },
+  { id: 'ev-16', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 051164', employee_name: 'SURYANTO', work_date: '2026-11-14', check_in: '06:10:00', check_out: '15:15:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt051164|2026-11-14|06:10:00', is_exception: false },
+  { id: 'ev-17', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 200303', employee_name: 'MUHAMMAD FATKHAN', work_date: '2026-11-10', check_in: '07:00:00', check_out: '17:05:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt200303|2026-11-10|07:00:00', is_exception: false },
+  { id: 'ev-18', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 190403', employee_name: 'ACHMAD FAUZI', work_date: '2026-11-16', check_in: '07:00:00', check_out: '17:00:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt190403|2026-11-16|07:00:00', is_exception: false },
+  { id: 'ev-19', batch_id: 'batch-demo-01', source_type: 'mitra_transaksi', source_priority: 1, employee_no: 'KT 021010', employee_name: 'SUGENG PURWANTO', work_date: '2026-11-17', check_in: '06:45:00', check_out: '18:00:00', source_status: 'M', raw_code: 'M', fingerprint: 'kt021010|2026-11-17|06:45:00', is_exception: false },
   { id: 'ev-07', batch_id: 'batch-demo-01', source_type: 'radin_xlsx', source_priority: 3, employee_no: 'ST 191103', employee_name: 'ELIAN PURBONEGORO', work_date: '2026-11-11', check_in: '07:42:00', check_out: '16:31:00', source_status: 'H', raw_code: 'H', fingerprint: 'st191103|2026-11-11|07:42:00', is_exception: false },
   { id: 'ev-08', batch_id: 'batch-demo-01', source_type: 'radin_xlsx', source_priority: 3, employee_no: 'ST 210202', employee_name: 'NATHANIA DEVI K', work_date: '2026-11-12', check_in: '08:16:00', check_out: '', source_status: 'H', raw_code: 'H', fingerprint: 'st210202|2026-11-12|08:16:00', is_exception: false },
   { id: 'ev-09', batch_id: 'batch-demo-01', source_type: 'mitra_presensi', source_priority: 2, employee_no: '1106', employee_name: '1106 (Pin Mesin)', work_date: '2026-11-02', check_in: '08:36:42', check_out: '17:02:04', source_status: 'PERLU_PEMERIKSAAN_HR', raw_code: 'UNMAPPED', fingerprint: '1106|2026-11-02|08:36:42', is_exception: true, exception_reason: 'NIK PIN mesin "1106" belum terpetakan di Employee Directory' }
 ];
 
 export const SEED_DRIVER_SCHEDULES = [
-  { id: 'ds-01', work_date: '2026-11-02', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', section: 'Indoor', start_time: '07:00', end_time: '17:30', is_holiday: false, normal_hours: 8, overtime_hours: 2.5, vehicle_no: 'N 8142 WA', destination: 'Kirim Surabaya', notes: 'Trip 2' },
-  { id: 'ds-02', work_date: '2026-11-03', employee_no: 'KT 190403', driver_name: 'ACHMAD FAUZI', section: 'Support', start_time: '07:00', end_time: '19:00', is_holiday: false, normal_hours: 8, overtime_hours: 4, vehicle_no: 'N 8142 WA', destination: 'Bongkar Gempol', notes: '' },
-  { id: 'ds-03', work_date: '2026-11-02', employee_no: 'KT 120509', driver_name: 'BUDI HARTOYO', section: 'Outdoor', start_time: '06:30', end_time: '16:30', is_holiday: false, normal_hours: 8, overtime_hours: 2, vehicle_no: 'N 8821 XB', destination: 'Malang', notes: '' },
-  { id: 'ds-04', work_date: '2026-11-08', employee_no: 'KT 120509', driver_name: 'BUDI HARTOYO', section: 'Radin', start_time: '08:00', end_time: '13:00', is_holiday: true, normal_hours: 0, overtime_hours: 5, vehicle_no: 'N 8821 XB', destination: 'Support Radin Minggu', notes: 'Lembur hari libur' },
-  { id: 'ds-05', work_date: '2026-11-02', employee_no: 'KT 260401', driver_name: 'M. KHUSEN', section: 'Support', start_time: '07:00', end_time: '15:00', is_holiday: false, normal_hours: 8, overtime_hours: 0, vehicle_no: 'N 9011 CD', destination: 'Pasuruan Kota', notes: '' },
-  { id: 'ds-06', work_date: '2026-11-03', employee_no: 'KT 200303', driver_name: 'MUHAMMAD FATKHAN', section: 'Outdoor', start_time: '07:00', end_time: '18:00', is_holiday: false, normal_hours: 8, overtime_hours: 3, vehicle_no: 'N 8220 AB', destination: 'Sidoarjo', notes: '' },
-  { id: 'ds-07', work_date: '2026-11-04', employee_no: 'ST 140807', driver_name: 'SIKUS', section: 'Indoor', start_time: '07:00', end_time: '16:30', is_holiday: false, normal_hours: 8, overtime_hours: 1.5, vehicle_no: 'N 8331 EF', destination: 'Mojokerto', notes: '' }
+  {
+    id: 'ds-01',
+    work_date: '2026-11-02',
+    employee_no: 'KT 190403',
+    driver_name: 'ACHMAD FAUZI',
+    section: 'Indoor',
+    start_time: '07:00',
+    end_time: '17:30',
+    activities: [
+      { start_time: '07:00', end_time: '12:00', is_until_home: false, activity: 'Muat barang Indoor' },
+      { start_time: '12:00', end_time: '', is_until_home: true, activity: 'Kirim Surabaya + Pulang' }
+    ],
+    vehicle_no: 'N 8142 WA',
+    destination: 'Kirim Surabaya',
+    notes: ''
+  },
+  {
+    id: 'ds-02',
+    work_date: '2026-11-03',
+    employee_no: 'KT 190403',
+    driver_name: 'ACHMAD FAUZI',
+    section: 'Support',
+    start_time: '07:00',
+    end_time: '19:00',
+    activities: [
+      { start_time: '07:00', end_time: '11:30', is_until_home: false, activity: 'Antar dokumen & operasional Support' },
+      { start_time: '13:00', end_time: '', is_until_home: true, activity: 'Bongkar Gempol sampai pulang' }
+    ],
+    vehicle_no: 'N 8142 WA',
+    destination: 'Bongkar Gempol',
+    notes: ''
+  },
+  {
+    id: 'ds-03',
+    work_date: '2026-11-02',
+    employee_no: 'KT 120509',
+    driver_name: 'BUDI HARTOYO',
+    section: 'Outdoor',
+    start_time: '06:30',
+    end_time: '16:30',
+    activities: [
+      { start_time: '06:30', end_time: '', is_until_home: true, activity: 'Kirim rangka Outdoor Malang' }
+    ],
+    vehicle_no: 'N 8821 XB',
+    destination: 'Malang',
+    notes: ''
+  },
+  {
+    id: 'ds-04',
+    work_date: '2026-11-08',
+    employee_no: 'KT 120509',
+    driver_name: 'BUDI HARTOYO',
+    section: 'Radin',
+    start_time: '08:00',
+    end_time: '13:00',
+    activities: [
+      { start_time: '08:00', end_time: '13:00', is_until_home: false, activity: 'Support Pengiriman PT Radin (Minggu)' }
+    ],
+    vehicle_no: 'N 8821 XB',
+    destination: 'Support Radin Minggu',
+    notes: 'Lembur hari Minggu'
+  },
+  {
+    id: 'ds-05',
+    work_date: '2026-11-02',
+    employee_no: 'KT 021010',
+    driver_name: 'SUGENG PURWANTO',
+    section: 'Support',
+    start_time: '07:00',
+    end_time: '',
+    activities: [
+      { start_time: '07:00', end_time: '09:30', is_until_home: false, activity: 'Mengantar Direksi' },
+      { start_time: '09:30', end_time: '13:00', is_until_home: false, activity: 'Ambil Barang di Subcon' },
+      { start_time: '13:00', end_time: '', is_until_home: true, activity: 'Bantu kirim barang' }
+    ],
+    vehicle_no: 'N 9011 CD',
+    destination: 'Direksi + Subcon',
+    notes: 'Multi-kegiatan'
+  },
+  {
+    id: 'ds-06',
+    work_date: '2026-11-07',
+    employee_no: 'KT 021010',
+    driver_name: 'SUGENG PURWANTO',
+    section: 'Radin',
+    start_time: '05:48',
+    end_time: '',
+    activities: [
+      { start_time: '05:48', end_time: '', is_until_home: true, activity: 'Kirim proyek Radin (Sabtu)' }
+    ],
+    vehicle_no: 'N 9011 CD',
+    destination: 'Proyek Radin',
+    notes: 'Sabtu normal 5j'
+  },
+  {
+    id: 'ds-07',
+    work_date: '2026-11-13',
+    employee_no: 'KT 021010',
+    driver_name: 'SUGENG PURWANTO',
+    section: 'Outdoor',
+    start_time: '06:30',
+    end_time: '',
+    activities: [
+      { start_time: '06:30', end_time: '', is_until_home: true, activity: 'Pengiriman luar kota (potensi lewat hari)' }
+    ],
+    vehicle_no: 'N 9011 CD',
+    destination: 'Luar Kota',
+    notes: 'Case clock-out kosong'
+  },
+  {
+    id: 'ds-08a',
+    work_date: '2026-11-14',
+    employee_no: 'KT 051164',
+    driver_name: 'SURYANTO',
+    section: 'Support',
+    start_time: '06:00',
+    end_time: '12:00',
+    activities: [
+      { start_time: '06:00', end_time: '12:00', is_until_home: false, activity: 'Operasional pagi Support' }
+    ],
+    vehicle_no: 'N 8220 AB',
+    destination: 'Support Pagi',
+    notes: ''
+  },
+  {
+    id: 'ds-08b',
+    work_date: '2026-11-14',
+    employee_no: 'KT 051164',
+    driver_name: 'SURYANTO',
+    section: 'Radin',
+    start_time: '12:00',
+    end_time: '',
+    activities: [
+      { start_time: '12:00', end_time: '', is_until_home: true, activity: 'Bantu pengiriman Radin sore' }
+    ],
+    vehicle_no: 'N 8220 AB',
+    destination: 'Radin Sore',
+    notes: 'Split 2 departemen'
+  },
+  {
+    id: 'ds-09',
+    work_date: '2026-11-10',
+    employee_no: 'KT 200303',
+    driver_name: 'MUHAMMAD FATKHAN',
+    section: 'Outdoor',
+    start_time: '07:00',
+    end_time: '',
+    activities: [
+      { start_time: '07:00', end_time: '', is_until_home: true, activity: 'Kirim Hari Pahlawan' }
+    ],
+    vehicle_no: 'N 8331 EF',
+    destination: 'Sidoarjo',
+    notes: 'Hari Besar: Normal 8j + Lembur Tarif Hari Besar'
+  },
+  {
+    id: 'ds-10',
+    work_date: '2026-11-16',
+    employee_no: 'KT 190403',
+    driver_name: 'ACHMAD FAUZI',
+    section: 'Indoor',
+    start_time: '07:00',
+    end_time: '',
+    activities: [
+      { start_time: '07:00', end_time: '', is_until_home: true, activity: 'Pengiriman Indoor Periode 2' }
+    ],
+    vehicle_no: 'N 8142 WA',
+    destination: 'Surabaya',
+    notes: ''
+  },
+  {
+    id: 'ds-11',
+    work_date: '2026-11-17',
+    employee_no: 'KT 021010',
+    driver_name: 'SUGENG PURWANTO',
+    section: 'Support',
+    start_time: '06:45',
+    end_time: '',
+    activities: [
+      { start_time: '06:45', end_time: '', is_until_home: true, activity: 'Operasional Support Periode 2' }
+    ],
+    vehicle_no: 'N 9011 CD',
+    destination: 'Pasuruan - Malang',
+    notes: ''
+  }
 ];
 
+export const SEED_DRIVER_RECONCILIATIONS = [];
+
 export const SEED_DRIVER_ADJUSTMENTS = {
-  'KT 190403': { priorShortfall: 0, bpjsDeduction: 45000, claimHours: 2 },
-  'KT 120509': { priorShortfall: 50000, bpjsDeduction: 45000, claimHours: 0 },
-  'KT 260401': { priorShortfall: 0, bpjsDeduction: 0, claimHours: 0 },
-  'KT 200303': { priorShortfall: 0, bpjsDeduction: 45000, claimHours: 1 },
-  'ST 140807': { priorShortfall: 0, bpjsDeduction: 45000, claimHours: 0 }
+  '2026-11-P1': {
+    'KT 120509': { priorShortfall: 50000, bySection: { Radin: 50000 } }
+  },
+  '2026-11-P2': {
+    'KT 190403': { priorShortfall: 0, bySection: {} }
+  }
 };
 
 export const SEED_STAFF_REVIEWS = [
@@ -245,3 +440,5 @@ export const SEED_STAFF_REVIEWS = [
     confirmed_at: '2026-11-23T08:20:00Z'
   }
 ];
+
+export const SEED_STAFF_MEAL_OVERRIDES = [];

@@ -1,6 +1,0 @@
-Output disini adalah berupa tombol PDF dari :
-(contoh format ada di proses)
-- Time Checksheet (per driver)
-- Laporan Per Bagian Supporting + Laporan Summarynya
-- Slip gaji driver
-- Bukti kas keluar (BKK)

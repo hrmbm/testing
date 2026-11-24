@@ -431,12 +431,14 @@ function seedDemoWorkspaceData() {
     {
       id: 'emp-demo-pic',
       applicant_id: null,
-      employee_no: 'ST 130116',
-      full_name: 'Diana Anita Sari',
-      department: 'HRD & GA',
-      position: 'Manager HRD & GA',
+      employee_no: 'ST 210608',
+      full_name: 'DIANA ANITA SARI',
+      department: 'HR GA',
+      position: 'KA. DEPT HR & GA',
       employment_status: 'TETAP',
-      join_date: '2013-01-16',
+      company_entity: 'PT MBM',
+      home_base: 'Pasuruan',
+      join_date: '2015-06-08',
       contract_start_date: null,
       contract_end_date: null,
       address: 'Pasuruan',
@@ -444,7 +446,110 @@ function seedDemoWorkspaceData() {
       phone: '08133193313',
       salary: 12000000,
       notes: ''
-    }
+    },
+    {
+      id: 'emp-demo-mmd-1',
+      applicant_id: null,
+      employee_no: 'ST 130116',
+      full_name: 'ABD. KHAMID',
+      department: 'PURCHASING',
+      position: 'MMD',
+      employment_status: 'TETAP',
+      company_entity: 'PT MBM',
+      home_base: 'Kiln Dry',
+      join_date: '2004-11-05',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Pasuruan',
+      ktp_nik: '3514000000130116',
+      phone: '082230164498',
+      salary: 5800000,
+      notes: 'Kiln Dry Schedule'
+    },
+    {
+      id: 'emp-demo-mmd-2',
+      applicant_id: null,
+      employee_no: 'ST 061105',
+      full_name: 'CHOIRIL',
+      department: 'PURCHASING',
+      position: 'MMD',
+      employment_status: 'TETAP',
+      company_entity: 'PT MBM',
+      home_base: 'Kiln Dry',
+      join_date: '2006-11-05',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Pasuruan',
+      ktp_nik: '3514000000061105',
+      phone: '081330112201',
+      salary: 5800000,
+      notes: 'Kiln Dry Schedule'
+    },
+    {
+      id: 'emp-demo-mmd-3',
+      applicant_id: null,
+      employee_no: 'ST 061107',
+      full_name: 'JUWADI',
+      department: 'PURCHASING',
+      position: 'MMD',
+      employment_status: 'TETAP',
+      company_entity: 'PT MBM',
+      home_base: 'Kiln Dry',
+      join_date: '2006-11-07',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Pasuruan',
+      ktp_nik: '3514000000061107',
+      phone: '081330112202',
+      salary: 5800000,
+      notes: 'Kiln Dry Schedule'
+    },
+    {
+      id: 'emp-demo-hr-staff',
+      applicant_id: null,
+      employee_no: 'ST 260501',
+      full_name: 'AYUK NUR KHOTIFAH',
+      department: 'HR GA',
+      position: 'STAFF HR & GA',
+      employment_status: 'TETAP',
+      company_entity: 'PT MBM',
+      home_base: 'Pasuruan',
+      join_date: '2021-05-01',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Pasuruan',
+      ktp_nik: '3514000000260501',
+      phone: '081230004501',
+      salary: 5200000,
+      notes: ''
+    },
+    {
+      id: 'emp-demo-radin-mgr',
+      applicant_id: null,
+      employee_no: 'ST 000002',
+      full_name: 'FLORENCIA IRENA',
+      department: 'MARKETING & OPERATION',
+      position: 'MARKETING, OPERATION MANAGER',
+      employment_status: 'TETAP',
+      company_entity: 'PT RADIN',
+      home_base: 'Surabaya',
+      join_date: '2018-01-10',
+      contract_start_date: null,
+      contract_end_date: null,
+      address: 'Surabaya',
+      ktp_nik: '3578000000000002',
+      phone: '08113100002',
+      salary: 14000000,
+      notes: ''
+    },
+    { id: 'drv-demo-1', applicant_id: null, employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-04-12', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000190403', phone: '081556636256', salary: 3675000, notes: '' },
+    { id: 'drv-demo-2', applicant_id: null, employee_no: 'KT 120509', full_name: 'BUDI HARTOYO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2013-02-04', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000120509', phone: '085536582306', salary: 3675000, notes: '' },
+    { id: 'drv-demo-3', applicant_id: null, employee_no: 'KT 260401', full_name: 'M. KHUSEN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2026-04-27', contract_start_date: '2026-04-27', contract_end_date: '2027-04-26', address: 'Pasuruan', ktp_nik: '3514000000260401', phone: '08892855334', salary: 3675000, notes: '' },
+    { id: 'drv-demo-4', applicant_id: null, employee_no: 'KT 200303', full_name: 'MUHAMMAD FATKHAN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2020-03-12', contract_start_date: '2026-03-12', contract_end_date: '2027-03-11', address: 'Pasuruan', ktp_nik: '3514000000200303', phone: '085853020834', salary: 3675000, notes: '' },
+    { id: 'drv-demo-5', applicant_id: null, employee_no: 'ST 140807', full_name: 'SIKUS', department: 'HR GA', position: 'SOPIR', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2007-08-14', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000140807', phone: '081325339928', salary: 3675000, notes: 'Driver Kontainer (dikecualikan dari modul Driver Payroll)' },
+    { id: 'drv-demo-6', applicant_id: null, employee_no: 'KT 021010', full_name: 'SUGENG PURWANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2010-10-11', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000021010', phone: '085852024564', salary: 3675000, notes: '' },
+    { id: 'drv-demo-7', applicant_id: null, employee_no: 'KT 051164', full_name: 'SURYANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2005-04-01', contract_start_date: '2026-04-01', contract_end_date: '2027-03-31', address: 'Pasuruan', ktp_nik: '3514000000051164', phone: '0816996881', salary: 3675000, notes: '' },
+    { id: 'drv-demo-8', applicant_id: null, employee_no: 'KT 190905', full_name: 'TEGUH SUSANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-09-13', contract_start_date: '2026-09-13', contract_end_date: '2027-09-12', address: 'Pasuruan', ktp_nik: '3514000000190905', phone: '083157160063', salary: 3675000, notes: '' }
   ];
   interviews = [
     {
@@ -6353,7 +6458,14 @@ async function loadView(view, forceRefresh = false) {
     return;
   }
 
-  const dataViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'contractSettings', 'systemImport', 'print']);
+  const dataViews = new Set([
+    'dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking',
+    'employees', 'contracts', 'contractSettings', 'systemImport', 'print',
+    'opsSettings', 'attendanceUpload', 'attendanceCalendar', 'attendanceStaffHoliday',
+    'attendanceStaffManagement', 'attendanceStaffReports', 'attendanceDriverSchedule',
+    'attendanceDriverManagement', 'attendanceDriverReports', 'stationeryInput',
+    'stationeryStock', 'stationeryReports'
+  ]);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
     let hasCached = false;
     if (!forceRefresh && !isDemoMode) {
@@ -6653,8 +6765,8 @@ async function init() {
         }
       : {
           userId: 'demo-admin',
-          username: 'ST 130116',
-          employeeNik: 'ST 130116',
+          username: 'ST 210608',
+          employeeNik: 'ST 210608',
           displayName: 'Diana Anita Sari',
           role: 'Superadmin',
           isRootAdmin: true

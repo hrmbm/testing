@@ -1,5 +1,0 @@
-Output disini adalah :
-1. Tabel Pengambilan per departemen
-2. Grafik pengambilan per departemen
-3. Rencana pembelian (Pisahkan mana yang Fast Moving, Slow Moving dan barang Jarang Bergerak)
-Pembelian ini tentu bisa untuk kebutuhan 1 mingguan, 2 mingguan atau bulanan, buat fleksibel, dan studinya harus dari data aktual selama 3 bulan, jika belum tercapai, pakai data yang ada

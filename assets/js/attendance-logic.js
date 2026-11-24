@@ -797,3 +797,194 @@ export function evaluateCutiConfirmationGate(leaveRow, referenceDateIso = '2026-
   const requiresConfirmation = days <= cfg.confirmationDaysThreshold;
   return { requiresConfirmation, daysUntilRenewal: days };
 }
+
+export function addMinutesToScheduleCutoff(hhmm = '07:30', thresholdMinutes = 1) {
+  const m = String(hhmm || '07:30').trim().match(/^(\d{1,2}):(\d{2})/);
+  const baseMin = m ? (Number(m[1]) * 60 + Number(m[2])) : (7 * 60 + 30);
+  const offset = Math.max(0, Math.round(Number(thresholdMinutes) || 0) - 1);
+  const totalMin = Math.min(23 * 60 + 59, baseMin + offset);
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${pad2(hh)}:${pad2(mm)}:59`;
+}
+
+export function resolveStaffWorkSchedule(emp = {}, workDate = '2026-11-02', settings = DEFAULT_OPS_SETTINGS) {
+  const cfg = normalizeOpsSettings(settings);
+  const ws = cfg.attendance.workSchedules;
+  const dow = workDate ? new Date(`${workDate}T00:00:00Z`).getUTCDay() : 1;
+  const isSaturday = dow === 6;
+  const isSunday = dow === 0;
+  const nikKey = compactNik(emp?.employee_no || '');
+  const nameKey = normKey(emp?.full_name || '');
+  const entityOrDept = `${emp?.company_entity || ''} ${emp?.department || ''} ${emp?.position || ''} ${emp?.home_base || ''}`.toUpperCase();
+
+  // 1. PT Radin Mitra Lestari (held for phase 2, structured ready)
+  if (/RADIN/.test(entityOrDept)) {
+    return {
+      ruleSource: 'radin_hold',
+      homeBase: 'PT RADIN MITRA LESTARI',
+      isSunday,
+      isSaturday,
+      startTime: '08:00',
+      endTime: isSaturday ? '12:00' : '17:00',
+      note: ws.radinPolicy.notes
+    };
+  }
+
+  // 2. Manual per-employee exception takes top priority for PT MBM Staff
+  const manual = (ws.manualExceptions || []).find(ex =>
+    (ex.employee_no && compactNik(ex.employee_no) === nikKey) ||
+    (ex.full_name && normKey(ex.full_name) === nameKey)
+  );
+  if (manual) {
+    return {
+      ruleSource: 'manual_exception',
+      homeBase: manual.homeBase || 'Pengecualian Manual',
+      isSunday,
+      isSaturday,
+      startTime: isSaturday ? manual.saturdayStart : manual.weekdayStart,
+      endTime: isSaturday ? manual.saturdayEnd : manual.weekdayEnd,
+      note: manual.reason || 'Pengecualian manual jadwal staff'
+    };
+  }
+
+  // 3. Kiln Dry MMD per-person schedule
+  const kiln = (ws.kilnDryPersonnel || []).find(k =>
+    (k.employee_no && compactNik(k.employee_no) === nikKey) ||
+    (k.full_name && normKey(k.full_name) === nameKey)
+  );
+  if (kiln) {
+    return {
+      ruleSource: 'kiln_dry_mmd',
+      homeBase: 'Kiln Dry (MMD)',
+      isSunday,
+      isSaturday,
+      startTime: isSaturday ? kiln.saturdayStart : kiln.weekdayStart,
+      endTime: isSaturday ? kiln.saturdayEnd : kiln.weekdayEnd,
+      note: kiln.notes || 'Jadwal Khusus Kiln Dry'
+    };
+  }
+
+  // 4. Surabaya & Jakarta vs Pasuruan Home Base
+  const isSbyJkt = /SURABAYA|SBY|JAKARTA|JKT|MARKETING & OPERATION/.test(entityOrDept) && /SURABAYA|JAKARTA/.test(`${emp?.home_base || ''} ${emp?.position || ''} ${emp?.address || ''}`.toUpperCase());
+  const block = isSbyJkt ? ws.surabayaJakarta : ws.pasuruan;
+  return {
+    ruleSource: isSbyJkt ? 'surabaya_jakarta' : 'pasuruan',
+    homeBase: block.label,
+    isSunday,
+    isSaturday,
+    startTime: isSaturday ? block.saturdayStart : block.weekdayStart,
+    endTime: isSaturday ? block.saturdayEnd : block.weekdayEnd,
+    note: ''
+  };
+}
+
+export function evaluateStaffArrivalStatus({
+  checkInTime = '',
+  scheduleStart = '07:30',
+  settings = DEFAULT_OPS_SETTINGS,
+  manualMealOverride = null // null | { eligible: boolean, reason: string }
+} = {}) {
+  const cfg = normalizeOpsSettings(settings).attendance;
+  const normIn = normalizeTimeString(checkInTime);
+  const lateCutoff = addMinutesToScheduleCutoff(scheduleStart, cfg.lateThresholdMinutes);
+  const mealCutoff = addMinutesToScheduleCutoff(scheduleStart, cfg.mealThresholdMinutes);
+
+  if (!normIn) {
+    return {
+      hasPunch: false,
+      isLate: false,
+      code: 'PENDING',
+      lateCutoff,
+      mealCutoff,
+      getsMealAllowance: manualMealOverride ? Boolean(manualMealOverride.eligible) : false,
+      mealOverridden: Boolean(manualMealOverride),
+      mealReason: manualMealOverride?.reason || 'Belum ada jam masuk'
+    };
+  }
+
+  const isLate = isTimeAfter(normIn, lateCutoff);
+  const autoMeal = !isTimeAfter(normIn, mealCutoff);
+  const getsMealAllowance = manualMealOverride && typeof manualMealOverride.eligible === 'boolean'
+    ? manualMealOverride.eligible
+    : autoMeal;
+
+  return {
+    hasPunch: true,
+    isLate,
+    code: isLate ? 'T' : 'M',
+    lateCutoff,
+    mealCutoff,
+    getsMealAllowance,
+    mealOverridden: Boolean(manualMealOverride),
+    mealReason: manualMealOverride?.reason || (autoMeal ? `Tap <= ${mealCutoff} (Dapat Uang Makan)` : `Tap > ${mealCutoff} (Tidak Dapat Uang Makan)`)
+  };
+}
+
+export function getIndonesianNationalHolidaysPreset(year = 2026) {
+  const y = Number(year) || 2026;
+  const presets = {
+    2026: [
+      { cal_date: '2026-01-01', day_type: 'HOLIDAY', label: 'Tahun Baru 2026 Masehi', notes: 'Libur Nasional' },
+      { cal_date: '2026-01-16', day_type: 'HOLIDAY', label: 'Isra Mikraj Nabi Muhammad SAW', notes: 'Libur Nasional' },
+      { cal_date: '2026-02-17', day_type: 'HOLIDAY', label: 'Tahun Baru Imlek 2577 Kongzili', notes: 'Libur Nasional' },
+      { cal_date: '2026-03-19', day_type: 'HOLIDAY', label: 'Hari Suci Nyepi (Tahun Baru Saka 1948)', notes: 'Libur Nasional' },
+      { cal_date: '2026-03-20', day_type: 'HOLIDAY', label: 'Hari Raya Idul Fitri 1447 H (Hari 1)', notes: 'Libur Nasional' },
+      { cal_date: '2026-03-21', day_type: 'HOLIDAY', label: 'Hari Raya Idul Fitri 1447 H (Hari 2)', notes: 'Libur Nasional' },
+      { cal_date: '2026-04-03', day_type: 'HOLIDAY', label: 'Wafat Yesus Kristus', notes: 'Libur Nasional' },
+      { cal_date: '2026-05-01', day_type: 'HOLIDAY', label: 'Hari Buruh Internasional', notes: 'Libur Nasional' },
+      { cal_date: '2026-05-14', day_type: 'HOLIDAY', label: 'Kenaikan Yesus Kristus', notes: 'Libur Nasional' },
+      { cal_date: '2026-05-27', day_type: 'HOLIDAY', label: 'Hari Raya Idul Adha 1447 H', notes: 'Libur Nasional' },
+      { cal_date: '2026-05-31', day_type: 'HOLIDAY', label: 'Hari Raya Waisak 2570 BE', notes: 'Libur Nasional' },
+      { cal_date: '2026-06-01', day_type: 'HOLIDAY', label: 'Hari Lahir Pancasila', notes: 'Libur Nasional' },
+      { cal_date: '2026-06-16', day_type: 'HOLIDAY', label: '1 Muharam Tahun Baru Islam 1448 H', notes: 'Libur Nasional' },
+      { cal_date: '2026-08-17', day_type: 'HOLIDAY', label: 'Proklamasi Kemerdekaan RI', notes: 'Libur Nasional' },
+      { cal_date: '2026-08-25', day_type: 'HOLIDAY', label: 'Maulid Nabi Muhammad SAW', notes: 'Libur Nasional' },
+      { cal_date: '2026-12-25', day_type: 'HOLIDAY', label: 'Kelahiran Yesus Kristus (Natal)', notes: 'Libur Nasional' }
+    ]
+  };
+  if (presets[y]) return presets[y];
+  return [
+    { cal_date: `${y}-01-01`, day_type: 'HOLIDAY', label: `Tahun Baru ${y} Masehi`, notes: 'Libur Nasional' },
+    { cal_date: `${y}-05-01`, day_type: 'HOLIDAY', label: 'Hari Buruh Internasional', notes: 'Libur Nasional' },
+    { cal_date: `${y}-06-01`, day_type: 'HOLIDAY', label: 'Hari Lahir Pancasila', notes: 'Libur Nasional' },
+    { cal_date: `${y}-08-17`, day_type: 'HOLIDAY', label: 'Proklamasi Kemerdekaan RI', notes: 'Libur Nasional' },
+    { cal_date: `${y}-12-25`, day_type: 'HOLIDAY', label: 'Hari Raya Natal', notes: 'Libur Nasional' }
+  ];
+}
+
+export function parseHolidayImportRows(aoa = []) {
+  if (!Array.isArray(aoa) || !aoa.length) return [];
+  const headerIdx = findHeaderRowIndex(aoa, [/TANGGAL|DATE/, /KETERANGAN|NAMA|LIBUR|LABEL/]);
+  const start = headerIdx >= 0 ? headerIdx + 1 : 0;
+  const header = headerIdx >= 0 ? aoa[headerIdx].map(normKey) : [];
+  const findCol = rx => (header.length ? header.findIndex(h => rx.test(h)) : -1);
+  const cDate = findCol(/TANGGAL|DATE/);
+  const cLabel = findCol(/KETERANGAN|NAMA|LIBUR|LABEL/);
+  const cType = findCol(/JENIS|TIPE|TYPE/);
+  const cNotes = findCol(/ALASAN|CATATAN|NOTE/);
+
+  const rows = [];
+  for (let i = start; i < aoa.length; i++) {
+    const r = aoa[i];
+    if (!Array.isArray(r) || !r.some(v => String(v ?? '').trim() !== '')) continue;
+    const rawDate = cDate >= 0 ? r[cDate] : r[0];
+    const calDate = parseExcelOrTextDate(rawDate);
+    if (!calDate) continue;
+    const label = String((cLabel >= 0 ? r[cLabel] : r[1]) ?? '').trim();
+    const rawType = normKey(cType >= 0 ? r[cType] : (r[2] || 'HOLIDAY'));
+    let dayType = 'HOLIDAY';
+    if (/CUTI/.test(rawType)) dayType = 'CUTI_BERSAMA';
+    else if (/WEEKEND|MINGGU/.test(rawType)) dayType = 'WEEKEND';
+    else if (/WORKING|KERJA|NORMAL/.test(rawType)) dayType = 'WORKING';
+    const notes = String((cNotes >= 0 ? r[cNotes] : r[3]) ?? '').trim() || 'Import Hari Besar Nasional';
+    rows.push({
+      cal_date: calDate,
+      day_type: dayType,
+      label: label || 'Hari Besar Nasional',
+      notes
+    });
+  }
+  return rows;
+}
+
