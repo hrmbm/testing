@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { read, utils } from '../node_modules/xlsx/xlsx.mjs';
 import { computeDisc, ageFromDate } from '../assets/js/disc-engine.js';
 import {
   TEMPLATE_URL,
@@ -105,7 +106,11 @@ import {
   resolveSharedDiscForApplicant,
   resolveSharedInterviewsForApplicant,
   parseEmployeeSpreadsheetRows,
+  parseEmployeeWorksheetAoa,
   formatEmployeeExportRow,
+  normalizeCompanyEntity,
+  formatCompanyEntityName,
+  resolveCompanyMasterIdFromEntity,
   verifyPinRevealPassword,
   normalizeLoginIdentifier,
   validateLoginIdentifier,
@@ -306,8 +311,15 @@ test('buildUnifiedTrackingRows produces full 12-column tracking structure', () =
   assert.equal(tracking[0].decisionDate, '2026-03-06');
 });
 
-test('Employee Directory spreadsheet parser and formatter align with 16-column format', () => {
-  assert.equal(EMPLOYEE_TABLE_HEADERS.length, 16);
+test('Employee Directory spreadsheet parser and formatter align with 18-column format and canonical company mapping', () => {
+  assert.equal(EMPLOYEE_TABLE_HEADERS.length, 18);
+  assert.equal(normalizeCompanyEntity('PT Radin Mitra Lestari'), 'REHOLZ');
+  assert.equal(normalizeCompanyEntity('PT. Mitra Binamandiri Makmur'), 'MITRA');
+  assert.equal(formatCompanyEntityName('REHOLZ'), 'PT Radin Mitra Lestari');
+  assert.equal(formatCompanyEntityName('MITRA'), 'PT. Mitra Binamandiri Makmur');
+  assert.equal(resolveCompanyMasterIdFromEntity('REHOLZ'), 'comp-rml');
+  assert.equal(resolveCompanyMasterIdFromEntity('MITRA'), 'comp-mbm');
+
   const { rows, errors } = parseEmployeeSpreadsheetRows([
     {
       Nama: 'ABD. KHAMID',
@@ -325,7 +337,9 @@ test('Employee Directory spreadsheet parser and formatter align with 16-column f
       Status: 'TETAP',
       Pendidikan: 'SMP',
       'Jenis Kelamin': 'Laki-laki',
-      Agama: 'Islam'
+      Agama: 'Islam',
+      'Home Base': 'KILN DRY',
+      Perusahaan: 'MITRA'
     }
   ]);
   assert.deepEqual(errors, []);
@@ -334,10 +348,37 @@ test('Employee Directory spreadsheet parser and formatter align with 16-column f
   assert.equal(rows[0].join_date, '2004-11-05');
   assert.equal(rows[0].contract_start_date, null);
   assert.equal(rows[0].birth_date, '1983-12-31');
+  assert.equal(rows[0].home_base, 'KILN DRY');
+  assert.equal(rows[0].company_entity, 'MITRA');
   const exported = formatEmployeeExportRow(rows[0]);
   assert.deepEqual(Object.keys(exported), EMPLOYEE_TABLE_HEADERS);
   assert.equal(exported['Tgl Masuk'], '05-11-2004');
   assert.equal(exported['Mulai Kontrak'], '-');
+  assert.equal(exported['Home Base'], 'KILN DRY');
+  assert.equal(exported.Perusahaan, 'MITRA');
+});
+
+test('DK/Data_Karyawan_2026-11-24.xlsx parses all 174 canonical MITRA & REHOLZ records cleanly', () => {
+  const buf = fs.readFileSync('DK/Data_Karyawan_2026-11-24.xlsx');
+  const wb = read(buf, { type: 'buffer' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const aoa = utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const { rows, errors } = parseEmployeeWorksheetAoa(aoa);
+  assert.deepEqual(errors, []);
+  assert.equal(rows.length, 174);
+  assert.equal(rows.filter(r => r.company_entity === 'MITRA').length, 146);
+  assert.equal(rows.filter(r => r.company_entity === 'REHOLZ').length, 28);
+  assert.equal(rows.filter(r => String(r.position || '').toUpperCase().includes('SOPIR')).length, 8);
+  assert.equal(rows.filter(r => r.home_base === 'KILN DRY').length, 3);
+
+  const bryan = rows.find(r => r.employee_no === 'ST 000001');
+  assert.equal(bryan?.full_name, 'BRYAN SOENNARDI');
+  assert.equal(bryan?.home_base, 'PASURUAN');
+  assert.equal(bryan?.company_entity, 'REHOLZ');
+
+  const khamid = rows.find(r => r.employee_no === 'ST 130116');
+  assert.equal(khamid?.home_base, 'KILN DRY');
+  assert.equal(khamid?.company_entity, 'MITRA');
 });
 
 test('findDefaultInterviewer matches Samsul Hariyadi for HR 1 and Diana Anita Sari for HR 2 strictly from Employee Directory', () => {
@@ -1356,9 +1397,10 @@ test('Optimization helpers: buildWorkspaceIndexes parity, memoized DISC, paginat
   assert.equal(endTyped.caretPos, 9);
 });
 
-test('SQL migrations v5 and v6 match all frontend Supabase tables, columns, and RPC calls', () => {
+test('SQL migrations v5, v6, and v8 match frontend tables, home_base/company_entity columns, and attendance reset SQL', () => {
   const v5Sql = fs.readFileSync('database/migrations/20261122_hrga_workspace_v5.sql', 'utf8');
   const v6Sql = fs.readFileSync('database/migrations/20261123_hrga_workspace_v6.sql', 'utf8');
+  const v8Sql = fs.readFileSync('database/migrations/20261124_hrga_v8_dk_integration_and_clear_attendance.sql', 'utf8');
 
   assert.match(v5Sql, /contract_history[\s\S]*DEFAULT gen_random_uuid\(\)::text/);
   assert.match(v5Sql, /applied_by_name/);
@@ -1379,6 +1421,12 @@ test('SQL migrations v5 and v6 match all frontend Supabase tables, columns, and 
   }
   assert.ok(v6Sql.includes('public.record_stationery_transaction('), 'v6 migration must define record_stationery_transaction RPC');
   assert.ok(v6Sql.includes('employee_no text NOT NULL'), 'staff_conditional_holidays must include employee_no column');
+
+  assert.ok(v8Sql.includes('home_base text NOT NULL DEFAULT'), 'v8 migration must add home_base column');
+  assert.ok(v8Sql.includes('company_entity text NOT NULL DEFAULT'), 'v8 migration must add company_entity column');
+  assert.ok(v8Sql.includes("'REHOLZ'") && v8Sql.includes("'MITRA'"), 'v8 migration must normalize MITRA/REHOLZ');
+  assert.ok(v8Sql.includes('DELETE FROM public.attendance_raw_events'), 'v8 migration must clear attendance_raw_events');
+  assert.ok(v8Sql.includes('DELETE FROM public.attendance_upload_batches'), 'v8 migration must clear attendance_upload_batches');
 });
 
 

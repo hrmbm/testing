@@ -1,5 +1,5 @@
 // Pure business logic helpers for HR&GA Workspace (unit-tested via node:test)
-import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-18';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-19';
 
 const DISC_RESULT_CACHE = new WeakMap();
 
@@ -21,6 +21,38 @@ export function getMemoizedDiscResult(disc, computeFn = computeDisc) {
 
 export const PIN_REVEAL_PASSWORD = '8karakterH!';
 
+export function normalizeCompanyEntity(value = '') {
+  const upper = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!upper) return 'MITRA';
+  if (upper.includes('REHOLZ') || upper.includes('RADIN') || upper === 'RML') return 'REHOLZ';
+  return 'MITRA';
+}
+
+export function isReholzCompanyEntity(value = '') {
+  const upper = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+  return upper.includes('REHOLZ') || upper.includes('RADIN') || upper === 'RML';
+}
+
+export function formatCompanyEntityName(value = '') {
+  return normalizeCompanyEntity(value) === 'REHOLZ'
+    ? 'PT Radin Mitra Lestari'
+    : 'PT. Mitra Binamandiri Makmur';
+}
+
+export function resolveCompanyMasterIdFromEntity(value = '') {
+  return normalizeCompanyEntity(value) === 'REHOLZ' ? 'comp-rml' : 'comp-mbm';
+}
+
+export function normalizeHomeBase(value = '') {
+  const upper = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!upper) return 'PASURUAN';
+  if (upper === 'SBY' || upper.includes('SURABAYA')) return 'SURABAYA';
+  if (upper === 'JKT' || upper.includes('JAKARTA')) return 'JAKARTA';
+  if (upper.includes('KILN')) return 'KILN DRY';
+  if (upper.includes('PASURUAN')) return 'PASURUAN';
+  return upper;
+}
+
 export const EMPLOYEE_TABLE_HEADERS = [
   'Nama',
   'Nik',
@@ -37,7 +69,9 @@ export const EMPLOYEE_TABLE_HEADERS = [
   'Status',
   'Pendidikan',
   'Jenis Kelamin',
-  'Agama'
+  'Agama',
+  'Home Base',
+  'Perusahaan'
 ];
 
 export const EMPLOYEE_UI_HEADERS = [
@@ -56,7 +90,9 @@ export const EMPLOYEE_UI_HEADERS = [
   'Status',
   'Education',
   'Gender',
-  'Religion'
+  'Religion',
+  'Home Base',
+  'Company'
 ];
 
 export const INVITE_SOURCES = [
@@ -1408,7 +1444,15 @@ const EMPLOYEE_HEADER_MAP = {
   kelamin: 'gender',
   gender: 'gender',
   agama: 'religion',
-  religion: 'religion'
+  religion: 'religion',
+  homebase: 'home_base',
+  lokasi: 'home_base',
+  location: 'home_base',
+  perusahaan: 'company_entity',
+  company: 'company_entity',
+  companyentity: 'company_entity',
+  pt: 'company_entity',
+  entity: 'company_entity'
 };
 
 export function normalizeEmploymentStatus(value = '') {
@@ -1458,11 +1502,43 @@ export function parseEmployeeSpreadsheetRows(rawRows = []) {
       employment_status: normalizeEmploymentStatus(mapped.employment_status),
       education: String(mapped.education ?? '').trim(),
       gender: String(mapped.gender ?? '').trim(),
-      religion: String(mapped.religion ?? '').trim()
+      religion: String(mapped.religion ?? '').trim(),
+      home_base: normalizeHomeBase(mapped.home_base ?? 'PASURUAN'),
+      company_entity: normalizeCompanyEntity(mapped.company_entity ?? 'MITRA')
     });
   });
 
   return { rows: parsed, errors };
+}
+
+export function parseEmployeeWorksheetAoa(aoa = []) {
+  if (!Array.isArray(aoa) || !aoa.length) return { rows: [], errors: [], headerRowIndex: -1 };
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(aoa.length, 15); i++) {
+    const row = Array.isArray(aoa[i]) ? aoa[i] : [];
+    const keys = new Set(row.map(c => normalizeHeaderKey(c)).filter(Boolean));
+    if ((keys.has('nama') || keys.has('name') || keys.has('fullname')) &&
+        (keys.has('nik') || keys.has('employeenik') || keys.has('employeeno'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) {
+    return { rows: [], errors: ['Header kolom Nama & Nik tidak ditemukan pada worksheet.'], headerRowIndex: -1 };
+  }
+  const headers = (aoa[headerIdx] || []).map(h => String(h ?? '').trim());
+  const objects = [];
+  for (let r = headerIdx + 1; r < aoa.length; r++) {
+    const rowArr = aoa[r];
+    if (!Array.isArray(rowArr) || !rowArr.some(v => String(v ?? '').trim() !== '')) continue;
+    const obj = {};
+    headers.forEach((h, colIdx) => {
+      if (h) obj[h] = rowArr[colIdx] ?? '';
+    });
+    objects.push(obj);
+  }
+  const res = parseEmployeeSpreadsheetRows(objects);
+  return { ...res, headerRowIndex: headerIdx };
 }
 
 export function formatEmployeeExportRow(employee, applicant = null) {
@@ -1485,7 +1561,9 @@ export function formatEmployeeExportRow(employee, applicant = null) {
     Status: employee.employment_status || '',
     Pendidikan: employee.education || appData.pendidikan_terakhir || '',
     'Jenis Kelamin': genderLabel,
-    Agama: employee.religion || appData.agama || ''
+    Agama: employee.religion || appData.agama || '',
+    'Home Base': normalizeHomeBase(employee.home_base || ''),
+    Perusahaan: normalizeCompanyEntity(employee.company_entity || '')
   };
 }
 

@@ -15,8 +15,14 @@ import {
 } from '../assets/js/ops-settings-logic.js';
 import {
   SEED_STATIONERY_ITEMS,
+  SEED_EMPLOYEES,
   SEED_DRIVERS,
-  SEED_STAFF_SAMPLES
+  SEED_STAFF_SAMPLES,
+  SEED_ATTENDANCE_BATCHES,
+  SEED_ATTENDANCE_EVENTS,
+  SEED_STAFF_REVIEWS,
+  SEED_STAFF_MEAL_OVERRIDES,
+  SEED_DRIVER_RECONCILIATIONS
 } from '../assets/js/ops-seed-data.js';
 import {
   parseExcelOrTextDate,
@@ -55,13 +61,7 @@ import {
   buildStationeryReports
 } from '../assets/js/stationery-logic.js';
 
-function readXlsxAoa(relPath, sheetName = '') {
-  const buf = fs.readFileSync(relPath);
-  const wb = read(buf, { type: 'buffer' });
-  const target = sheetName && wb.Sheets[sheetName] ? sheetName : wb.SheetNames[0];
-  const sheet = wb.Sheets[target];
-  return { wb, target, sheet, aoa: utils.sheet_to_json(sheet, { header: 1, defval: '' }) };
-}
+// Helper removed (deleted obsolete Project Tambahan fixtures)
 
 test('Recruitment scoring config, per-vacancy thresholds, and PDF title formatting work accurately', () => {
   const cfg = normalizeRecruitmentScoringConfig({ defaultMinScore: 65, scoringMode: 'percentage', requireQualificationForWa: true });
@@ -107,31 +107,62 @@ test('Recruitment scoring config, per-vacancy thresholds, and PDF title formatti
   assert.equal(normalizeRecruitmentScoringConfig().defaultMinScore, DEFAULT_RECRUITMENT_SCORING_CONFIG.defaultMinScore);
 });
 
-test('Real Project Tambahan workbooks parse cleanly (Transaksi, Presensi, Radin, Cuti, Karyawan, ATK)', () => {
-  const { aoa: txAoa } = readXlsxAoa('Project Tambahan/Attendance Suite/Upload Absensi/Input Utama - Laporan Transaksi.xls');
+test('Attendance parsers, Cuti #REF! handling, DK 174 canonical seeds, and cleared attendance seeds work cleanly', () => {
+  // Laporan Transaksi punch parser
+  const txAoa = [
+    ['NO. ID', 'NIK', 'NAMA', 'WAKTU', 'STATUS', 'STATUS BARU', 'PENGECUALIAN'],
+    ['101', 'ST 130116', 'ABD. KHAMID', '2026-11-02 07:14:22', 'C/Masuk', '', 'OK'],
+    ['101', 'ST 130116', 'ABD. KHAMID', '2026-11-02 17:04:10', 'C/Keluar', '', 'OK']
+  ];
   const txRows = parseLaporanTransaksiRows(txAoa);
-  assert.ok(txRows.length >= 100, 'Laporan Transaksi should yield > 100 punch rows');
+  assert.equal(txRows.length, 2);
   assert.ok(txRows.every(r => /^\d{4}-\d{2}-\d{2}$/.test(r.work_date)));
 
-  const { aoa: prAoa } = readXlsxAoa('Project Tambahan/Attendance Suite/Upload Absensi/Input Pendukung Opsional - Data Presensi.xls');
+  // Data Presensi summary parser
+  const prAoa = [
+    ['DEPARTEMEN', 'NAMA', 'NO.ID', 'TGL/WAKTU', 'LOKASI ID', 'NO.PIN'],
+    ['QC OUTDOOR', 'ABDUL AJIS', '102', '2026-11-02 07:22:00', '1', 'ST 130117']
+  ];
   const prRows = parseDataPresensiRows(prAoa);
-  assert.ok(prRows.length >= 100, 'Data Presensi should yield > 100 punch rows');
+  assert.equal(prRows.length, 1);
+  assert.equal(prRows[0].employee_no, 'ST 130117');
 
-  const { aoa: radAoa } = readXlsxAoa('Project Tambahan/Attendance Suite/Upload Absensi/Input Utama - Karyawan RadinPRESENSI KARYAWAN RADIN 11-12 NOVEMBER 2026.xlsx');
+  // Radin facial-clockin matrix parser
+  const radAoa = [
+    ['Employee ID', 'Date', 'Full Name', 'Attendance Code', 'Check In', 'Check Out', 'Organization'],
+    ['ST 000002', '2026-11-11', 'FLORENCIA IRENA', 'H', '07:55', '17:05', 'MARKETING & OPERATION'],
+    ['ST 000002', '2026-11-12', 'FLORENCIA IRENA', 'H', '07:58', '17:10', 'MARKETING & OPERATION']
+  ];
   const radRows = parseRadinAttendanceRows(radAoa);
-  assert.ok(radRows.length >= 2, 'Radin export should parse clean attendance rows');
+  assert.equal(radRows.length, 2);
   assert.ok(radRows.every(r => r.source_type === 'radin_xlsx'));
 
-  const { aoa: cutiAoa, sheet: cutiSheet } = readXlsxAoa('Project Tambahan/Attendance Suite/Employee Directory/Cuti.xlsx');
-  const { rows: cutiRows, errors: cutiErrors } = parseCutiSpreadsheetRows(cutiAoa, SEED_STAFF_SAMPLES, DEFAULT_OPS_SETTINGS, cutiSheet);
-  assert.ok(cutiRows.length >= 20, 'Cuti.xlsx should parse all active employee leave rows');
-  assert.ok(cutiErrors.some(e => e.includes('#REF!')), 'Cuti.xlsx parser must flag #REF! errors cleanly instead of NaN');
+  // Cuti spreadsheet parser flags #REF! errors and normalizes company entity -> MITRA/REHOLZ
+  const cutiAoa = [
+    ['NO', 'NAMA', 'PT', 'TGL MASUK', '', 'JATAH CUTI', 'CUTI BERSAMA', '', 'TGL1', '', '', '', '', '', '', 'RENEWAL', 'PERIODE'],
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    [1, 'ABD. KHAMID', 'PT. Mitra Binamandiri Makmur', '2004-11-05', '', 12, 4, '', '', '', '', '', '', '', '', '2027-06-15', '2026-2027'],
+    [2, 'ELIAN PURBONEGORO', 'PT Radin Mitra Lestari', '2019-11-28', '', 12, 4, '', '2026-08-10', '', '', '', '', '', '', '2026-12-20', '2026-2027'],
+    ['', 'ERR ROW', 'MITRA', '#REF!', '', 12, 4, '', '', '', '', '', '', '', '', '#REF!', '']
+  ];
+  const { rows: cutiRows, errors: cutiErrors } = parseCutiSpreadsheetRows(cutiAoa, SEED_STAFF_SAMPLES, DEFAULT_OPS_SETTINGS);
+  assert.equal(cutiRows.length, 3);
+  assert.equal(cutiRows[0].pt_entity, 'MITRA');
+  assert.equal(cutiRows[1].pt_entity, 'REHOLZ');
+  assert.equal(cutiRows[1].remaining_leave, 7);
+  assert.ok(cutiErrors.some(e => e.includes('#REF!')), 'Cuti parser must flag #REF! errors cleanly instead of NaN');
   assert.ok(cutiRows.every(r => Number.isFinite(r.remaining_leave)));
 
-  const { aoa: atkAoa } = readXlsxAoa('Project Tambahan/Stationery/Process/ATK.xlsx', 'NOV');
-  const atkItems = atkAoa.slice(1).filter(r => r && Number(r[0]) > 0 && String(r[1] || '').trim() && !/^TOTAL$/i.test(String(r[1]).trim()));
-  assert.equal(atkItems.length, 121, 'ATK.xlsx NOV sheet has 121 items');
-  assert.equal(SEED_STATIONERY_ITEMS.length, 121, 'SEED_STATIONERY_ITEMS matches all 121 ATK items');
+  // Canonical DK 174 & ATK 121 seed checks + cleared attendance database seeds
+  assert.equal(SEED_EMPLOYEES.length, 174);
+  assert.equal(SEED_DRIVERS.length, 8);
+  assert.equal(SEED_STAFF_SAMPLES.length, 166);
+  assert.equal(SEED_STATIONERY_ITEMS.length, 121);
+  assert.equal(SEED_ATTENDANCE_BATCHES.length, 0);
+  assert.equal(SEED_ATTENDANCE_EVENTS.length, 0);
+  assert.equal(SEED_STAFF_REVIEWS.length, 0);
+  assert.equal(SEED_STAFF_MEAL_OVERRIDES.length, 0);
+  assert.equal(SEED_DRIVER_RECONCILIATIONS.length, 0);
 
   // Verify mixed Excel serial and dd/mm/yy date parsing
   assert.equal(parseExcelOrTextDate('20/6/26'), '2026-06-20');
@@ -234,22 +265,24 @@ test('Employee Directory delta computes diff cleanly and Cuti gate respects thre
 test('General Staff Work Schedules, exact late/meal cutoffs (07:30:59 vs 07:31:00; 07:35:59 vs 07:36:00), and National Holidays work accurately', () => {
   const staffPasuruan = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 130117');
   const staffKilnDry = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 130116'); // ABD. KHAMID MMD
-  const staffSby = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 210202');
-  const staffRadin = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 000002');
+  const staffSby = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 210202'); // NATHANIA (REHOLZ)
+  const staffMitraSby = { ...staffSby, company_entity: 'MITRA', home_base: 'SURABAYA' };
+  const staffRadinPasuruan = SEED_STAFF_SAMPLES.find(s => s.employee_no === 'ST 000001'); // BRYAN SOENNARDI (PASURUAN, REHOLZ)
 
-  // Mon-Fri vs Saturday for Pasuruan & Surabaya
+  // Mon-Fri vs Saturday for Pasuruan & Surabaya (MITRA)
   assert.equal(resolveStaffWorkSchedule(staffPasuruan, '2026-11-02').startTime, '07:30');
   assert.equal(resolveStaffWorkSchedule(staffPasuruan, '2026-11-07').endTime, '12:00');
-  assert.equal(resolveStaffWorkSchedule(staffSby, '2026-11-02').startTime, '08:00');
-  assert.equal(resolveStaffWorkSchedule(staffSby, '2026-11-07').endTime, '12:00');
+  assert.equal(resolveStaffWorkSchedule(staffMitraSby, '2026-11-02').startTime, '08:00');
+  assert.equal(resolveStaffWorkSchedule(staffMitraSby, '2026-11-07').endTime, '12:00');
 
   // Kiln Dry MMD per-person schedule (ABD. KHAMID starts 07:00)
   const kdMon = resolveStaffWorkSchedule(staffKilnDry, '2026-11-02');
   assert.equal(kdMon.ruleSource, 'kiln_dry_mmd');
   assert.equal(kdMon.startTime, '07:00');
 
-  // Radin stays on radin_hold
-  assert.equal(resolveStaffWorkSchedule(staffRadin, '2026-11-02').ruleSource, 'radin_hold');
+  // REHOLZ (PT Radin Mitra Lestari) stays on radin_hold regardless of Pasuruan/Surabaya home_base
+  assert.equal(resolveStaffWorkSchedule(staffSby, '2026-11-02').ruleSource, 'radin_hold');
+  assert.equal(resolveStaffWorkSchedule(staffRadinPasuruan, '2026-11-02').ruleSource, 'radin_hold');
 
   // Manual exception override beats Pasuruan/Kiln Dry defaults
   const withExceptionSettings = normalizeOpsSettings({

@@ -1,5 +1,12 @@
 // Pure Attendance Normalization, Upload Deduplication, Cuti, Directory Delta & Staff Payroll Attendance Logic
 import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings } from './ops-settings-logic.js';
+import {
+  normalizeCompanyEntity,
+  isReholzCompanyEntity,
+  normalizeHomeBase
+} from './workspace-logic.js';
+
+export { normalizeCompanyEntity, isReholzCompanyEntity, normalizeHomeBase };
 
 export function normKey(v = '') {
   return String(v || '').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -450,7 +457,7 @@ export function processStaffAttendancePeriod({
   for (const emp of employees) {
     const nikKey = compactNik(emp.employee_no);
     const isDriver = /SOPIR|DRIVER/i.test(String(emp.position || '')) || /SOPIR|DRIVER/i.test(String(emp.department || ''));
-    const isRadin = /RADIN/i.test(String(emp.company_entity || emp.department || ''));
+    const isRadin = isReholzCompanyEntity(emp.company_entity || '') || /RADIN|REHOLZ/i.test(String(emp.department || ''));
     const lateCutoff = isRadin ? attCfg.radinLateCutoffTime : attCfg.mitraLateCutoffTime;
 
     let countM = 0;
@@ -621,7 +628,9 @@ export function computeEmployeeDirectoryDelta(incomingRows = [], existingEmploye
     'contract_start_date',
     'contract_end_date',
     'address',
-    'phone'
+    'phone',
+    'home_base',
+    'company_entity'
   ];
 
   const items = [];
@@ -664,8 +673,15 @@ export function computeEmployeeDirectoryDelta(incomingRows = [], existingEmploye
 
     const diffs = [];
     for (const f of compareFields) {
-      const a = String(existing[f] ?? '').trim();
-      const b = String(row[f] ?? '').trim();
+      let a = String(existing[f] ?? '').trim();
+      let b = String(row[f] ?? '').trim();
+      if (f === 'home_base') {
+        a = normalizeHomeBase(a || 'PASURUAN');
+        b = normalizeHomeBase(b || 'PASURUAN');
+      } else if (f === 'company_entity') {
+        a = normalizeCompanyEntity(a || 'MITRA');
+        b = normalizeCompanyEntity(b || 'MITRA');
+      }
       if (a !== b) diffs.push({ field: f, from: a, to: b });
     }
     if (diffs.length) {
@@ -767,7 +783,7 @@ export function parseCutiSpreadsheetRows(aoa = [], employees = [], settings = DE
       id: `cuti-imp-${i}`,
       employee_no: emp?.employee_no || '',
       employee_name: rawName,
-      pt_entity: String(r[2] || 'MITRA').trim(),
+      pt_entity: emp ? normalizeCompanyEntity(emp.company_entity) : normalizeCompanyEntity(r[2] || 'MITRA'),
       join_date: joinDate,
       period_label: String(r[16] || '').trim(),
       annual_quota: annualQuota,
@@ -816,13 +832,14 @@ export function resolveStaffWorkSchedule(emp = {}, workDate = '2026-11-02', sett
   const isSunday = dow === 0;
   const nikKey = compactNik(emp?.employee_no || '');
   const nameKey = normKey(emp?.full_name || '');
-  const entityOrDept = `${emp?.company_entity || ''} ${emp?.department || ''} ${emp?.position || ''} ${emp?.home_base || ''}`.toUpperCase();
+  const isReholz = isReholzCompanyEntity(emp?.company_entity || '') ||
+    /RADIN|REHOLZ/.test(String(emp?.department || '').toUpperCase());
 
-  // 1. PT Radin Mitra Lestari (held for phase 2, structured ready)
-  if (/RADIN/.test(entityOrDept)) {
+  // 1. PT Radin Mitra Lestari (ReHolz) — holds phase 2 regardless of Pasuruan / Surabaya station
+  if (isReholz) {
     return {
       ruleSource: 'radin_hold',
-      homeBase: 'PT RADIN MITRA LESTARI',
+      homeBase: 'PT RADIN MITRA LESTARI (REHOLZ)',
       isSunday,
       isSaturday,
       startTime: '08:00',
@@ -865,8 +882,10 @@ export function resolveStaffWorkSchedule(emp = {}, workDate = '2026-11-02', sett
     };
   }
 
-  // 4. Surabaya & Jakarta vs Pasuruan Home Base
-  const isSbyJkt = /SURABAYA|SBY|JAKARTA|JKT|MARKETING & OPERATION/.test(entityOrDept) && /SURABAYA|JAKARTA/.test(`${emp?.home_base || ''} ${emp?.position || ''} ${emp?.address || ''}`.toUpperCase());
+  // 4. Surabaya & Jakarta vs Pasuruan Home Base (PT. Mitra Binamandiri Makmur)
+  const canonHomeBase = normalizeHomeBase(emp?.home_base || '');
+  const isSbyJkt = canonHomeBase === 'SURABAYA' || canonHomeBase === 'JAKARTA' ||
+    /SURABAYA|\bSBY\b|JAKARTA|\bJKT\b/.test(`${emp?.position || ''} ${emp?.address || ''}`.toUpperCase());
   const block = isSbyJkt ? ws.surabayaJakarta : ws.pasuruan;
   return {
     ruleSource: isSbyJkt ? 'surabaya_jakarta' : 'pasuruan',

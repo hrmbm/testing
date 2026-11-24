@@ -1,8 +1,8 @@
-import { supabase, isConfigured } from './supabase.js?v=20261123-hrga-workspace-18';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261123-hrga-workspace-18';
-import { $, $$, esc, idDate } from './common.js?v=20261123-hrga-workspace-18';
-import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-18';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261123-hrga-workspace-18';
+import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-19';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-19';
+import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-19';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-19';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-19';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -26,6 +26,8 @@ import {
   resolveSharedDiscForApplicant,
   resolveSharedInterviewsForApplicant,
   formatEmployeeExportRow,
+  formatCompanyEntityName,
+  normalizeCompanyEntity,
   formatDmyDash,
   isRootAdminAccount,
   maskPin,
@@ -44,7 +46,7 @@ import {
   getMemoizedDiscResult,
   paginateRows,
   preserveCaretCurrencyValue
-} from './workspace-logic.js?v=20261123-hrga-workspace-18';
+} from './workspace-logic.js?v=20261124-hrga-workspace-19';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -56,7 +58,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261123-hrga-workspace-18';
+} from './admin-modals.js?v=20261124-hrga-workspace-19';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -67,7 +69,7 @@ import {
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261123-hrga-workspace-18';
+} from './contract-logic.js?v=20261124-hrga-workspace-19';
 import {
   DISTRICTS_BY_CITY,
   APPLY_INFO_SOURCES,
@@ -83,7 +85,7 @@ import {
   normalizeDistrictToken,
   calculateVacancyMaxScore,
   buildShareUrl
-} from './vacancy-logic.js?v=20261123-hrga-workspace-18';
+} from './vacancy-logic.js?v=20261124-hrga-workspace-19';
 import {
   APPLY_CUSTOM_FIELD_TYPES,
   FORM_CUSTOM_FIELD_TYPES,
@@ -96,7 +98,8 @@ import {
   STAGE2_SECTION_META,
   normalizeApplySchema,
   normalizeStage2Schema
-} from './form-schema.js?v=20261123-hrga-workspace-18';
+} from './form-schema.js?v=20261124-hrga-workspace-19';
+import { SEED_EMPLOYEES } from './ops-seed-data.js?v=20261124-hrga-workspace-19';
 
 const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -134,17 +137,17 @@ function writeSavedContractSettings(settings = {}) {
 }
 
 let printModPromise = null;
-const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261123-hrga-workspace-18'));
+const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261124-hrga-workspace-19'));
 
 let applicantModPromise = null;
-const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261123-hrga-workspace-18'));
+const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261124-hrga-workspace-19'));
 
 let contractModalPromise = null;
-const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261123-hrga-workspace-18'));
+const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261124-hrga-workspace-19'));
 
 let opsViewsPromise = null;
 let opsViewsModuleRef = null;
-const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261123-hrga-workspace-18').then(mod => {
+const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261124-hrga-workspace-19').then(mod => {
   opsViewsModuleRef = mod;
   return mod;
 }));
@@ -195,6 +198,7 @@ let interviewContractNoColMissing = false;
 let stage1HasRecommendationCol = true;
 let stage1HasSourceCol = true;
 let employeesExtendedMissing = false;
+let employeesV8Missing = false;
 let lastDataFetchedAt = 0;
 let inflightRefreshPromise = null;
 let bgRevalidatePromise = null;
@@ -376,15 +380,17 @@ function seedDemoWorkspaceData() {
       }
     }
   ];
-  employees = [
+  const demoContractSamples = [
     {
       id: 'emp-demo-exp-1',
       applicant_id: null,
-      employee_no: 'ST 250112',
+      employee_no: 'ST 259901',
       full_name: 'Hendra Wijaya',
       department: 'Produksi / CNC',
       position: 'Operator CNC',
       employment_status: 'KONTRAK',
+      home_base: 'PASURUAN',
+      company_entity: 'MITRA',
       join_date: isoDay(y - 1, m, 28),
       contract_start_date: isoDay(y - 1, m, 28),
       contract_end_date: isoDay(y, m, 27),
@@ -397,11 +403,13 @@ function seedDemoWorkspaceData() {
     {
       id: 'emp-demo-exp-2',
       applicant_id: null,
-      employee_no: 'ST 251204',
+      employee_no: 'ST 259902',
       full_name: 'Dewi Kartika',
-      department: 'Purchasing',
+      department: 'MARKETING & OPERATION',
       position: 'Staff Purchasing',
       employment_status: 'KONTRAK',
+      home_base: 'SURABAYA',
+      company_entity: 'REHOLZ',
       join_date: isoDay(y - 1, nm, 15),
       contract_start_date: isoDay(y - 1, nm, 15),
       contract_end_date: isoDay(ny, nm, 14),
@@ -414,11 +422,13 @@ function seedDemoWorkspaceData() {
     {
       id: 'emp-demo-later',
       applicant_id: null,
-      employee_no: 'ST 260801',
+      employee_no: 'ST 269903',
       full_name: 'Ahmad Fauzi',
       department: 'Maintenance',
       position: 'Teknisi Listrik',
       employment_status: 'KONTRAK',
+      home_base: 'PASURUAN',
+      company_entity: 'MITRA',
       join_date: isoDay(y, m, 1),
       contract_start_date: isoDay(y, m, 1),
       contract_end_date: isoDay(ly, lm, 15),
@@ -427,130 +437,15 @@ function seedDemoWorkspaceData() {
       phone: '081777889900',
       salary: 5300000,
       notes: ''
-    },
-    {
-      id: 'emp-demo-pic',
-      applicant_id: null,
-      employee_no: 'ST 210608',
-      full_name: 'DIANA ANITA SARI',
-      department: 'HR GA',
-      position: 'KA. DEPT HR & GA',
-      employment_status: 'TETAP',
-      company_entity: 'PT MBM',
-      home_base: 'Pasuruan',
-      join_date: '2015-06-08',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Pasuruan',
-      ktp_nik: '3514000000000001',
-      phone: '08133193313',
-      salary: 12000000,
-      notes: ''
-    },
-    {
-      id: 'emp-demo-mmd-1',
-      applicant_id: null,
-      employee_no: 'ST 130116',
-      full_name: 'ABD. KHAMID',
-      department: 'PURCHASING',
-      position: 'MMD',
-      employment_status: 'TETAP',
-      company_entity: 'PT MBM',
-      home_base: 'Kiln Dry',
-      join_date: '2004-11-05',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Pasuruan',
-      ktp_nik: '3514000000130116',
-      phone: '082230164498',
-      salary: 5800000,
-      notes: 'Kiln Dry Schedule'
-    },
-    {
-      id: 'emp-demo-mmd-2',
-      applicant_id: null,
-      employee_no: 'ST 061105',
-      full_name: 'CHOIRIL',
-      department: 'PURCHASING',
-      position: 'MMD',
-      employment_status: 'TETAP',
-      company_entity: 'PT MBM',
-      home_base: 'Kiln Dry',
-      join_date: '2006-11-05',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Pasuruan',
-      ktp_nik: '3514000000061105',
-      phone: '081330112201',
-      salary: 5800000,
-      notes: 'Kiln Dry Schedule'
-    },
-    {
-      id: 'emp-demo-mmd-3',
-      applicant_id: null,
-      employee_no: 'ST 061107',
-      full_name: 'JUWADI',
-      department: 'PURCHASING',
-      position: 'MMD',
-      employment_status: 'TETAP',
-      company_entity: 'PT MBM',
-      home_base: 'Kiln Dry',
-      join_date: '2006-11-07',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Pasuruan',
-      ktp_nik: '3514000000061107',
-      phone: '081330112202',
-      salary: 5800000,
-      notes: 'Kiln Dry Schedule'
-    },
-    {
-      id: 'emp-demo-hr-staff',
-      applicant_id: null,
-      employee_no: 'ST 260501',
-      full_name: 'AYUK NUR KHOTIFAH',
-      department: 'HR GA',
-      position: 'STAFF HR & GA',
-      employment_status: 'TETAP',
-      company_entity: 'PT MBM',
-      home_base: 'Pasuruan',
-      join_date: '2021-05-01',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Pasuruan',
-      ktp_nik: '3514000000260501',
-      phone: '081230004501',
-      salary: 5200000,
-      notes: ''
-    },
-    {
-      id: 'emp-demo-radin-mgr',
-      applicant_id: null,
-      employee_no: 'ST 000002',
-      full_name: 'FLORENCIA IRENA',
-      department: 'MARKETING & OPERATION',
-      position: 'MARKETING, OPERATION MANAGER',
-      employment_status: 'TETAP',
-      company_entity: 'PT RADIN',
-      home_base: 'Surabaya',
-      join_date: '2018-01-10',
-      contract_start_date: null,
-      contract_end_date: null,
-      address: 'Surabaya',
-      ktp_nik: '3578000000000002',
-      phone: '08113100002',
-      salary: 14000000,
-      notes: ''
-    },
-    { id: 'drv-demo-1', applicant_id: null, employee_no: 'KT 190403', full_name: 'ACHMAD FAUZI', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-04-12', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000190403', phone: '081556636256', salary: 3675000, notes: '' },
-    { id: 'drv-demo-2', applicant_id: null, employee_no: 'KT 120509', full_name: 'BUDI HARTOYO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2013-02-04', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000120509', phone: '085536582306', salary: 3675000, notes: '' },
-    { id: 'drv-demo-3', applicant_id: null, employee_no: 'KT 260401', full_name: 'M. KHUSEN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2026-04-27', contract_start_date: '2026-04-27', contract_end_date: '2027-04-26', address: 'Pasuruan', ktp_nik: '3514000000260401', phone: '08892855334', salary: 3675000, notes: '' },
-    { id: 'drv-demo-4', applicant_id: null, employee_no: 'KT 200303', full_name: 'MUHAMMAD FATKHAN', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2020-03-12', contract_start_date: '2026-03-12', contract_end_date: '2027-03-11', address: 'Pasuruan', ktp_nik: '3514000000200303', phone: '085853020834', salary: 3675000, notes: '' },
-    { id: 'drv-demo-5', applicant_id: null, employee_no: 'ST 140807', full_name: 'SIKUS', department: 'HR GA', position: 'SOPIR', employment_status: 'TETAP', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2007-08-14', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000140807', phone: '081325339928', salary: 3675000, notes: 'Driver Kontainer (dikecualikan dari modul Driver Payroll)' },
-    { id: 'drv-demo-6', applicant_id: null, employee_no: 'KT 021010', full_name: 'SUGENG PURWANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'HARIAN', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2010-10-11', contract_start_date: null, contract_end_date: null, address: 'Pasuruan', ktp_nik: '3514000000021010', phone: '085852024564', salary: 3675000, notes: '' },
-    { id: 'drv-demo-7', applicant_id: null, employee_no: 'KT 051164', full_name: 'SURYANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2005-04-01', contract_start_date: '2026-04-01', contract_end_date: '2027-03-31', address: 'Pasuruan', ktp_nik: '3514000000051164', phone: '0816996881', salary: 3675000, notes: '' },
-    { id: 'drv-demo-8', applicant_id: null, employee_no: 'KT 190905', full_name: 'TEGUH SUSANTO', department: 'HR GA', position: 'SOPIR', employment_status: 'KONTRAK', company_entity: 'PT MBM', home_base: 'Pasuruan', join_date: '2019-09-13', contract_start_date: '2026-09-13', contract_end_date: '2027-09-12', address: 'Pasuruan', ktp_nik: '3514000000190905', phone: '083157160063', salary: 3675000, notes: '' }
+    }
   ];
+  const seenEmpNos = new Set();
+  employees = [...demoContractSamples, ...SEED_EMPLOYEES].filter(emp => {
+    const key = String(emp.employee_no || '').trim().toUpperCase();
+    if (!key || seenEmpNos.has(key)) return false;
+    seenEmpNos.add(key);
+    return true;
+  }).map(emp => ({ ...emp }));
   interviews = [
     {
       id: 'intv-demo-1',
@@ -822,13 +717,21 @@ function bindSearch(selector, rerender, delay = 180) {
 }
 
 async function fetchEmployeesSafe() {
-  const fullCols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,salary,notes,created_at,updated_at';
+  const fullCols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,home_base,company_entity,salary,notes,created_at,updated_at';
+  employeesV8Missing = false;
   let res = await supabase.from('employees').select(fullCols).order('created_at', { ascending: false }).limit(1000);
   if (res.error && isMissingSchemaError(res.error)) {
-    employeesExtendedMissing = true;
-    res = await supabase.from('employees')
-      .select('id,applicant_id,employee_no,department,position,employment_status,join_date,notes,created_at,updated_at')
-      .order('created_at', { ascending: false }).limit(1000);
+    employeesV8Missing = true;
+    const legacyV3Cols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,salary,notes,created_at,updated_at';
+    res = await supabase.from('employees').select(legacyV3Cols).order('created_at', { ascending: false }).limit(1000);
+    if (res.error && isMissingSchemaError(res.error)) {
+      employeesExtendedMissing = true;
+      res = await supabase.from('employees')
+        .select('id,applicant_id,employee_no,department,position,employment_status,join_date,notes,created_at,updated_at')
+        .order('created_at', { ascending: false }).limit(1000);
+    } else {
+      employeesExtendedMissing = false;
+    }
   } else {
     employeesExtendedMissing = false;
   }
@@ -2497,16 +2400,17 @@ function renderTrackingView() {
 }
 
 /* ============================================================================
- * EMPLOYEE DIRECTORY — 16 Columns + Upload XLSX/CSV
+ * EMPLOYEE DIRECTORY — 18 Columns (Home Base + Perusahaan) + Upload XLSX/CSV
  * ============================================================================ */
 function employeeRows(rows) {
-  if (!rows.length) return emptyRow(17, 'No employee records found');
+  if (!rows.length) return emptyRow(19, 'No employee records found');
   const idx = getWorkspaceIndexes();
   return rows.map(employee => {
     const applicant = idx.applicantById.get(employee.applicant_id) || null;
     const formatted = formatEmployeeExportRow(employee, applicant);
     const statusUpper = String(formatted.Status || '').toUpperCase();
     const statusTone = statusUpper === 'TETAP' ? 'green' : statusUpper === 'KONTRAK' ? 'blue' : statusUpper === 'NONAKTIF' ? 'gray' : 'gold';
+    const entityCode = normalizeCompanyEntity(formatted.Perusahaan);
     return `<tr>
       <td><b>${esc(formatted.Nama || '—')}</b></td>
       <td style="font-family:var(--font-mono)">${esc(formatted.Nik || '—')}</td>
@@ -2524,6 +2428,8 @@ function employeeRows(rows) {
       <td>${esc(formatted.Pendidikan || '—')}</td>
       <td>${esc(formatted['Jenis Kelamin'] || '—')}</td>
       <td>${esc(formatted.Agama || '—')}</td>
+      <td>${esc(formatted['Home Base'] || 'PASURUAN')}</td>
+      <td><span class="status-pill ${entityCode === 'REHOLZ' ? 'gold' : 'blue'}" title="${esc(formatCompanyEntityName(entityCode))}">${esc(entityCode)}</span></td>
       <td><button class="icon-btn" data-edit-employee="${esc(employee.id)}">Edit</button></td>
     </tr>`;
   }).join('');
@@ -2531,11 +2437,13 @@ function employeeRows(rows) {
 
 function renderEmployees() {
   const migrationWarn = employeesExtendedMissing
-    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Extended Employee Directory columns are not migrated yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> in Supabase SQL Editor.</div>`
-    : '';
+    ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Extended Employee Directory columns are not migrated yet. Run <code>database/migrations/20261124_hrga_v8_dk_integration_and_clear_attendance.sql</code> in Supabase SQL Editor.</div>`
+    : employeesV8Missing
+      ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fde68a;background:#fffbeb;color:#92400e">Kolom <code>home_base</code> dan <code>company_entity</code> belum dimigrasi di database. Jalankan <code>database/migrations/20261124_hrga_v8_dk_integration_and_clear_attendance.sql</code> di Supabase SQL Editor.</div>`
+      : '';
   const subTabsHtml = `
     <div class="ops-subtab-bar" role="tablist" aria-label="Employee Directory Modes">
-      <button type="button" class="tab-btn ${employeeSubTab === 'directory' ? 'active' : ''}" data-emp-subtab="directory">Employee Directory (16 Kolom)</button>
+      <button type="button" class="tab-btn ${employeeSubTab === 'directory' ? 'active' : ''}" data-emp-subtab="directory">Employee Directory (18 Kolom)</button>
       <button type="button" class="tab-btn ${employeeSubTab === 'delta' ? 'active' : ''}" data-emp-subtab="delta">Snapshot Delta Check</button>
       <button type="button" class="tab-btn ${employeeSubTab === 'cuti' ? 'active' : ''}" data-emp-subtab="cuti">Saldo Cuti &amp; Import Cuti.xlsx</button>
     </div>
@@ -2566,7 +2474,7 @@ function renderEmployees() {
     const row = formatEmployeeExportRow(e, a);
     return {
       employee: e,
-      searchText: Object.values(row).join(' ').toLowerCase()
+      searchText: `${Object.values(row).join(' ')} ${formatCompanyEntityName(row.Perusahaan)}`.toLowerCase()
     };
   });
 
@@ -2575,7 +2483,7 @@ function renderEmployees() {
     '<button id="upload-employees" class="btn btn-secondary">Upload XLSX / CSV ↑</button>' +
     '<button id="export-employees" class="btn btn-primary">Download XLSX ↓</button>'
   ) + migrationWarn + subTabsHtml + `
-    <section class="panel table-panel">${tableToolbar('Search name / NIK / department / position…', 'Employee Directory')}
+    <section class="panel table-panel">${tableToolbar('Search name / NIK / department / home base / company…', 'Employee Directory')}
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
           <thead><tr>${EMPLOYEE_UI_HEADERS.map(h => `<th>${esc(h.toUpperCase())}</th>`).join('')}<th>ACTIONS</th></tr></thead>
@@ -2620,15 +2528,35 @@ function renderEmployees() {
     openEmployeeUploadModal({
       onDownloadTemplate: downloadEmployeeTemplateXlsx,
       onImport: async parsedRows => {
+        if (isDemoMode || !supabase) {
+          const nowIso = new Date().toISOString();
+          parsedRows.forEach(r => {
+            const key = String(r.employee_no || '').trim().toUpperCase();
+            const existingIdx = employees.findIndex(e => String(e.employee_no || '').trim().toUpperCase() === key);
+            if (existingIdx >= 0) {
+              employees[existingIdx] = { ...employees[existingIdx], ...r, updated_at: nowIso };
+            } else {
+              employees.unshift({ id: `emp-imp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...r, updated_at: nowIso });
+            }
+          });
+          workspaceIndexesCache = null;
+          say(`${parsedRows.length} employee records imported into Employee Directory (Demo).`);
+          renderEmployees();
+          return;
+        }
         if (employeesExtendedMissing) {
-          throw new Error('Please run SQL migration v2/v3 first before importing the 16-column Employee Directory.');
+          throw new Error('Please run SQL migration v8 (database/migrations/20261124_hrga_v8_dk_integration_and_clear_attendance.sql) before importing the 18-column Employee Directory.');
         }
         const chunkSize = 100;
         for (let i = 0; i < parsedRows.length; i += chunkSize) {
-          const batch = parsedRows.slice(i, i + chunkSize).map(r => ({
-            ...r,
-            updated_at: new Date().toISOString()
-          }));
+          const batch = parsedRows.slice(i, i + chunkSize).map(r => {
+            const item = { ...r, updated_at: new Date().toISOString() };
+            if (employeesV8Missing) {
+              delete item.home_base;
+              delete item.company_entity;
+            }
+            return item;
+          });
           const { error } = await supabase.from('employees').upsert(batch, { onConflict: 'employee_no' });
           if (error) throw error;
         }
@@ -2646,6 +2574,31 @@ function openEmployeeEditor(employee = null, applicant = null) {
     employee,
     applicant,
     onSave: async fields => {
+      const nowIso = new Date().toISOString();
+      if (isDemoMode || !supabase) {
+        if (fields.id) {
+          const idx = employees.findIndex(e => e.id === fields.id);
+          if (idx >= 0) employees[idx] = { ...employees[idx], ...fields, updated_at: nowIso };
+          say('Employee record updated (Demo).');
+        } else {
+          const key = String(fields.employee_no || '').trim().toUpperCase();
+          const byNikIdx = employees.findIndex(e => String(e.employee_no || '').trim().toUpperCase() === key);
+          if (byNikIdx >= 0) {
+            employees[byNikIdx] = { ...employees[byNikIdx], ...fields, updated_at: nowIso };
+          } else {
+            employees.unshift({ id: `emp-demo-${Date.now()}`, ...fields, updated_at: nowIso });
+          }
+          if (fields.applicant_id) {
+            const aIdx = applicants.findIndex(a => a.id === fields.applicant_id);
+            if (aIdx >= 0) applicants[aIdx] = { ...applicants[aIdx], stage: 'hired' };
+          }
+          say('Employee record saved to Employee Directory (Demo).');
+        }
+        workspaceIndexesCache = null;
+        renderEmployees();
+        return;
+      }
+
       if (fields.id) {
         const updatePayload = employeesExtendedMissing
           ? {
@@ -2655,10 +2608,14 @@ function openEmployeeEditor(employee = null, applicant = null) {
               employment_status: fields.employment_status,
               join_date: fields.join_date,
               notes: fields.notes,
-              updated_at: new Date().toISOString()
+              updated_at: nowIso
             }
-          : { ...fields, id: undefined, updated_at: new Date().toISOString() };
+          : { ...fields, id: undefined, updated_at: nowIso };
         delete updatePayload.id;
+        if (employeesV8Missing) {
+          delete updatePayload.home_base;
+          delete updatePayload.company_entity;
+        }
         const { error } = await supabase.from('employees').update(updatePayload).eq('id', fields.id);
         if (error) throw error;
         say('Employee record updated.');
@@ -2677,11 +2634,15 @@ function openEmployeeEditor(employee = null, applicant = null) {
       } else {
         const insertPayload = { ...fields };
         delete insertPayload.id;
-        insertPayload.updated_at = new Date().toISOString();
+        insertPayload.updated_at = nowIso;
+        if (employeesV8Missing) {
+          delete insertPayload.home_base;
+          delete insertPayload.company_entity;
+        }
         const { error } = await supabase.from('employees').upsert(insertPayload, { onConflict: 'employee_no' });
         if (error) throw error;
         if (fields.applicant_id) {
-          await supabase.from('applicants').update({ stage: 'hired', updated_at: new Date().toISOString() }).eq('id', fields.applicant_id);
+          await supabase.from('applicants').update({ stage: 'hired', updated_at: nowIso }).eq('id', fields.applicant_id);
         }
         say('Employee record saved to Employee Directory.');
       }
@@ -2717,7 +2678,9 @@ async function downloadEmployeeTemplateXlsx() {
       Status: 'TETAP',
       Pendidikan: 'SMP',
       'Jenis Kelamin': 'Laki-laki',
-      Agama: 'Islam'
+      Agama: 'Islam',
+      'Home Base': 'KILN DRY',
+      Perusahaan: 'MITRA'
     }];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(sample, { header: EMPLOYEE_TABLE_HEADERS });
@@ -3068,6 +3031,8 @@ function buildContractRecordFromInterview(intv, cand = null) {
     ktpNik: intv.candidate_nik || emp?.ktp_nik || app?.nik || '',
     department: emp?.department || '',
     position: intv.official_position || emp?.position || intv.applied_position || app?.position || '',
+    homeBase: emp?.home_base || 'PASURUAN',
+    companyEntity: normalizeCompanyEntity(emp?.company_entity || 'MITRA'),
     address: emp?.address || appData.alamat_asal || appData.domisili || '',
     phone: intv.candidate_whatsapp || emp?.phone || appData.telepon || '',
     salary: intv.salary ?? emp?.salary ?? null,

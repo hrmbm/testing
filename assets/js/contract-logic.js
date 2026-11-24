@@ -1,14 +1,16 @@
 import {
   normalizeInterviewDecision,
   normalizeLeadRecommendation,
-  normalizeDisplayNik
-} from './workspace-logic.js?v=20261123-hrga-workspace-18';
+  normalizeDisplayNik,
+  normalizeCompanyEntity,
+  normalizeHomeBase
+} from './workspace-logic.js?v=20261124-hrga-workspace-19';
 import {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
   renderAgreementHtml
-} from './hris-renderer.js?v=20261123-hrga-workspace-18';
+} from './hris-renderer.js?v=20261124-hrga-workspace-19';
 
 export {
   computeEndDate,
@@ -290,6 +292,8 @@ export function buildContractWorkspaceQueue({
       ktpNik: emp.ktp_nik || app?.nik || '',
       department: emp.department || '',
       position: emp.position || matchedIntv?.official_position || app?.position || '',
+      homeBase: normalizeHomeBase(emp.home_base || ''),
+      companyEntity: normalizeCompanyEntity(emp.company_entity || ''),
       address: emp.address || buildApplicantAddress(app),
       phone: emp.phone || app?.application_data?.telepon || '',
       salary: emp.salary ?? matchedIntv?.salary ?? null,
@@ -348,6 +352,8 @@ export function buildContractWorkspaceQueue({
       ktpNik: intv.candidate_nik || emp?.ktp_nik || app?.nik || '',
       department: emp?.department || '',
       position: intv.official_position || emp?.position || intv.applied_position || app?.position || '',
+      homeBase: normalizeHomeBase(emp?.home_base || ''),
+      companyEntity: normalizeCompanyEntity(intv.company_entity || emp?.company_entity || 'MITRA'),
       address: emp?.address || buildApplicantAddress(app),
       phone: intv.candidate_whatsapp || emp?.phone || app?.application_data?.telepon || '',
       salary: intv.salary ?? emp?.salary ?? null,
@@ -904,6 +910,12 @@ export function buildDirectContractSyncPayloads({
   const contractNo = String(payload.no_pkwt || config.contractNumber || config.pkwtNumber || (docSequence ? formatContractCode(docSequence, startDate, 'PKWT') : '')).trim();
   const resolvedEmpNo = assignedNik || ktpNik || `EMP-${Date.now().toString().slice(-6)}`;
   const contractNote = contractNo ? `Contract No. ${contractNo}` : (currentEmployee?.notes || '');
+  const companyEntity = normalizeCompanyEntity(
+    config.companyId === 'comp-rml'
+      ? 'REHOLZ'
+      : (config.companyEntity || record.companyEntity || currentEmployee?.company_entity || 'MITRA')
+  );
+  const homeBase = normalizeHomeBase(config.homeBase || record.homeBase || currentEmployee?.home_base || 'PASURUAN');
 
   const employeePayload = {
     applicant_id: record.applicantId || currentEmployee?.applicant_id || null,
@@ -923,6 +935,8 @@ export function buildDirectContractSyncPayloads({
     education: currentEmployee?.education || null,
     gender: currentEmployee?.gender || null,
     religion: currentEmployee?.religion || null,
+    home_base: homeBase,
+    company_entity: companyEntity,
     salary,
     notes: contractNote
   };

@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261123-hrga-workspace-18';
+import { $, esc } from './common.js?v=20261124-hrga-workspace-19';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -11,11 +11,14 @@ import {
   calculateContractDates,
   findDefaultInterviewer,
   parseEmployeeSpreadsheetRows,
+  parseEmployeeWorksheetAoa,
+  normalizeCompanyEntity,
+  normalizeHomeBase,
   buildEmployeeUserOptionLabel,
   normalizeInterviewDecision,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261123-hrga-workspace-18';
+} from './workspace-logic.js?v=20261124-hrga-workspace-19';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -803,6 +806,16 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
             <option value="Perempuan">Female (Perempuan)</option>
           </select></label>
           <label>Religion<input class="input" name="religion" maxlength="40" placeholder="Islam / Christian / etc."></label>
+          <label>Home Base<select class="select" name="home_base">
+            <option value="PASURUAN">PASURUAN</option>
+            <option value="SURABAYA">SURABAYA</option>
+            <option value="JAKARTA">JAKARTA</option>
+            <option value="KILN DRY">KILN DRY</option>
+          </select></label>
+          <label>Company<select class="select" name="company_entity">
+            <option value="MITRA">MITRA — PT. Mitra Binamandiri Makmur</option>
+            <option value="REHOLZ">REHOLZ — PT Radin Mitra Lestari</option>
+          </select></label>
           <label>Notes<input class="input" name="notes" maxlength="500"></label>
         </div>
         <div id="employee-form-error" class="form-error" role="alert"></div>
@@ -852,6 +865,15 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
   form.elements.education.value = employee?.education || appData.pendidikan_terakhir || '';
   form.elements.gender.value = genderNormalized || '';
   form.elements.religion.value = employee?.religion || appData.agama || '';
+  const hbVal = normalizeHomeBase(employee?.home_base || 'PASURUAN');
+  if (![...form.elements.home_base.options].some(o => o.value === hbVal)) {
+    const opt = document.createElement('option');
+    opt.value = hbVal;
+    opt.textContent = hbVal;
+    form.elements.home_base.append(opt);
+  }
+  form.elements.home_base.value = hbVal;
+  form.elements.company_entity.value = normalizeCompanyEntity(employee?.company_entity || 'MITRA');
   form.elements.notes.value = employee?.notes || '';
 
   $('#employee-modal-title', modal).textContent = employee ? `Edit Employee · ${form.elements.full_name.value}` : 'Add Employee';
@@ -887,6 +909,8 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
         education: fd.education.trim(),
         gender: fd.gender,
         religion: fd.religion.trim(),
+        home_base: normalizeHomeBase(fd.home_base),
+        company_entity: normalizeCompanyEntity(fd.company_entity),
         notes: fd.notes.trim()
       });
       modal.classList.add('hidden');
@@ -914,7 +938,7 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
         <button type="button" class="modal-close" id="emp-upload-close" aria-label="Close">×</button>
       </div>
       <div class="upload-preview-box">
-        <b>Required Spreadsheet Format (16 Columns):</b>
+        <b>Required Spreadsheet Format (18 Columns):</b>
         <div style="margin-top:6px;color:var(--muted);line-height:1.5">${esc(EMPLOYEE_TABLE_HEADERS.join(' · '))}</div>
         <div style="margin-top:10px">
           <button type="button" class="btn btn-secondary btn-xs" id="emp-download-template">Download XLSX Template ↓</button>
@@ -967,8 +991,8 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
       const sheetName = wb.SheetNames[0];
       if (!sheetName) throw new Error('No worksheet found in the selected file.');
-      const jsonRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
-      const { rows, errors } = parseEmployeeSpreadsheetRows(jsonRows);
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
+      const { rows, errors } = parseEmployeeWorksheetAoa(aoa);
       if (errors.length) {
         errorBox.textContent = errors.slice(0, 3).join(' ');
       }
@@ -979,7 +1003,7 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
       parsedRows = rows;
       confirmBtn.disabled = false;
       previewBox.classList.remove('hidden');
-      previewBox.innerHTML = `<b>${rows.length} rows ready to import</b> (matched by unique NIK):<div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.employee_no)}</b> — ${esc(r.full_name)} (${esc(r.department || '—')} · ${esc(r.position || '—')})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more rows.</div>` : ''}</div>`;
+      previewBox.innerHTML = `<b>${rows.length} rows ready to import</b> (matched by unique NIK):<div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.employee_no)}</b> — ${esc(r.full_name)} (${esc(r.department || '—')} · ${esc(r.home_base || 'PASURUAN')} · ${esc(r.company_entity || 'MITRA')})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more rows.</div>` : ''}</div>`;
     } catch (err) {
       errorBox.textContent = err.message || 'Failed to read spreadsheet file.';
     }

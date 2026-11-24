@@ -1,5 +1,5 @@
-/* HR&GA Workspace app cache worker — version 20261123-hrga-workspace-18. */
-const BUILD = '20261123-hrga-workspace-18';
+/* HR&GA Workspace app cache worker — version 20261124-hrga-workspace-19. */
+const BUILD = '20261124-hrga-workspace-19';
 const APP_ASSET_CACHE = `hrga-workspace-app-assets-${BUILD}`;
 const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 

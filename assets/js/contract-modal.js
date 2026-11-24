@@ -1,9 +1,10 @@
-import { $, esc } from './common.js?v=20261123-hrga-workspace-18';
-import { bindSafeModalClose } from './admin-modals.js?v=20261123-hrga-workspace-18';
+import { $, esc } from './common.js?v=20261124-hrga-workspace-19';
+import { bindSafeModalClose } from './admin-modals.js?v=20261124-hrga-workspace-19';
 import {
   CONTRACT_DURATION_OPTIONS,
-  preserveCaretCurrencyValue
-} from './workspace-logic.js?v=20261123-hrga-workspace-18';
+  preserveCaretCurrencyValue,
+  resolveCompanyMasterIdFromEntity
+} from './workspace-logic.js?v=20261124-hrga-workspace-19';
 import {
   CONTRACT_DOCUMENTS,
   DEFAULT_CONTRACT_SETTINGS,
@@ -16,7 +17,7 @@ import {
   renderAgreementHtml,
   resolveDefaultContractStartDate,
   toIsoDate
-} from './contract-logic.js?v=20261123-hrga-workspace-18';
+} from './contract-logic.js?v=20261124-hrga-workspace-19';
 
 export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -368,9 +369,12 @@ export async function openPkwtConfigModal({
     `<option value="${esc(c.id)}">${esc(c.companyDisplayName || c.companyName)}</option>`
   ).join('');
 
-  const initialCompanyId = masters.some(m => m.id === activeSettings.companyId)
-    ? activeSettings.companyId
-    : (masters[0]?.id || 'comp-mbm');
+  const preferredCompanyId = record?.companyEntity
+    ? resolveCompanyMasterIdFromEntity(record.companyEntity)
+    : activeSettings.companyId;
+  const initialCompanyId = masters.some(m => m.id === preferredCompanyId)
+    ? preferredCompanyId
+    : (masters.some(m => m.id === activeSettings.companyId) ? activeSettings.companyId : (masters[0]?.id || 'comp-mbm'));
   companySelect.value = initialCompanyId;
   const activeMaster = () => masters.find(m => m.id === companySelect.value) || masters[0];
 

@@ -6,8 +6,9 @@ import {
   DEFAULT_WEEKDAY_OVERTIME_TARIFF,
   DEFAULT_HOLIDAY_OVERTIME_TARIFF,
   normalizeOpsSettings
-} from './ops-settings-logic.js?v=20261123-hrga-workspace-18';
+} from './ops-settings-logic.js?v=20261124-hrga-workspace-19';
 import {
+  SEED_EMPLOYEES,
   SEED_STATIONERY_ITEMS,
   SEED_STATIONERY_MOVEMENTS,
   SEED_DRIVERS,
@@ -21,7 +22,7 @@ import {
   SEED_DRIVER_ADJUSTMENTS,
   SEED_STAFF_REVIEWS,
   SEED_STAFF_MEAL_OVERRIDES
-} from './ops-seed-data.js?v=20261123-hrga-workspace-18';
+} from './ops-seed-data.js?v=20261124-hrga-workspace-19';
 import {
   compactNik,
   parseLaporanTransaksiRows,
@@ -37,26 +38,31 @@ import {
   resolveStaffWorkSchedule,
   evaluateStaffArrivalStatus,
   addMinutesToScheduleCutoff
-} from './attendance-logic.js?v=20261123-hrga-workspace-18';
+} from './attendance-logic.js?v=20261124-hrga-workspace-19';
 import {
   getEligibleDrivers,
   normalizeScheduleActivities,
   validateDriverSchedules,
   reconcileDriverSchedulesAndAttendance,
   computeDriverDayMetrics
-} from './driver-logic.js?v=20261123-hrga-workspace-18';
+} from './driver-logic.js?v=20261124-hrga-workspace-19';
 import {
   renderDriverReportsView as renderDriverReportsModule,
   openDomPrintPreview
-} from './driver-reports.js?v=20261123-hrga-workspace-18';
+} from './driver-reports.js?v=20261124-hrga-workspace-19';
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
   buildStationeryReports
-} from './stationery-logic.js?v=20261123-hrga-workspace-18';
-import { parseEmployeeSpreadsheetRows, paginateRows } from './workspace-logic.js?v=20261123-hrga-workspace-18';
+} from './stationery-logic.js?v=20261124-hrga-workspace-19';
+import {
+  parseEmployeeWorksheetAoa,
+  paginateRows,
+  normalizeCompanyEntity,
+  formatCompanyEntityName
+} from './workspace-logic.js?v=20261124-hrga-workspace-19';
 
-const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v2';
+const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
 const DRIVER_ADJUSTMENTS_KEY = 'hrga_driver_adjustments_v1';
 const OPS_STATE_TTL_MS = 120000;
@@ -287,7 +293,7 @@ async function loadOpsState(ctx, force = false) {
 function getAllKnownEmployees(ctx) {
   const fromDir = Array.isArray(ctx.getEmployees?.()) ? ctx.getEmployees() : [];
   if (fromDir.length) return fromDir;
-  return [...SEED_DRIVERS, ...SEED_STAFF_SAMPLES];
+  return [...SEED_EMPLOYEES];
 }
 
 // ============================================================================
@@ -820,20 +826,12 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
       }
       const XLSX = await loadXlsx();
       const wb = XLSX.read(await file.arrayBuffer());
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-      const cleanRows = rows.map(r => {
-        if (r['DATA KARYAWAN'] && r.__EMPTY) {
-          return {
-            Nama: r['DATA KARYAWAN'], Nik: r.__EMPTY, Departement: r.__EMPTY_1, 'Tgl Masuk': r.__EMPTY_2,
-            Jabatan: r.__EMPTY_3, 'Mulai Kontrak': r.__EMPTY_4, 'Kontrak Berakhir': r.__EMPTY_5,
-            Alamat: r.__EMPTY_6, Nik2: r.__EMPTY_7, 'Tempat Lahir': r.__EMPTY_8, 'Tanggal Lahir': r.__EMPTY_9,
-            'No. Telp': r.__EMPTY_10, Status: r.__EMPTY_11, Pendidikan: r.__EMPTY_12,
-            'Jenis Kelamin': r.__EMPTY_13, Agama: r.__EMPTY_14
-          };
-        }
-        return r;
-      }).filter(r => r.Nama && r.Nama !== 'Nama');
-      const parsed = parseEmployeeSpreadsheetRows(cleanRows);
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+      const parsed = parseEmployeeWorksheetAoa(aoa);
+      if (!parsed.rows.length) {
+        showInlineBanner(host, parsed.errors[0] || 'Data karyawan valid tidak ditemukan pada worksheet.', 'error');
+        return;
+      }
       ctx.setLastDelta?.(computeEmployeeDirectoryDelta(parsed.rows, employees));
       renderEmployeeExtensionsView(host, 'delta', ctx);
     });
@@ -1039,12 +1037,12 @@ export async function renderStaffManagementView(host, ctx) {
                 const flaggedDay = row.days.find(d => d.code === 'PERLU_PEMERIKSAAN_HR' || d.code === 'T') || row.days.find(d => d.code !== 'O' && d.code !== '-');
                 return `
                   <tr>
-                    <td><code>${esc(row.employee_no)}</code></td>
-                    <td>
+                    <td style="white-space:nowrap"><code>${esc(row.employee_no)}</code></td>
+                    <td style="min-width:220px">
                       <b>${esc(row.employee_name)}</b> ${row.is_driver ? '<span class="pill">Driver</span>' : ''}
-                      <div><small>${esc(sch.homeBase)} (${esc(sch.startTime)}–${esc(sch.endTime)})</small></div>
+                      <div style="margin-top:3px"><small><span class="pill ${normalizeCompanyEntity(empObj.company_entity || '') === 'REHOLZ' ? 'gold' : 'blue'}">${esc(normalizeCompanyEntity(empObj.company_entity || ''))}</span> ${sch.ruleSource === 'radin_hold' ? `${esc(empObj.home_base || 'PASURUAN')} · Hold (${esc(sch.startTime)}–${esc(sch.endTime)})` : `${esc(sch.homeBase)} (${esc(sch.startTime)}–${esc(sch.endTime)})`}</small></div>
                     </td>
-                    <td>${esc(row.department)}</td>
+                    <td style="min-width:130px">${esc(row.department)}</td>
                     <td class="num">${row.counts.M}</td>
                     <td class="num">${row.counts.T}</td>
                     <td class="num">${row.counts.S + row.counts.SDR + row.counts.I}</td>
@@ -1052,13 +1050,13 @@ export async function renderStaffManagementView(host, ctx) {
                     <td class="num">${row.counts.CT}</td>
                     <td class="num">${row.counts.PENDING ? `<span class="pill gold">${row.counts.PENDING}</span>` : '0'}</td>
                     <td class="num"><b>${row.effectivePaidDays}</b></td>
-                    <td><span class="pill ${row.evalStatus === 'Baik' ? 'green' : 'danger'}">${esc(row.evalStatus)}</span>${row.leaveCandidate ? ' <span class="pill gold">Kandidat Potong Cuti</span>' : ''}</td>
+                    <td style="white-space:nowrap"><span class="pill ${row.evalStatus === 'Baik' ? 'green' : 'danger'}">${esc(row.evalStatus)}</span>${row.leaveCandidate ? ' <span class="pill gold">Kandidat Potong Cuti</span>' : ''}</td>
                     <td>
-                      <div class="ops-inline-edit">
-                        <select class="input ops-rev-date" data-nik="${esc(row.employee_no)}" aria-label="Tanggal untuk ${esc(row.employee_name)}">
+                      <div class="ops-inline-edit" style="flex-wrap:nowrap">
+                        <select class="input ops-rev-date" style="min-width:165px" data-nik="${esc(row.employee_no)}" aria-label="Tanggal untuk ${esc(row.employee_name)}">
                           ${row.days.slice(0, 15).map(d => `<option value="${d.work_date}" ${flaggedDay?.work_date === d.work_date ? 'selected' : ''}>${d.work_date} (${d.code === 'PERLU_PEMERIKSAAN_HR' ? 'HR?' : d.code}${d.is_confirmed ? ' ✓' : ''})</option>`).join('')}
                         </select>
-                        <select class="input ops-rev-code" data-nik="${esc(row.employee_no)}" aria-label="Kode status untuk ${esc(row.employee_name)}">
+                        <select class="input ops-rev-code" style="min-width:68px" data-nik="${esc(row.employee_no)}" aria-label="Kode status untuk ${esc(row.employee_name)}">
                           <option value="M">M</option>
                           <option value="T">T</option>
                           <option value="S">S</option>
@@ -2020,7 +2018,7 @@ export async function renderOpsSettingsView(host, ctx) {
   const empOptions = (selectedNik = '') => {
     const normSel = compactNik(selectedNik);
     return `<option value="">-- Pilih dari Employee Directory --</option>` + employees.map(e =>
-      `<option value="${esc(e.employee_no)}" data-name="${esc(e.full_name)}" data-pos="${esc(e.position || '')}" ${compactNik(e.employee_no) === normSel ? 'selected' : ''}>${esc(e.full_name)} (${esc(e.employee_no)} · ${esc(e.position || '-')})</option>`
+      `<option value="${esc(e.employee_no)}" data-name="${esc(e.full_name)}" data-pos="${esc(e.position || '')}" title="${esc(formatCompanyEntityName(e.company_entity || ''))}" ${compactNik(e.employee_no) === normSel ? 'selected' : ''}>${esc(e.full_name)} (${esc(e.employee_no)} · ${esc(normalizeCompanyEntity(e.company_entity || ''))} · ${esc(e.home_base || 'PASURUAN')})</option>`
     ).join('');
   };
 
