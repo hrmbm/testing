@@ -1,5 +1,23 @@
 // Pure business logic helpers for HR&GA Workspace (unit-tested via node:test)
-import { computeDisc } from './disc-engine.js?v=20261122-hrga-workspace-16';
+import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-18';
+
+const DISC_RESULT_CACHE = new WeakMap();
+
+export function getMemoizedDiscResult(disc, computeFn = computeDisc) {
+  if (!disc || !Array.isArray(disc.answers) || disc.answers.length !== 24) return null;
+  const cached = DISC_RESULT_CACHE.get(disc);
+  if (cached && cached.answersRef === disc.answers) {
+    return cached.result;
+  }
+  let result = null;
+  try {
+    result = computeFn(disc.answers);
+  } catch {
+    result = null;
+  }
+  DISC_RESULT_CACHE.set(disc, { answersRef: disc.answers, result });
+  return result;
+}
 
 export const PIN_REVEAL_PASSWORD = '8karakterH!';
 
@@ -271,7 +289,105 @@ export function extractDirectDisc(applicant) {
     : applicant.disc_submissions) || null;
 }
 
-export function collectSiblingApplicants(applicant, applicants = []) {
+export function buildWorkspaceIndexes({
+  applicants = [],
+  employees = [],
+  interviews = [],
+  invitedCandidates = [],
+  stage1Leads = []
+} = {}) {
+  const applicantById = new Map();
+  const applicantOrder = new Map();
+  const applicantsByNik = new Map();
+  const applicantsByDuplicatedFrom = new Map();
+  const applicantsByPhone = new Map();
+  const applicantsByName = new Map();
+
+  const pushMap = (map, key, val) => {
+    if (!key) return;
+    let bucket = map.get(key);
+    if (!bucket) {
+      bucket = [];
+      map.set(key, bucket);
+    }
+    bucket.push(val);
+  };
+
+  (applicants || []).forEach((app, idx) => {
+    if (!app) return;
+    applicantOrder.set(app, idx);
+    if (app.id) applicantById.set(app.id, app);
+    const nikKey = normalizeNikKey(app.nik || app.application_data?.nik);
+    if (nikKey) pushMap(applicantsByNik, nikKey, app);
+    if (app.duplicated_from) pushMap(applicantsByDuplicatedFrom, app.duplicated_from, app);
+    if (app.stage !== 'stage1_pending') {
+      const phoneKey = normalizePhoneDigits(app.application_data?.telepon);
+      if (phoneKey) pushMap(applicantsByPhone, phoneKey, app);
+      const nameKey = normalizePersonName(app.full_name || app.application_data?.nama);
+      if (nameKey) pushMap(applicantsByName, nameKey, app);
+    }
+  });
+
+  const employeeByApplicantId = new Map();
+  const employeeByNik = new Map();
+  (employees || []).forEach(emp => {
+    if (!emp) return;
+    if (emp.applicant_id && !employeeByApplicantId.has(emp.applicant_id)) {
+      employeeByApplicantId.set(emp.applicant_id, emp);
+    }
+    const ktpNik = normalizeNikKey(emp.ktp_nik || emp.applicant?.nik);
+    if (ktpNik && !employeeByNik.has(ktpNik)) {
+      employeeByNik.set(ktpNik, emp);
+    }
+  });
+
+  const interviewsByApplicantId = new Map();
+  const interviewsByStage1Id = new Map();
+  const interviewsByNik = new Map();
+  (interviews || []).forEach(row => {
+    if (!row) return;
+    if (row.applicant_id) pushMap(interviewsByApplicantId, row.applicant_id, row);
+    if (row.stage1_id) pushMap(interviewsByStage1Id, row.stage1_id, row);
+    const nikKey = normalizeNikKey(row.candidate_nik);
+    if (nikKey) pushMap(interviewsByNik, nikKey, row);
+  });
+
+  const inviteByApplicantId = new Map();
+  const inviteByStage1Id = new Map();
+  (invitedCandidates || []).forEach(inv => {
+    if (!inv) return;
+    if (inv.linked_applicant_id && !inviteByApplicantId.has(inv.linked_applicant_id)) {
+      inviteByApplicantId.set(inv.linked_applicant_id, inv);
+    }
+    if (inv.linked_stage1_id && !inviteByStage1Id.has(inv.linked_stage1_id)) {
+      inviteByStage1Id.set(inv.linked_stage1_id, inv);
+    }
+  });
+
+  const stage1ById = new Map();
+  (stage1Leads || []).forEach(lead => {
+    if (lead?.id) stage1ById.set(lead.id, lead);
+  });
+
+  return {
+    applicantById,
+    applicantOrder,
+    applicantsByNik,
+    applicantsByDuplicatedFrom,
+    applicantsByPhone,
+    applicantsByName,
+    employeeByApplicantId,
+    employeeByNik,
+    interviewsByApplicantId,
+    interviewsByStage1Id,
+    interviewsByNik,
+    inviteByApplicantId,
+    inviteByStage1Id,
+    stage1ById
+  };
+}
+
+export function collectSiblingApplicants(applicant, applicants = [], indexes = null) {
   if (!applicant) return [];
   const targetNik = normalizeNikKey(applicant.nik || applicant.application_data?.nik);
   const directLinks = new Set([applicant.id, applicant.duplicated_from].filter(Boolean));
@@ -283,6 +399,28 @@ export function collectSiblingApplicants(applicant, applicants = []) {
     result.push(item);
   };
   pushUnique(applicant);
+
+  if (indexes) {
+    if (targetNik) {
+      for (const cand of (indexes.applicantsByNik.get(targetNik) || [])) {
+        if (cand.id !== applicant.id) pushUnique(cand);
+      }
+    }
+    if (applicant.duplicated_from) {
+      const parent = indexes.applicantById.get(applicant.duplicated_from);
+      if (parent && parent.id !== applicant.id) pushUnique(parent);
+      for (const cand of (indexes.applicantsByDuplicatedFrom.get(applicant.duplicated_from) || [])) {
+        if (cand.id !== applicant.id) pushUnique(cand);
+      }
+    }
+    if (applicant.id) {
+      for (const cand of (indexes.applicantsByDuplicatedFrom.get(applicant.id) || [])) {
+        if (cand.id !== applicant.id) pushUnique(cand);
+      }
+    }
+    return result;
+  }
+
   for (const cand of (applicants || [])) {
     if (!cand || cand.id === applicant.id) continue;
     const candNik = normalizeNikKey(cand.nik || cand.application_data?.nik);
@@ -299,12 +437,12 @@ export function collectSiblingApplicants(applicant, applicants = []) {
   return result;
 }
 
-export function resolveSharedDiscForApplicant(applicant, applicants = []) {
+export function resolveSharedDiscForApplicant(applicant, applicants = [], indexes = null) {
   const direct = extractDirectDisc(applicant);
   if (direct && (Array.isArray(direct.answers) ? direct.answers.length === 24 : true)) {
     return direct;
   }
-  const siblings = collectSiblingApplicants(applicant, applicants);
+  const siblings = collectSiblingApplicants(applicant, applicants, indexes);
   let fallback = direct;
   for (const sib of siblings) {
     if (sib === applicant) continue;
@@ -318,19 +456,35 @@ export function resolveSharedDiscForApplicant(applicant, applicants = []) {
   return fallback || null;
 }
 
-export function resolveSharedInterviewsForApplicant(applicant, applicants = [], interviews = []) {
+export function resolveSharedInterviewsForApplicant(applicant, applicants = [], interviews = [], indexes = null) {
   if (!applicant && !interviews?.length) return [];
-  const siblings = collectSiblingApplicants(applicant, applicants);
+  const siblings = collectSiblingApplicants(applicant, applicants, indexes);
   const siblingIds = new Set(siblings.map(s => s.id).filter(Boolean));
   if (applicant?.id) siblingIds.add(applicant.id);
   const targetNik = normalizeNikKey(applicant?.nik || applicant?.application_data?.nik);
 
-  const matching = (interviews || []).filter(row => {
-    if (!row) return false;
-    if (row.applicant_id && siblingIds.has(row.applicant_id)) return true;
-    if (targetNik && normalizeNikKey(row.candidate_nik) === targetNik) return true;
-    return false;
-  });
+  let matching;
+  if (indexes) {
+    const matchedSet = new Set();
+    for (const sid of siblingIds) {
+      for (const row of (indexes.interviewsByApplicantId.get(sid) || [])) {
+        matchedSet.add(row);
+      }
+    }
+    if (targetNik) {
+      for (const row of (indexes.interviewsByNik.get(targetNik) || [])) {
+        matchedSet.add(row);
+      }
+    }
+    matching = [...matchedSet];
+  } else {
+    matching = (interviews || []).filter(row => {
+      if (!row) return false;
+      if (row.applicant_id && siblingIds.has(row.applicant_id)) return true;
+      if (targetNik && normalizeNikKey(row.candidate_nik) === targetNik) return true;
+      return false;
+    });
+  }
 
   if (!matching.length) return [];
 
@@ -510,9 +664,11 @@ export function deriveCandidateProgress(applicant, candidateInterviews = [], emp
     }
   }
   const sharedDisc = options?.sharedDisc || (
-    Array.isArray(options?.applicants)
-      ? resolveSharedDiscForApplicant(applicant, options.applicants)
-      : extractDirectDisc(applicant)
+    options?.indexes
+      ? resolveSharedDiscForApplicant(applicant, options?.applicants || [], options.indexes)
+      : (Array.isArray(options?.applicants)
+          ? resolveSharedDiscForApplicant(applicant, options.applicants)
+          : extractDirectDisc(applicant))
   );
   const hasDisc = Boolean(sharedDisc || applicant?.stage === 'disc_completed');
   if (hasDisc) {
@@ -546,8 +702,35 @@ function normalizePersonName(name = '') {
   return String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-export function findMatchingApplicantForLead(lead, { applicants = [], interviews = [], invitedCandidates = [] } = {}) {
+export function findMatchingApplicantForLead(lead, { applicants = [], interviews = [], invitedCandidates = [], indexes = null } = {}) {
   if (!lead) return null;
+  if (indexes) {
+    const invMatch = indexes.inviteByStage1Id.get(lead.id);
+    if (invMatch?.linked_applicant_id) {
+      const app = indexes.applicantById.get(invMatch.linked_applicant_id);
+      if (app) return app;
+    }
+    const intList = indexes.interviewsByStage1Id.get(lead.id) || [];
+    for (const row of intList) {
+      if (row.applicant_id) {
+        const app = indexes.applicantById.get(row.applicant_id);
+        if (app) return app;
+      }
+    }
+    const leadPhone = normalizePhoneDigits(lead.whatsapp);
+    const leadName = normalizePersonName(lead.full_name);
+    const leadPos = String(lead.position || '').trim().toLowerCase();
+
+    const phoneCandidates = leadPhone ? (indexes.applicantsByPhone.get(leadPhone) || []) : [];
+    const nameCandidates = leadName ? (indexes.applicantsByName.get(leadName) || []) : [];
+    if (!phoneCandidates.length && !nameCandidates.length) return null;
+
+    const matchSet = new Set([...phoneCandidates, ...nameCandidates]);
+    const matches = [...matchSet].sort((a, b) => (indexes.applicantOrder.get(a) ?? 0) - (indexes.applicantOrder.get(b) ?? 0));
+    const exactPos = matches.find(a => String(a.position || '').trim().toLowerCase() === leadPos);
+    return exactPos || matches[0] || null;
+  }
+
   const invMatch = (invitedCandidates || []).find(inv => inv.linked_stage1_id === lead.id && inv.linked_applicant_id);
   if (invMatch) {
     const app = applicants.find(a => a.id === invMatch.linked_applicant_id);
@@ -574,29 +757,34 @@ export function findMatchingApplicantForLead(lead, { applicants = [], interviews
   return exactPos || matches[0];
 }
 
-export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [], employees = [], invitedCandidates = [] } = {}) {
-  const linkedApplicant = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates });
-  const stage1Ints = (interviews || []).filter(i => i.stage1_id === lead?.id);
-  const appInts = linkedApplicant ? resolveSharedInterviewsForApplicant(linkedApplicant, applicants, interviews) : [];
+export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [], employees = [], invitedCandidates = [], indexes = null } = {}) {
+  const linkedApplicant = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates, indexes });
+  const stage1Ints = indexes
+    ? (indexes.interviewsByStage1Id.get(lead?.id) || [])
+    : (interviews || []).filter(i => i.stage1_id === lead?.id);
+  const appInts = linkedApplicant ? resolveSharedInterviewsForApplicant(linkedApplicant, applicants, interviews, indexes) : [];
   const mergedMap = new Map();
   [...stage1Ints, ...appInts].forEach(i => {
     mergedMap.set(i.id || `${i.interview_stage}:${i.updated_at || i.created_at}`, i);
   });
   const emp = linkedApplicant
     ? ((Array.isArray(linkedApplicant.employees) ? linkedApplicant.employees[0] : linkedApplicant.employees) ||
-        (employees || []).find(e => e.applicant_id === linkedApplicant.id) || null)
+        (indexes
+          ? (indexes.employeeByApplicantId.get(linkedApplicant.id) || null)
+          : (employees || []).find(e => e.applicant_id === linkedApplicant.id)) || null)
     : null;
   const progress = deriveCandidateProgress(
     linkedApplicant || { stage: 'stage1_pending' },
     [...mergedMap.values()],
     emp,
     lead,
-    { applicants }
+    { applicants, indexes }
   );
   return { ...progress, linkedApplicant };
 }
 
-export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [], stage1Leads = [] } = {}) {
+export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [], stage1Leads = [], indexes = null } = {}) {
+  const idx = indexes || buildWorkspaceIndexes({ applicants, invitedCandidates: manualInvites, stage1Leads });
   const linkedIds = new Set();
   const linkedStage1Ids = new Set();
   (manualInvites || []).forEach(inv => {
@@ -606,10 +794,9 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
 
   const matchedLeadByApplicantId = new Map();
   const matchedStage1Ids = new Set();
-  const stage1ById = new Map((stage1Leads || []).map(l => [l.id, l]));
 
   for (const lead of (stage1Leads || [])) {
-    const matchedApp = findMatchingApplicantForLead(lead, { applicants, invitedCandidates: manualInvites });
+    const matchedApp = findMatchingApplicantForLead(lead, { applicants, invitedCandidates: manualInvites, indexes: idx });
     if (matchedApp) {
       matchedStage1Ids.add(lead.id);
       const existingLead = matchedLeadByApplicantId.get(matchedApp.id);
@@ -623,9 +810,9 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
 
   for (const inv of (manualInvites || [])) {
     const linkedApp = inv.linked_applicant_id
-      ? (applicants || []).find(a => a.id === inv.linked_applicant_id) || null
+      ? (idx.applicantById.get(inv.linked_applicant_id) || null)
       : null;
-    const linkedLead = inv.linked_stage1_id ? (stage1ById.get(inv.linked_stage1_id) || null) : null;
+    const linkedLead = inv.linked_stage1_id ? (idx.stage1ById.get(inv.linked_stage1_id) || null) : null;
     const resolvedStatus = (linkedApp || linkedLead)
       ? 'Responded'
       : (inv.status === 'Responded' ? 'Responded' : 'No Response');
@@ -745,33 +932,31 @@ export function buildUnifiedTrackingRows({
   stage1Leads = [],
   interviews = [],
   employees = [],
-  invitedCandidates = []
+  invitedCandidates = [],
+  indexes = null
 } = {}) {
+  const idx = indexes || buildWorkspaceIndexes({ applicants, employees, interviews, invitedCandidates, stage1Leads });
   const rows = [];
-  const inviteByApplicantId = new Map();
-  const inviteByStage1Id = new Map();
-  (invitedCandidates || []).forEach(inv => {
-    if (inv.linked_applicant_id && !inviteByApplicantId.has(inv.linked_applicant_id)) {
-      inviteByApplicantId.set(inv.linked_applicant_id, inv);
-    }
-    if (inv.linked_stage1_id && !inviteByStage1Id.has(inv.linked_stage1_id)) {
-      inviteByStage1Id.set(inv.linked_stage1_id, inv);
-    }
-  });
+  const inviteByApplicantId = idx.inviteByApplicantId;
+  const inviteByStage1Id = idx.inviteByStage1Id;
 
   const leadByApplicantId = new Map();
+  const matchedStage1Set = new Set();
   const seenStage1Ids = new Set();
   for (const s of (stage1Leads || [])) {
     seenStage1Ids.add(s.id);
-    const matched = findMatchingApplicantForLead(s, { applicants, interviews, invitedCandidates });
-    if (matched && !leadByApplicantId.has(matched.id) && String(s.source || '').trim()) {
-      leadByApplicantId.set(matched.id, s);
+    const matched = findMatchingApplicantForLead(s, { applicants, interviews, invitedCandidates, indexes: idx });
+    if (matched) {
+      matchedStage1Set.add(s.id);
+      if (!leadByApplicantId.has(matched.id) && String(s.source || '').trim()) {
+        leadByApplicantId.set(matched.id, s);
+      }
     }
   }
 
-  const getDisc = a => resolveSharedDiscForApplicant(a, applicants);
+  const getDisc = a => resolveSharedDiscForApplicant(a, applicants, idx);
   const getEmp = a => (Array.isArray(a.employees) ? a.employees[0] : a.employees) ||
-    (employees || []).find(e => e.applicant_id === a.id) || null;
+    idx.employeeByApplicantId.get(a.id) || null;
 
   const formatInterviewStageCell = item => {
     if (!item) return null;
@@ -793,7 +978,7 @@ export function buildUnifiedTrackingRows({
 
   for (const a of (applicants || [])) {
     if (a.stage === 'stage1_pending') continue;
-    const ints = resolveSharedInterviewsForApplicant(a, applicants, interviews);
+    const ints = resolveSharedInterviewsForApplicant(a, applicants, interviews, idx);
     const byStage = getLatestInterviewsByStage(ints);
     const emp = getEmp(a);
     const disc = getDisc(a);
@@ -871,9 +1056,8 @@ export function buildUnifiedTrackingRows({
   }
 
   for (const s of (stage1Leads || [])) {
-    const matched = findMatchingApplicantForLead(s, { applicants, interviews, invitedCandidates });
-    if (matched) continue;
-    const ints = (interviews || []).filter(i => i.stage1_id === s.id);
+    if (matchedStage1Set.has(s.id)) continue;
+    const ints = idx.interviewsByStage1Id.get(s.id) || [];
     const byStage = getLatestInterviewsByStage(ints);
     const linkedInv = inviteByStage1Id.get(s.id) || null;
     const invStatus = linkedInv ? (linkedInv.status === 'Responded' ? 'Responded' : 'No Response') : 'Responded';
@@ -976,8 +1160,10 @@ export function buildRecruitmentConclusionSummary({
   stage1Leads = [],
   applicants = [],
   interviews = [],
-  employees = []
+  employees = [],
+  indexes = null
 } = {}) {
+  const idx = indexes || buildWorkspaceIndexes({ applicants, employees, interviews, invitedCandidates, stage1Leads });
   const buckets = new Map();
   const ensureBucket = (rawPos = '') => {
     const clean = String(rawPos || '').trim();
@@ -1002,11 +1188,11 @@ export function buildRecruitmentConclusionSummary({
     if (String(pos || '').trim()) ensureBucket(pos);
   }
 
-  const applicantById = new Map((applicants || []).map(a => [a.id, a]));
-  const leadById = new Map((stage1Leads || []).map(l => [l.id, l]));
+  const applicantById = idx.applicantById;
+  const leadById = idx.stage1ById;
   const matchedAppByStage1Id = new Map();
   for (const lead of (stage1Leads || [])) {
-    const matched = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates });
+    const matched = findMatchingApplicantForLead(lead, { applicants, interviews, invitedCandidates, indexes: idx });
     if (matched) matchedAppByStage1Id.set(lead.id, matched);
   }
 
@@ -1017,7 +1203,7 @@ export function buildRecruitmentConclusionSummary({
   }
 
   // 2. Invited count per Position (deduplicated view rows)
-  const invitedRows = buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants, stage1Leads });
+  const invitedRows = buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants, stage1Leads, indexes: idx });
   for (const row of invitedRows) {
     const pos = String(row.appliedPosition || '').trim();
     if (!pos || pos === '—') continue;
@@ -1033,14 +1219,14 @@ export function buildRecruitmentConclusionSummary({
     const pos = String(app.position || app.application_data?.posisi || '').trim();
     if (!pos) continue;
     const bucket = ensureBucket(pos);
-    const resolvedDisc = resolveSharedDiscForApplicant(app, applicants);
+    const resolvedDisc = resolveSharedDiscForApplicant(app, applicants, idx);
     const hasDisc = Boolean(resolvedDisc || app.stage === 'disc_completed');
     if (hasDisc) bucket.hrTestCount += 1;
     if (app.stage === 'hired' || hiredApplicantIds.has(app.id)) {
       bucket.acceptedCandidates.add(`app:${app.id}`);
     }
 
-    const sharedInts = resolveSharedInterviewsForApplicant(app, applicants, interviews);
+    const sharedInts = resolveSharedInterviewsForApplicant(app, applicants, interviews, idx);
     const candKey = `app:${app.id}`;
     for (const row of sharedInts) {
       if (row.applicant_id === app.id && row.id) coveredDirectInterviewIds.add(row.id);
@@ -1724,6 +1910,69 @@ export function buildConclusionExportRows(summary = {}) {
       : '0%'
   }));
 }
+
+export function paginateRows(rows = [], page = 1, pageSize = 50) {
+  const list = Array.isArray(rows) ? rows : [];
+  const totalItems = list.length;
+  if (pageSize === 'all' || String(pageSize).toLowerCase() === 'all' || Number(pageSize) <= 0) {
+    return {
+      items: list,
+      totalItems,
+      page: 1,
+      pageSize: 'all',
+      totalPages: 1,
+      startIndex: totalItems ? 1 : 0,
+      endIndex: totalItems
+    };
+  }
+  const size = Math.max(1, Number.parseInt(pageSize, 10) || 50);
+  const totalPages = Math.max(1, Math.ceil(totalItems / size));
+  const safePage = Math.min(Math.max(1, Number.parseInt(page, 10) || 1), totalPages);
+  const offset = (safePage - 1) * size;
+  const items = list.slice(offset, offset + size);
+  return {
+    items,
+    totalItems,
+    page: safePage,
+    pageSize: size,
+    totalPages,
+    startIndex: totalItems ? offset + 1 : 0,
+    endIndex: offset + items.length
+  };
+}
+
+export function preserveCaretCurrencyValue(rawValue = '', selectionStart = null) {
+  const raw = String(rawValue ?? '');
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!digits) {
+    return { formatted: '', digits: '', caretPos: 0 };
+  }
+  const formatted = Number(digits).toLocaleString('id-ID');
+  if (selectionStart === null || selectionStart === undefined || !Number.isFinite(Number(selectionStart))) {
+    return { formatted, digits, caretPos: formatted.length };
+  }
+  const clampedStart = Math.max(0, Math.min(raw.length, Number(selectionStart)));
+  let digitsBeforeCaret = 0;
+  for (let i = 0; i < clampedStart; i++) {
+    if (/\d/.test(raw[i])) digitsBeforeCaret += 1;
+  }
+  if (digitsBeforeCaret <= 0) {
+    return { formatted, digits, caretPos: 0 };
+  }
+  let seen = 0;
+  let caretPos = formatted.length;
+  for (let i = 0; i < formatted.length; i++) {
+    if (/\d/.test(formatted[i])) {
+      seen += 1;
+      if (seen === digitsBeforeCaret) {
+        caretPos = i + 1;
+        break;
+      }
+    }
+  }
+  return { formatted, digits, caretPos };
+}
+
 
 
 

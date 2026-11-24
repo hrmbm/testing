@@ -1,6 +1,9 @@
-import { $, esc } from './common.js?v=20261122-hrga-workspace-16';
-import { bindSafeModalClose } from './admin-modals.js?v=20261122-hrga-workspace-16';
-import { CONTRACT_DURATION_OPTIONS } from './workspace-logic.js?v=20261122-hrga-workspace-16';
+import { $, esc } from './common.js?v=20261123-hrga-workspace-18';
+import { bindSafeModalClose } from './admin-modals.js?v=20261123-hrga-workspace-18';
+import {
+  CONTRACT_DURATION_OPTIONS,
+  preserveCaretCurrencyValue
+} from './workspace-logic.js?v=20261123-hrga-workspace-18';
 import {
   CONTRACT_DOCUMENTS,
   DEFAULT_CONTRACT_SETTINGS,
@@ -13,7 +16,7 @@ import {
   renderAgreementHtml,
   resolveDefaultContractStartDate,
   toIsoDate
-} from './contract-logic.js?v=20261122-hrga-workspace-16';
+} from './contract-logic.js?v=20261123-hrga-workspace-18';
 
 export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -422,6 +425,15 @@ export async function openPkwtConfigModal({
 
   let selectedDocKey = CONTRACT_DOCUMENTS[0].key;
   let renderSeq = 0;
+  let previewDebounceTimer = null;
+
+  const schedulePreviewRender = (delay = 180) => {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(() => {
+      previewDebounceTimer = null;
+      renderPreview();
+    }, delay);
+  };
 
   const collectFormConfig = () => {
     const currentMaster = activeMaster();
@@ -502,20 +514,31 @@ export async function openPkwtConfigModal({
     if (m && !activeSettings.signingCity) {
       form.elements.signingCity.value = m.signingCity || 'Pasuruan';
     }
+    clearTimeout(previewDebounceTimer);
     renderPreview();
   };
 
-  form.elements.signingDate.onchange = () => renderPreview();
-  form.elements.durationMonths.onchange = () => renderPreview();
+  form.elements.signingDate.onchange = () => {
+    clearTimeout(previewDebounceTimer);
+    renderPreview();
+  };
+  form.elements.durationMonths.onchange = () => {
+    clearTimeout(previewDebounceTimer);
+    renderPreview();
+  };
 
   form.elements.cashWageAmount.oninput = () => {
-    form.elements.cashWageAmount.value = formatCurrencyDigits(form.elements.cashWageAmount.value);
-    renderPreview();
+    const inputEl = form.elements.cashWageAmount;
+    const { formatted, caretPos } = preserveCaretCurrencyValue(inputEl.value, inputEl.selectionStart);
+    inputEl.value = formatted;
+    try { inputEl.setSelectionRange(caretPos, caretPos); } catch {}
+    schedulePreviewRender(180);
   };
 
   ['includeKtp', 'includeNik', 'includeDepartment', 'includeCustomNote'].forEach(name => {
     form.elements[name].onchange = () => {
       syncOptionalInputs();
+      clearTimeout(previewDebounceTimer);
       renderPreview();
     };
   });
@@ -524,10 +547,11 @@ export async function openPkwtConfigModal({
     if (['cashWageAmount', 'signingDate', 'durationMonths'].includes(event.target?.name)) {
       return;
     }
-    renderPreview();
+    schedulePreviewRender(180);
   };
 
   const handlePrint = async (printAll) => {
+    clearTimeout(previewDebounceTimer);
     errorBox.textContent = '';
     if (!form.reportValidity()) return;
     const config = collectFormConfig();
@@ -709,7 +733,10 @@ export function openPostPrintEmployeeUpdateModal({
   form.elements.address.value = config.employeeAddress || currentEmployee?.address || record.address || '';
 
   form.elements.salary.oninput = () => {
-    form.elements.salary.value = formatCurrencyDigits(form.elements.salary.value);
+    const inputEl = form.elements.salary;
+    const { formatted, caretPos } = preserveCaretCurrencyValue(inputEl.value, inputEl.selectionStart);
+    inputEl.value = formatted;
+    try { inputEl.setSelectionRange(caretPos, caretPos); } catch {}
   };
 
   approveNowBtn.classList.toggle('hidden', !isRootAdmin);

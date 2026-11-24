@@ -1,5 +1,5 @@
-/* HR&GA Workspace app cache worker — version 20261123-hrga-workspace-17. */
-const BUILD = '20261123-hrga-workspace-17';
+/* HR&GA Workspace app cache worker — version 20261123-hrga-workspace-18. */
+const BUILD = '20261123-hrga-workspace-18';
 const APP_ASSET_CACHE = `hrga-workspace-app-assets-${BUILD}`;
 const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 
@@ -8,7 +8,7 @@ self.addEventListener('message', event => {
 });
 
 self.addEventListener('install', event => {
-  event.waitUntil(self.skipWaiting());
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
@@ -27,9 +27,28 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Do not cache navigation HTML so GitHub Pages always serves current build markup.
+  // Keep HTML navigations fresh so deployments activate immediately.
   if (request.mode === 'navigate') {
     event.respondWith(fetch(new Request(request, { cache: 'no-cache' })).catch(() => caches.match(request)));
+    return;
+  }
+
+  const isImmutableVersioned = url.searchParams.has('v') && /\.(?:js|css)$/i.test(url.pathname);
+  const isStaticMediaOrVendor = url.pathname.startsWith('/vendor/') ||
+    (url.pathname.includes('/assets/img/') && /\.(?:png|jpe?g|webp|svg|ico)$/i.test(url.pathname)) ||
+    (url.pathname.includes('/assets/contracts/') && /\.(?:html|json)$/i.test(url.pathname));
+
+  if (isImmutableVersioned || isStaticMediaOrVendor) {
+    event.respondWith((async () => {
+      const cache = await caches.open(APP_ASSET_CACHE);
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok && response.type !== 'opaque') {
+        await cache.put(request, response.clone());
+      }
+      return response;
+    })());
     return;
   }
 

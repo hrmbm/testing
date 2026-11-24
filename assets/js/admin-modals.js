@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261122-hrga-workspace-16';
+import { $, esc } from './common.js?v=20261123-hrga-workspace-18';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -15,7 +15,7 @@ import {
   normalizeInterviewDecision,
   verifyPinRevealPassword,
   maskPin
-} from './workspace-logic.js?v=20261122-hrga-workspace-16';
+} from './workspace-logic.js?v=20261123-hrga-workspace-18';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -960,7 +960,9 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
     previewBox.classList.add('hidden');
     if (!file) return;
     try {
-      const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const XLSX = await import('/vendor/xlsx.mjs')
+        .then(m => (m.read ? m : m.default || m))
+        .catch(() => import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'));
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
       const sheetName = wb.SheetNames[0];

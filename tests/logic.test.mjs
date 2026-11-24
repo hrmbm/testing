@@ -1236,4 +1236,150 @@ test('parseDiscImportRows, Tracking XLSX export formatters, Recruitment Settings
   }
 });
 
+test('Optimization helpers: buildWorkspaceIndexes parity, memoized DISC, pagination, and caret currency input', async () => {
+  const {
+    buildWorkspaceIndexes,
+    getMemoizedDiscResult,
+    paginateRows,
+    preserveCaretCurrencyValue,
+    deriveCandidateProgress,
+    resolveLeadUnifiedStatus,
+    buildInvitedCandidatesViewRows,
+    buildUnifiedTrackingRows,
+    buildRecruitmentConclusionSummary
+  } = await import('../assets/js/workspace-logic.js');
+
+  const answers = Array.from({ length: 24 }, (_, idx) => ({ most: idx % 4, least: (idx + 2) % 4 }));
+  const applicants = [
+    {
+      id: 'app-1',
+      full_name: 'Sari Dewi',
+      nik: '3514122006840004',
+      position: 'CNC',
+      stage: 'disc_completed',
+      created_at: '2026-11-10T08:00:00Z',
+      application_data: { telepon: '081234567890' },
+      disc_submissions: [{ id: 'disc-1', answers, completed_at: '2026-11-11T09:00:00Z' }]
+    },
+    {
+      id: 'app-2',
+      full_name: 'Sari Dewi',
+      nik: '3514122006840004',
+      position: 'QA',
+      stage: 'application_submitted',
+      duplicated_from: 'app-1',
+      created_at: '2026-11-12T08:00:00Z',
+      disc_submissions: []
+    }
+  ];
+  const employees = [{ id: 'emp-1', applicant_id: 'app-1', full_name: 'Sari Dewi', nik: '3514122006840004' }];
+  const interviews = [
+    { id: 'int-1', applicant_id: 'app-1', candidate_nik: '3514122006840004', interview_stage: 'HR 1', interview_date: '2026-11-13', decision: 'Recommended', created_at: '2026-11-13T08:00:00Z' }
+  ];
+  const invitedCandidates = [
+    { id: 'inv-1', linked_applicant_id: 'app-1', linked_stage1_id: 'lead-1', candidate_name: 'Sari Dewi', applied_position: 'CNC', source: 'Glints', status: 'Responded', invite_date: '2026-11-09' }
+  ];
+  const stage1Leads = [
+    { id: 'lead-1', full_name: 'Sari Dewi', position: 'CNC', whatsapp: '+62 812-3456-7890', source: 'Glints', recommendation: 'Recommended', created_at: '2026-11-08T08:00:00Z' },
+    { id: 'lead-2', full_name: 'Rudi Hartono', position: 'Driver', whatsapp: '089876543210', source: 'Instagram', recommendation: 'Pending', created_at: '2026-11-09T08:00:00Z' }
+  ];
+
+  const indexes = buildWorkspaceIndexes({ applicants, employees, interviews, invitedCandidates, stage1Leads });
+
+  assert.deepEqual(
+    deriveCandidateProgress(applicants[1], interviews, null, null, { applicants }),
+    deriveCandidateProgress(applicants[1], interviews, null, null, { applicants, indexes })
+  );
+  assert.equal(
+    resolveLeadUnifiedStatus(stage1Leads[0], { applicants, interviews, employees, invitedCandidates }).label,
+    resolveLeadUnifiedStatus(stage1Leads[0], { applicants, interviews, employees, invitedCandidates, indexes }).label
+  );
+  assert.deepEqual(
+    buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants, stage1Leads }),
+    buildInvitedCandidatesViewRows({ manualInvites: invitedCandidates, applicants, stage1Leads, indexes })
+  );
+  assert.deepEqual(
+    buildUnifiedTrackingRows({ applicants, stage1Leads, interviews, employees, invitedCandidates }),
+    buildUnifiedTrackingRows({ applicants, stage1Leads, interviews, employees, invitedCandidates, indexes })
+  );
+  assert.deepEqual(
+    buildRecruitmentConclusionSummary({ positions: ['CNC', 'QA'], cvScreenings: [], invitedCandidates, stage1Leads, applicants, interviews, employees }),
+    buildRecruitmentConclusionSummary({ positions: ['CNC', 'QA'], cvScreenings: [], invitedCandidates, stage1Leads, applicants, interviews, employees, indexes })
+  );
+
+  // Memoized DISC computation
+  let computeCalls = 0;
+  const spyCompute = ans => {
+    computeCalls++;
+    return computeDisc(ans);
+  };
+  const discObj = { id: 'd-memo', answers };
+  const first = getMemoizedDiscResult(discObj, spyCompute);
+  const second = getMemoizedDiscResult(discObj, spyCompute);
+  assert.equal(first, second);
+  assert.equal(computeCalls, 1);
+  // Changing answers reference recomputes once
+  discObj.answers = [...answers];
+  getMemoizedDiscResult(discObj, spyCompute);
+  assert.equal(computeCalls, 2);
+
+  // Pagination bounds
+  const emptyPage = paginateRows([], 3, 50);
+  assert.equal(emptyPage.totalItems, 0);
+  assert.equal(emptyPage.totalPages, 1);
+  assert.equal(emptyPage.page, 1);
+  assert.deepEqual(emptyPage.items, []);
+
+  const list120 = Array.from({ length: 120 }, (_, i) => i + 1);
+  const page2 = paginateRows(list120, 2, 50);
+  assert.equal(page2.startIndex, 51);
+  assert.equal(page2.endIndex, 100);
+  assert.equal(page2.totalPages, 3);
+  assert.equal(page2.items.length, 50);
+
+  const clamped = paginateRows(list120, 99, 50);
+  assert.equal(clamped.page, 3);
+  assert.equal(clamped.items.length, 20);
+
+  const allPage = paginateRows(list120, 2, 'all');
+  assert.equal(allPage.page, 1);
+  assert.equal(allPage.totalPages, 1);
+  assert.equal(allPage.items.length, 120);
+
+  // Caret-preserving currency input
+  const insertedMid = preserveCaretCurrencyValue('5.1879.681', 6); // inserted '9' after '5.187'
+  assert.equal(insertedMid.formatted, '51.879.681');
+  assert.equal(insertedMid.caretPos, 6); // right after '9' in '51.879'
+
+  const endTyped = preserveCaretCurrencyValue('4500000', null);
+  assert.equal(endTyped.formatted, '4.500.000');
+  assert.equal(endTyped.caretPos, 9);
+});
+
+test('SQL migrations v5 and v6 match all frontend Supabase tables, columns, and RPC calls', () => {
+  const v5Sql = fs.readFileSync('database/migrations/20261122_hrga_workspace_v5.sql', 'utf8');
+  const v6Sql = fs.readFileSync('database/migrations/20261123_hrga_workspace_v6.sql', 'utf8');
+
+  assert.match(v5Sql, /contract_history[\s\S]*DEFAULT gen_random_uuid\(\)::text/);
+  assert.match(v5Sql, /applied_by_name/);
+  assert.match(v5Sql, /cancelled_by_name/);
+
+  for (const tbl of [
+    'attendance_upload_batches',
+    'attendance_raw_events',
+    'attendance_calendar_days',
+    'staff_conditional_holidays',
+    'staff_attendance_reviews',
+    'employee_leave_balances',
+    'driver_daily_schedules',
+    'stationery_items',
+    'stationery_movements'
+  ]) {
+    assert.ok(v6Sql.includes(`public.${tbl}`), `v6 migration must define ${tbl}`);
+  }
+  assert.ok(v6Sql.includes('public.record_stationery_transaction('), 'v6 migration must define record_stationery_transaction RPC');
+  assert.ok(v6Sql.includes('employee_no text NOT NULL'), 'staff_conditional_holidays must include employee_no column');
+});
+
+
 

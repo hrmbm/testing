@@ -2,13 +2,13 @@ import {
   normalizeInterviewDecision,
   normalizeLeadRecommendation,
   normalizeDisplayNik
-} from './workspace-logic.js?v=20261122-hrga-workspace-16';
+} from './workspace-logic.js?v=20261123-hrga-workspace-18';
 import {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
   renderAgreementHtml
-} from './hris-renderer.js?v=20261122-hrga-workspace-16';
+} from './hris-renderer.js?v=20261123-hrga-workspace-18';
 
 export {
   computeEndDate,

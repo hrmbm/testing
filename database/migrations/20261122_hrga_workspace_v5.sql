@@ -6,7 +6,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.contract_update_requests (
-  id text PRIMARY KEY,
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
   requested_at timestamptz NOT NULL DEFAULT now(),
   requested_by text NOT NULL DEFAULT '',
@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS public.contract_update_requests (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.contract_update_requests
+  ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+
 CREATE INDEX IF NOT EXISTS contract_update_requests_status_idx
   ON public.contract_update_requests (status, requested_at DESC);
 
@@ -48,13 +51,15 @@ CREATE POLICY "contract_update_requests_admin_all"
   WITH CHECK (public.is_portal_admin());
 
 CREATE TABLE IF NOT EXISTS public.contract_history (
-  id text PRIMARY KEY,
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   request_id text NULL,
   status text NOT NULL DEFAULT 'applied' CHECK (status IN ('applied', 'cancelled')),
   applied_at timestamptz NOT NULL DEFAULT now(),
   applied_by text NOT NULL DEFAULT '',
+  applied_by_name text NOT NULL DEFAULT '',
   cancelled_at timestamptz NULL,
   cancelled_by text NULL,
+  cancelled_by_name text NOT NULL DEFAULT '',
   employee_id uuid NULL REFERENCES public.employees(id) ON DELETE SET NULL,
   created_employee_id uuid NULL,
   applicant_id uuid NULL REFERENCES public.applicants(id) ON DELETE SET NULL,
@@ -73,6 +78,12 @@ CREATE TABLE IF NOT EXISTS public.contract_history (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.contract_history
+  ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.contract_history
+  ADD COLUMN IF NOT EXISTS applied_by_name text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS cancelled_by_name text NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS contract_history_applied_idx
   ON public.contract_history (applied_at DESC);

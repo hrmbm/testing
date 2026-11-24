@@ -1,10 +1,8 @@
-import { supabase, isConfigured } from './supabase.js?v=20261123-hrga-workspace-17';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261123-hrga-workspace-17';
-import { $, $$, esc, idDate } from './common.js?v=20261123-hrga-workspace-17';
-import { printApplication, printTrackingReport, invalidateMasterHtmlCache } from './print.js?v=20261123-hrga-workspace-17';
-import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-17';
-import { renderAdminEditorMarkup, bindAdminEditorForm, collectAdminEditorData } from './applicant.js?v=20261123-hrga-workspace-17';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261123-hrga-workspace-17';
+import { supabase, isConfigured } from './supabase.js?v=20261123-hrga-workspace-18';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261123-hrga-workspace-18';
+import { $, $$, esc, idDate } from './common.js?v=20261123-hrga-workspace-18';
+import { computeDisc } from './disc-engine.js?v=20261123-hrga-workspace-18';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261123-hrga-workspace-18';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -41,8 +39,12 @@ import {
   DISC_IMPORT_SAMPLE_ROW,
   parseDiscImportRows,
   buildTrackingExportRows,
-  buildConclusionExportRows
-} from './workspace-logic.js?v=20261123-hrga-workspace-17';
+  buildConclusionExportRows,
+  buildWorkspaceIndexes,
+  getMemoizedDiscResult,
+  paginateRows,
+  preserveCaretCurrencyValue
+} from './workspace-logic.js?v=20261123-hrga-workspace-18';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -54,7 +56,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261123-hrga-workspace-17';
+} from './admin-modals.js?v=20261123-hrga-workspace-18';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -65,12 +67,7 @@ import {
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261123-hrga-workspace-17';
-import {
-  openPkwtConfigModal,
-  readSavedContractSettings,
-  writeSavedContractSettings
-} from './contract-modal.js?v=20261123-hrga-workspace-17';
+} from './contract-logic.js?v=20261123-hrga-workspace-18';
 import {
   DISTRICTS_BY_CITY,
   APPLY_INFO_SOURCES,
@@ -86,7 +83,7 @@ import {
   normalizeDistrictToken,
   calculateVacancyMaxScore,
   buildShareUrl
-} from './vacancy-logic.js?v=20261123-hrga-workspace-17';
+} from './vacancy-logic.js?v=20261123-hrga-workspace-18';
 import {
   APPLY_CUSTOM_FIELD_TYPES,
   FORM_CUSTOM_FIELD_TYPES,
@@ -99,22 +96,80 @@ import {
   STAGE2_SECTION_META,
   normalizeApplySchema,
   normalizeStage2Schema
-} from './form-schema.js?v=20261123-hrga-workspace-17';
-import {
-  renderAttendanceUploadView,
-  renderAttendanceCalendarView,
-  renderStaffHolidayView,
-  renderEmployeeExtensionsView,
-  renderStaffManagementView,
-  renderStaffReportsView,
-  renderDriverScheduleView,
-  renderDriverManagementView,
-  renderDriverReportsView,
-  renderStationeryInputView,
-  renderStationeryStockView,
-  renderStationeryReportsView,
-  renderOpsSettingsView
-} from './ops-views.js?v=20261123-hrga-workspace-17';
+} from './form-schema.js?v=20261123-hrga-workspace-18';
+
+const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
+
+function readSavedContractSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CONTRACT_SETTINGS_STORAGE_KEY) || 'null');
+    return parsed && typeof parsed === 'object'
+      ? { ...DEFAULT_CONTRACT_SETTINGS, ...parsed }
+      : { ...DEFAULT_CONTRACT_SETTINGS };
+  } catch {
+    return { ...DEFAULT_CONTRACT_SETTINGS };
+  }
+}
+
+function writeSavedContractSettings(settings = {}) {
+  try {
+    const current = readSavedContractSettings();
+    localStorage.setItem(CONTRACT_SETTINGS_STORAGE_KEY, JSON.stringify({
+      ...current,
+      companyId: settings.companyId ?? current.companyId,
+      prevUmkYear: Number(settings.prevUmkYear) || current.prevUmkYear,
+      prevUmkAmount: parseNumericCurrency(settings.prevUmkAmount ?? current.prevUmkAmount),
+      currUmkYear: Number(settings.currUmkYear) || current.currUmkYear,
+      currUmkAmount: parseNumericCurrency(settings.currUmkAmount ?? current.currUmkAmount),
+      governorDecreeNo: settings.governorDecreeNo ?? current.governorDecreeNo,
+      overtimeWeekdayRate: parseNumericCurrency(settings.overtimeWeekdayRate ?? current.overtimeWeekdayRate),
+      overtimeHolidayRate: parseNumericCurrency(settings.overtimeHolidayRate ?? current.overtimeHolidayRate),
+      paydayDay: Number(settings.paydayDay) || current.paydayDay,
+      signingCity: settings.signingCity ?? current.signingCity,
+      hrName: settings.hrName ?? current.hrName,
+      hrSignatureTitle: settings.hrSignatureTitle ?? current.hrSignatureTitle,
+      lastDocSequence: Number(settings.lastDocSequence ?? current.lastDocSequence) || 0
+    }));
+  } catch {}
+}
+
+let printModPromise = null;
+const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261123-hrga-workspace-18'));
+
+let applicantModPromise = null;
+const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261123-hrga-workspace-18'));
+
+let contractModalPromise = null;
+const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261123-hrga-workspace-18'));
+
+let opsViewsPromise = null;
+let opsViewsModuleRef = null;
+const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261123-hrga-workspace-18').then(mod => {
+  opsViewsModuleRef = mod;
+  return mod;
+}));
+
+let xlsxLibPromise = null;
+const loadXlsxLib = () => (xlsxLibPromise ??= import('/vendor/xlsx.mjs')
+  .then(m => (m.read ? m : m.default || m))
+  .catch(() => import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm')));
+
+let idlePreloadStarted = false;
+function scheduleIdleModulePreload() {
+  if (idlePreloadStarted) return;
+  idlePreloadStarted = true;
+  const warm = () => {
+    void loadPrintModule().catch(() => {});
+    void loadContractModalModule().catch(() => {});
+    void loadApplicantModule().catch(() => {});
+    void loadOpsViewsModule().catch(() => {});
+  };
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(warm, { timeout: 2500 });
+  } else {
+    setTimeout(warm, 900);
+  }
+}
 
 const loginView = $('#login-view');
 const shell = $('#admin-shell');
@@ -442,6 +497,7 @@ function seedDemoWorkspaceData() {
     const histRaw = JSON.parse(localStorage.getItem(DEMO_CONTRACT_HISTORY_KEY) || '[]');
     contractHistory = Array.isArray(histRaw) ? histRaw : [];
   } catch { contractHistory = []; }
+  workspaceIndexesCache = null;
   lastDataFetchedAt = Date.now();
 }
 
@@ -462,6 +518,7 @@ function say(message) {
 
 function invalidateDataCache() {
   lastDataFetchedAt = 0;
+  workspaceIndexesCache = null;
   cacheDelete('workspace_snapshot').catch(() => {});
 }
 
@@ -490,20 +547,78 @@ function emptyRow(columns, message = 'No data available') {
   return `<tr><td colspan="${columns}" class="table-empty">${esc(message)}</td></tr>`;
 }
 
+let workspaceIndexesCache = null;
+function getWorkspaceIndexes() {
+  if (!workspaceIndexesCache) {
+    workspaceIndexesCache = buildWorkspaceIndexes({
+      applicants,
+      employees,
+      interviews,
+      invitedCandidates,
+      stage1Leads
+    });
+  }
+  return workspaceIndexesCache;
+}
+
+function debounce(fn, delay = 180) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+function renderPaginationFooter(slotEl, paged, onPageChange) {
+  if (!slotEl) return;
+  if (!paged || paged.totalItems <= 0) {
+    slotEl.innerHTML = '';
+    return;
+  }
+  const sizeVal = paged.pageSize === 'all' ? 'all' : String(paged.pageSize);
+  slotEl.innerHTML = `<div class="table-pagination">
+    <div class="pagination-info">Showing ${paged.startIndex}–${paged.endIndex} of ${paged.totalItems}</div>
+    <div class="pagination-controls">
+      <label>Rows:
+        <select class="select page-size-select" data-pg-size aria-label="Rows per page">
+          <option value="25" ${sizeVal === '25' ? 'selected' : ''}>25</option>
+          <option value="50" ${sizeVal === '50' ? 'selected' : ''}>50</option>
+          <option value="100" ${sizeVal === '100' ? 'selected' : ''}>100</option>
+          <option value="all" ${sizeVal === 'all' ? 'selected' : ''}>All</option>
+        </select>
+      </label>
+      <button type="button" class="btn btn-sm btn-secondary" data-pg-prev ${paged.page <= 1 ? 'disabled' : ''}>Prev</button>
+      <span class="pagination-page-label">Page ${paged.page} / ${paged.totalPages}</span>
+      <button type="button" class="btn btn-sm btn-secondary" data-pg-next ${paged.page >= paged.totalPages ? 'disabled' : ''}>Next</button>
+    </div>
+  </div>`;
+  slotEl.querySelector('[data-pg-size]')?.addEventListener('change', e => {
+    const val = e.target.value;
+    onPageChange(1, val === 'all' ? 'all' : Number(val));
+  });
+  slotEl.querySelector('[data-pg-prev]')?.addEventListener('click', () => {
+    if (paged.page > 1) onPageChange(paged.page - 1, paged.pageSize);
+  });
+  slotEl.querySelector('[data-pg-next]')?.addEventListener('click', () => {
+    if (paged.page < paged.totalPages) onPageChange(paged.page + 1, paged.pageSize);
+  });
+}
+
 function getEmployeeForApplicant(applicant) {
   const rel = Array.isArray(applicant?.employees) ? applicant.employees[0] : applicant?.employees;
   if (rel) return rel;
-  return employees.find(e => e.applicant_id === applicant?.id) || null;
+  return getWorkspaceIndexes().employeeByApplicantId.get(applicant?.id) || null;
 }
 
 function getDiscForApplicant(applicant) {
-  return resolveSharedDiscForApplicant(applicant, applicants);
+  return resolveSharedDiscForApplicant(applicant, applicants, getWorkspaceIndexes());
 }
 
 function getInterviewsForApplicant(applicantId, applicantObj = null) {
-  const target = applicantObj || applicants.find(a => a.id === applicantId) || null;
-  if (!target) return interviews.filter(i => i.applicant_id === applicantId);
-  return resolveSharedInterviewsForApplicant(target, applicants, interviews);
+  const idx = getWorkspaceIndexes();
+  const target = applicantObj || idx.applicantById.get(applicantId) || null;
+  if (!target) return idx.interviewsByApplicantId.get(applicantId) || [];
+  return resolveSharedInterviewsForApplicant(target, applicants, interviews, idx);
 }
 
 const APPLICATION_FIELD_LABELS = {
@@ -568,19 +683,20 @@ function discGraphSvg(result) {
 
 function applicantRows(rows, action = 'print') {
   if (!rows.length) return emptyRow(action === 'both' ? 7 : 5);
+  const idx = getWorkspaceIndexes();
   return rows.map(applicant => {
     const employee = getEmployeeForApplicant(applicant);
     const disc = getDiscForApplicant(applicant);
-    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id, applicant), employee, null, { applicants, sharedDisc: disc });
+    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id, applicant), employee, null, { applicants, indexes: idx, sharedDisc: disc });
     let graph = '<span class="status-pill gray">No graph yet</span>';
     let personality = '—';
     if (disc?.answers) {
-      try {
-        const result = computeDisc(disc.answers);
+      const result = getMemoizedDiscResult(disc, computeDisc);
+      if (result) {
         const natural = result.pola[2];
         graph = discGraphSvg(result);
         personality = `<b>${esc(natural.title)}</b><small class="table-subline">${esc(natural.nama)} · Dominant ${esc(result.hurufDominan)}</small>`;
-      } catch {
+      } else {
         graph = '<span class="status-pill gray">Check result</span>';
         personality = 'Needs review';
       }
@@ -593,10 +709,11 @@ function applicantRows(rows, action = 'print') {
   }).join('');
 }
 
-function bindSearch(selector, rerender) {
+function bindSearch(selector, rerender, delay = 180) {
   const input = $(selector);
   if (!input) return;
-  input.addEventListener('input', () => rerender(input.value.trim().toLowerCase()));
+  const run = debounce(() => rerender(input.value.trim().toLowerCase()), delay);
+  input.addEventListener('input', run);
 }
 
 async function fetchEmployeesSafe() {
@@ -727,6 +844,26 @@ async function fetchApplicantsLean() {
   return stripEmbeddedKtpPhoto(candidateResult.data || []);
 }
 
+function computeSnapshotSignature() {
+  const latest = list => {
+    if (!Array.isArray(list) || !list.length) return '0';
+    const first = list[0];
+    return `${list.length}:${first?.updated_at || first?.created_at || first?.id || ''}`;
+  };
+  return [
+    latest(applicants),
+    latest(employees),
+    latest(stage1Leads),
+    latest(interviews),
+    latest(invitedCandidates),
+    latest(cvScreenings),
+    interviewsTableMissing ? 1 : 0,
+    invitedTableMissing ? 1 : 0,
+    cvScreeningsTableMissing ? 1 : 0,
+    employeesExtendedMissing ? 1 : 0
+  ].join('|');
+}
+
 function hydrateSnapshotIntoMemory(snapshot, savedAt) {
   if (!snapshot) return false;
   applicants = Array.isArray(snapshot.applicants) ? snapshot.applicants : [];
@@ -740,12 +877,14 @@ function hydrateSnapshotIntoMemory(snapshot, savedAt) {
   cvScreeningsTableMissing = Boolean(snapshot.cvScreeningsTableMissing);
   stage1HasRecommendationCol = snapshot.stage1HasRecommendationCol !== false;
   employeesExtendedMissing = Boolean(snapshot.employeesExtendedMissing);
+  workspaceIndexesCache = null;
   lastDataFetchedAt = savedAt || Date.now();
   return true;
 }
 
 async function fetchAndCacheFreshSnapshot() {
   if (inflightRefreshPromise) return inflightRefreshPromise;
+  const prevSignature = computeSnapshotSignature();
   inflightRefreshPromise = (async () => {
     const [appRows, empRows, leadRows, intRows, invRows, scrRows] = await Promise.all([
       fetchApplicantsLean(),
@@ -761,7 +900,9 @@ async function fetchAndCacheFreshSnapshot() {
     interviews = intRows;
     invitedCandidates = invRows;
     cvScreenings = scrRows;
+    workspaceIndexesCache = null;
     lastDataFetchedAt = Date.now();
+    const changed = computeSnapshotSignature() !== prevSignature;
     void cacheSet('workspace_snapshot', {
       applicants,
       employees,
@@ -775,6 +916,7 @@ async function fetchAndCacheFreshSnapshot() {
       stage1HasRecommendationCol,
       employeesExtendedMissing
     }).catch(() => {});
+    return { changed };
   })().finally(() => {
     inflightRefreshPromise = null;
   });
@@ -784,11 +926,17 @@ async function fetchAndCacheFreshSnapshot() {
 function triggerBackgroundRevalidate() {
   if (bgRevalidatePromise || inflightRefreshPromise) return;
   bgRevalidatePromise = fetchAndCacheFreshSnapshot()
-    .then(() => {
+    .then(result => {
+      if (result && !result.changed) return;
+      const activeTag = document.activeElement?.tagName;
+      const isEditingInContent = Boolean(
+        content?.contains(document.activeElement) &&
+        (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT')
+      );
       const hasOpenModal = Boolean($('.modal-backdrop:not(.hidden)'));
       const searchVal = $('#table-search')?.value?.trim();
       const autoRefreshViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'print']);
-      if (!hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
+      if (!isEditingInContent && !hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
         if (activeView === 'dashboard') renderDashboard();
         else if (activeView === 'invited') renderInvitedView();
         else if (activeView === 'stage1') renderStage1();
@@ -942,6 +1090,7 @@ function renderDashboard() {
   bindPrint();
   $('#refresh-dashboard')?.addEventListener('click', () => loadView('dashboard', true));
   $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));
+  scheduleIdleModulePreload();
 }
 
 /* ============================================================================
@@ -967,17 +1116,28 @@ function getLeadScoreDisplay(row) {
   };
 }
 
-function stage1RowsHtml(rows) {
-  if (!rows.length) return emptyRow(7, 'No lead records yet');
-  return rows.map(row => {
+function renderStage1() {
+  const idx = getWorkspaceIndexes();
+  const entries = stage1Leads.map(row => {
     const unified = resolveLeadUnifiedStatus(row, {
       applicants,
       interviews,
       employees,
-      invitedCandidates
+      invitedCandidates,
+      indexes: idx
     });
     const scoreDisplay = getLeadScoreDisplay(row);
-    return `<tr>
+    return {
+      row,
+      unified,
+      scoreDisplay,
+      searchText: `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${scoreDisplay.searchText} ${unified.label}`.toLowerCase()
+    };
+  });
+
+  const renderLeadRows = list => {
+    if (!list.length) return emptyRow(7, 'No lead records yet');
+    return list.map(({ row, unified, scoreDisplay }) => `<tr>
       <td><b>${esc(row.full_name)}</b></td>
       <td>${esc(row.position || '-')}</td>
       <td>${esc(row.source || '-')}</td>
@@ -985,30 +1145,39 @@ function stage1RowsHtml(rows) {
       <td data-stage1-score="${esc(row.id)}">${scoreDisplay.html}</td>
       <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '-'}</td>
       <td data-stage1-status="${esc(row.id)}"><span class="status-pill ${unified.tone}">${esc(unified.label)}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderStage1() {
-  const rows = stage1Leads;
-  const paint = query => {
-    const filtered = rows.filter(row => {
-      const unified = resolveLeadUnifiedStatus(row, { applicants, interviews, employees, invitedCandidates });
-      const scoreDisplay = getLeadScoreDisplay(row);
-      return `${row.full_name} ${row.position} ${row.source || ''} ${row.whatsapp} ${scoreDisplay.searchText} ${unified.label}`.toLowerCase().includes(query);
-    });
-    $('#stage1-rows').innerHTML = stage1RowsHtml(filtered);
-    bindStage1Actions(rows);
+    </tr>`).join('');
   };
+
+  let currentQuery = '';
+  let currentPage = 1;
+  let currentPageSize = 50;
+
+  const paint = () => {
+    const filtered = currentQuery ? entries.filter(e => e.searchText.includes(currentQuery)) : entries;
+    const paged = paginateRows(filtered, currentPage, currentPageSize);
+    currentPage = paged.page;
+    $('#stage1-rows').innerHTML = renderLeadRows(paged.items);
+    renderPaginationFooter($('#stage1-pager'), paged, (nextPage, nextSize) => {
+      currentPage = nextPage;
+      currentPageSize = nextSize;
+      paint();
+    });
+    bindStage1Actions(stage1Leads);
+  };
+
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
     `<section class="panel table-panel">${tableToolbar('Search name / position / source / score / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>SCORE</th><th>CV</th><th>STATUS</th></tr></thead>
-        <tbody id="stage1-rows">${stage1RowsHtml(rows)}</tbody>
-      </table></div></section>`;
+        <tbody id="stage1-rows"></tbody>
+      </table></div><div id="stage1-pager"></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
-  bindSearch('#table-search', paint);
-  bindStage1Actions(rows);
+  paint();
+  bindSearch('#table-search', query => {
+    currentQuery = query;
+    currentPage = 1;
+    paint();
+  });
 }
 
 function bindStage1Actions(rows) {
@@ -1116,10 +1285,10 @@ function stage2CellClass(key) {
   return '';
 }
 
-function stage2RowHtml(row, keys) {
+function stage2RowHtml(row, keys, idx = getWorkspaceIndexes()) {
   const data = row.application_data || {};
   const pos = row.position || data.posisi || '—';
-  const progress = deriveCandidateProgress(row, getInterviewsForApplicant(row.id, row), getEmployeeForApplicant(row), null, { applicants });
+  const progress = deriveCandidateProgress(row, getInterviewsForApplicant(row.id, row), getEmployeeForApplicant(row), null, { applicants, indexes: idx });
   return `<tr><td><b class="cell-clamp-2" title="${esc(row.full_name)}">${esc(row.full_name)}</b><small class="table-subline">${esc(row.nik)}</small></td>
     <td><div class="cell-clamp-2" title="${esc(pos)}">${esc(pos)}</div></td>
     ${keys.map(key => {
@@ -1263,6 +1432,7 @@ async function openStage2CandidateEditor(applicant) {
   $('#candidate-edit-title', modal).textContent = `Edit · ${applicant.full_name || 'Unnamed'}`;
   $('#candidate-edit-summary', modal).textContent = `${values.nik} · ${values.posisi} · Five sections matching the candidate application form`;
   $('#candidate-edit-error', modal).textContent = '';
+  const { renderAdminEditorMarkup, bindAdminEditorForm } = await loadApplicantModule();
   $('#candidate-edit-form-slot', modal).innerHTML = renderAdminEditorMarkup(values, stage2PositionsCache);
   modal.classList.remove('hidden');
 
@@ -1305,6 +1475,7 @@ async function saveStage2Candidate() {
     const { data: fullRow } = await supabase.from('applicants').select('application_data').eq('id', applicant.id).maybeSingle();
     if (fullRow?.application_data) baseAppData = fullRow.application_data;
   } catch {}
+  const { collectAdminEditorData } = await loadApplicantModule();
   const nextData = collectAdminEditorData(form, baseAppData);
   nextData.nama = fullName;
   nextData.nik = nik;
@@ -1442,9 +1613,14 @@ function bindStage2CandidateActions() {
 }
 
 function renderStage2() {
+  const idx = getWorkspaceIndexes();
   const allRows = applicants.filter(row => row.stage !== 'stage1_pending');
   const keys = stage2FieldKeys(allRows);
-  const renderRows = rows => rows.length ? rows.map(row => stage2RowHtml(row, keys)).join('') : emptyRow(6 + keys.length, 'No candidate forms');
+  const indexedRows = allRows.map(row => ({
+    row,
+    searchText: `${row.full_name || ''} ${row.nik || ''} ${row.position || ''} ${Object.values(row.application_data || {}).join(' ')}`.toLowerCase()
+  }));
+  const renderRows = rows => rows.length ? rows.map(row => stage2RowHtml(row, keys, idx)).join('') : emptyRow(6 + keys.length, 'No candidate forms');
   const headerCells = [
     '<th>APPLICANT</th>',
     '<th>POSITION</th>',
@@ -1456,31 +1632,71 @@ function renderStage2() {
   ].join('');
   content.innerHTML = header('Candidate List', '', '<button class="btn btn-secondary" id="refresh-stage2">Refresh ↻</button>') +
     `<section class="panel table-panel stage2-candidate-panel">${tableToolbar('Search name / NIK / position…', 'Candidate List')}
-      <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows">${renderRows(allRows)}</tbody></table></div></section>`;
+      <div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table"><thead><tr>${headerCells}</tr></thead><tbody id="candidate-rows"></tbody></table></div><div id="stage2-pager"></div></section>`;
   $('#refresh-stage2')?.addEventListener('click', () => loadView('stage2', true));
-  const repaint = query => {
-    const filtered = allRows.filter(row => `${row.full_name} ${row.nik} ${row.position} ${JSON.stringify(row.application_data || {})}`.toLowerCase().includes(query));
-    $('#candidate-rows').innerHTML = renderRows(filtered);
+
+  let currentQuery = '';
+  let currentPage = 1;
+  let currentPageSize = 50;
+
+  const paint = () => {
+    const filtered = currentQuery
+      ? indexedRows.filter(item => item.searchText.includes(currentQuery)).map(item => item.row)
+      : allRows;
+    const paged = paginateRows(filtered, currentPage, currentPageSize);
+    currentPage = paged.page;
+    $('#candidate-rows').innerHTML = renderRows(paged.items);
+    renderPaginationFooter($('#stage2-pager'), paged, (nextPage, nextSize) => {
+      currentPage = nextPage;
+      currentPageSize = nextSize;
+      paint();
+    });
     bindStage2DocumentActions();
     bindStage2CandidateActions();
   };
-  bindSearch('#table-search', repaint);
-  bindStage2DocumentActions();
-  bindStage2CandidateActions();
+  paint();
+  bindSearch('#table-search', query => {
+    currentQuery = query;
+    currentPage = 1;
+    paint();
+  });
 }
 
 function renderStage3() {
   const rows = applicants.filter(row => getDiscForApplicant(row) || row.stage === 'disc_completed' || row.stage === 'hired');
+  const indexedRows = rows.map(row => ({
+    row,
+    searchText: `${row.full_name || ''} ${row.nik || ''} ${row.position || ''}`.toLowerCase()
+  }));
   content.innerHTML = header('DISC Assessment', '') +
     `<section class="panel table-panel">${tableToolbar('Search candidates…', 'DISC Assessment')}<div class="table-wrap recruitment-data-scroll"><table class="data-table recruitment-wide-table disc-assessment-table">
       <thead><tr><th>APPLICANT / NIK</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>DISC GRAPHS (G1 · G2 · G3)</th><th>PERSONALITY / NATURAL PATTERN</th><th>ACTIONS</th></tr></thead>
-      <tbody id="candidate-rows">${applicantRows(rows, 'both')}</tbody></table></div></section>`;
-  const repaint = query => {
-    $('#candidate-rows').innerHTML = applicantRows(rows.filter(row => `${row.full_name} ${row.nik} ${row.position}`.toLowerCase().includes(query)), 'both');
+      <tbody id="candidate-rows"></tbody></table></div><div id="stage3-pager"></div></section>`;
+
+  let currentQuery = '';
+  let currentPage = 1;
+  let currentPageSize = 50;
+
+  const paint = () => {
+    const filtered = currentQuery
+      ? indexedRows.filter(item => item.searchText.includes(currentQuery)).map(item => item.row)
+      : rows;
+    const paged = paginateRows(filtered, currentPage, currentPageSize);
+    currentPage = paged.page;
+    $('#candidate-rows').innerHTML = applicantRows(paged.items, 'both');
+    renderPaginationFooter($('#stage3-pager'), paged, (nextPage, nextSize) => {
+      currentPage = nextPage;
+      currentPageSize = nextSize;
+      paint();
+    });
     bindPrint();
   };
-  bindSearch('#table-search', repaint);
-  bindPrint();
+  paint();
+  bindSearch('#table-search', query => {
+    currentQuery = query;
+    currentPage = 1;
+    paint();
+  });
 }
 
 /* ============================================================================
@@ -1505,8 +1721,13 @@ function renderInvitedView() {
   const allRows = buildInvitedCandidatesViewRows({
     manualInvites: invitedCandidates,
     applicants,
-    stage1Leads
+    stage1Leads,
+    indexes: getWorkspaceIndexes()
   });
+  const indexedInviteRows = allRows.map(r => ({
+    row: r,
+    searchText: `${r.inviteDate} ${r.candidateName} ${r.appliedPosition} ${r.source} ${r.status} ${r.notes}`.toLowerCase()
+  }));
   const screeningSummary = aggregateCvScreeningBySource(cvScreenings);
   const linkedApplicantIds = new Set(invitedCandidates.map(i => i.linked_applicant_id).filter(Boolean));
 
@@ -1540,9 +1761,10 @@ function renderInvitedView() {
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>DATE</th><th>NAME</th><th>APPLIED POSITION</th><th>SOURCE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody id="invited-rows">${renderInviteRows(allRows)}</tbody>
+            <tbody id="invited-rows"></tbody>
           </table>
         </div>
+        <div id="invited-pager"></div>
       </section>
 
       <section class="panel table-panel cv-screening-panel">
@@ -1706,14 +1928,31 @@ function renderInvitedView() {
   $('#add-invited-candidate')?.addEventListener('click', () => openInviteEditor(null));
   $('#add-cv-screening')?.addEventListener('click', () => openScreeningEditor(null));
 
+  let invQuery = '';
+  let invPage = 1;
+  let invPageSize = 50;
+
+  const paintInvited = () => {
+    const filtered = invQuery
+      ? indexedInviteRows.filter(item => item.searchText.includes(invQuery)).map(item => item.row)
+      : allRows;
+    const paged = paginateRows(filtered, invPage, invPageSize);
+    invPage = paged.page;
+    $('#invited-rows').innerHTML = renderInviteRows(paged.items);
+    renderPaginationFooter($('#invited-pager'), paged, (nextPage, nextSize) => {
+      invPage = nextPage;
+      invPageSize = nextSize;
+      paintInvited();
+    });
+    bindInviteRowActions(paged.items);
+  };
+  paintInvited();
+
   bindSearch('#table-search', query => {
-    const filtered = allRows.filter(r =>
-      `${r.inviteDate} ${r.candidateName} ${r.appliedPosition} ${r.source} ${r.status} ${r.notes}`.toLowerCase().includes(query)
-    );
-    $('#invited-rows').innerHTML = renderInviteRows(filtered);
-    bindInviteRowActions(filtered);
+    invQuery = query;
+    invPage = 1;
+    paintInvited();
   });
-  bindInviteRowActions(allRows);
 }
 
 /* ============================================================================
@@ -2000,18 +2239,22 @@ function trackingStageCellHtml(cell) {
 }
 
 function renderTrackingView() {
+  const idx = getWorkspaceIndexes();
   const allRows = buildUnifiedTrackingRows({
     applicants,
     stage1Leads,
     interviews,
     employees,
-    invitedCandidates
+    invitedCandidates,
+    indexes: idx
   }).map(r => ({
     ...r,
     searchText: `${r.name} ${r.position} ${r.sub} ${r.inviteSource} ${r.inviteStatus} ${r.decision} ${r.rejectionReason}`.toLowerCase()
   }));
 
   let activeFilteredRows = allRows;
+  let trkPage = 1;
+  let trkPageSize = 50;
 
   const renderRows = rows => rows.length
     ? rows.map(r => `<tr>
@@ -2054,9 +2297,21 @@ function renderTrackingView() {
             <th>HR INTERVIEW 1</th><th>HR INTERVIEW 2</th><th>USER INTERVIEW 1</th><th>USER INTERVIEW 2</th>
             <th>FINAL INTERVIEW</th><th>DECISION</th><th>DECISION DATE</th><th>JOIN DATE</th>
           </tr></thead>
-          <tbody id="tracking-rows">${renderRows(allRows)}</tbody>
+          <tbody id="tracking-rows"></tbody>
         </table>
-      </div></section>`;
+      </div><div id="tracking-pager"></div></section>`;
+
+  const paintTracking = () => {
+    const paged = paginateRows(activeFilteredRows, trkPage, trkPageSize);
+    trkPage = paged.page;
+    $('#tracking-rows').innerHTML = renderRows(paged.items);
+    renderPaginationFooter($('#tracking-pager'), paged, (nextPage, nextSize) => {
+      trkPage = nextPage;
+      trkPageSize = nextSize;
+      paintTracking();
+    });
+  };
+  paintTracking();
 
   $('#refresh-tracking')?.addEventListener('click', () => loadView('tracking', true));
   $('#export-tracking')?.addEventListener('click', async () => {
@@ -2066,7 +2321,7 @@ function renderTrackingView() {
       button.textContent = 'Preparing XLSX…';
     }
     try {
-      const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const XLSX = await loadXlsxLib();
       const positions = await loadPositionList().catch(() => stage2PositionsCache);
       const summary = buildRecruitmentConclusionSummary({
         positions,
@@ -2075,7 +2330,8 @@ function renderTrackingView() {
         stage1Leads,
         applicants,
         interviews,
-        employees
+        employees,
+        indexes: getWorkspaceIndexes()
       });
       const trackingRowsData = buildTrackingExportRows(activeFilteredRows);
       const summaryRowsData = buildConclusionExportRows(summary);
@@ -2119,16 +2375,19 @@ function renderTrackingView() {
         stage1Leads,
         applicants,
         interviews,
-        employees
+        employees,
+        indexes: getWorkspaceIndexes()
       });
+      const { printTrackingReport } = await loadPrintModule();
       printTrackingReport({ summary, rows: activeFilteredRows, filterQuery: query });
     } catch (err) {
       say(err.message || 'Unable to prepare Tracking & Report print view.');
     }
   });
   bindSearch('#table-search', query => {
-    activeFilteredRows = allRows.filter(r => r.searchText.includes(query));
-    $('#tracking-rows').innerHTML = renderRows(activeFilteredRows);
+    activeFilteredRows = query ? allRows.filter(r => r.searchText.includes(query)) : allRows;
+    trkPage = 1;
+    paintTracking();
   });
 }
 
@@ -2137,8 +2396,9 @@ function renderTrackingView() {
  * ============================================================================ */
 function employeeRows(rows) {
   if (!rows.length) return emptyRow(17, 'No employee records found');
+  const idx = getWorkspaceIndexes();
   return rows.map(employee => {
-    const applicant = applicants.find(a => a.id === employee.applicant_id);
+    const applicant = idx.applicantById.get(employee.applicant_id) || null;
     const formatted = formatEmployeeExportRow(employee, applicant);
     const statusUpper = String(formatted.Status || '').toUpperCase();
     const statusTone = statusUpper === 'TETAP' ? 'green' : statusUpper === 'KONTRAK' ? 'blue' : statusUpper === 'NONAKTIF' ? 'gray' : 'gold';
@@ -2184,16 +2444,26 @@ function renderEmployees() {
       renderEmployees();
     }));
     $('#add-employee')?.addEventListener('click', () => openEmployeeEditor(null, null));
-    renderEmployeeExtensionsView($('#emp-ext-host'), employeeSubTab, {
+    loadOpsViewsModule().then(opsMod => opsMod.renderEmployeeExtensionsView($('#emp-ext-host'), employeeSubTab, {
       isDemoMode,
       supabase,
       profile: currentAdminProfile,
       getEmployees: () => employees,
       getLastDelta: () => lastEmployeeDelta,
       setLastDelta: d => { lastEmployeeDelta = d; }
-    });
+    }));
     return;
   }
+
+  const idx = getWorkspaceIndexes();
+  const indexedEmployees = employees.map(e => {
+    const a = idx.applicantById.get(e.applicant_id) || null;
+    const row = formatEmployeeExportRow(e, a);
+    return {
+      employee: e,
+      searchText: Object.values(row).join(' ').toLowerCase()
+    };
+  });
 
   content.innerHTML = header('Employee Directory', '',
     '<button id="add-employee" class="btn btn-secondary">+ Add Employee</button>' +
@@ -2204,9 +2474,9 @@ function renderEmployees() {
       <div class="table-wrap recruitment-data-scroll">
         <table class="data-table">
           <thead><tr>${EMPLOYEE_UI_HEADERS.map(h => `<th>${esc(h.toUpperCase())}</th>`).join('')}<th>ACTIONS</th></tr></thead>
-          <tbody id="employee-rows">${employeeRows(employees)}</tbody>
+          <tbody id="employee-rows"></tbody>
         </table>
-      </div>
+      </div><div id="employee-pager"></div>
     </section>`;
 
   $$('[data-emp-subtab]').forEach(b => b.addEventListener('click', () => {
@@ -2214,14 +2484,30 @@ function renderEmployees() {
     renderEmployees();
   }));
 
-  bindSearch('#table-search', query => {
-    const filtered = employees.filter(e => {
-      const a = applicants.find(x => x.id === e.applicant_id);
-      const row = formatEmployeeExportRow(e, a);
-      return Object.values(row).join(' ').toLowerCase().includes(query);
+  let empQuery = '';
+  let empPage = 1;
+  let empPageSize = 50;
+
+  const paintEmployees = () => {
+    const filtered = empQuery
+      ? indexedEmployees.filter(item => item.searchText.includes(empQuery)).map(item => item.employee)
+      : employees;
+    const paged = paginateRows(filtered, empPage, empPageSize);
+    empPage = paged.page;
+    $('#employee-rows').innerHTML = employeeRows(paged.items);
+    renderPaginationFooter($('#employee-pager'), paged, (nextPage, nextSize) => {
+      empPage = nextPage;
+      empPageSize = nextSize;
+      paintEmployees();
     });
-    $('#employee-rows').innerHTML = employeeRows(filtered);
     bindEmployeeEdit();
+  };
+  paintEmployees();
+
+  bindSearch('#table-search', query => {
+    empQuery = query;
+    empPage = 1;
+    paintEmployees();
   });
 
   $('#add-employee').addEventListener('click', () => openEmployeeEditor(null, null));
@@ -2248,7 +2534,6 @@ function renderEmployees() {
     });
   });
   $('#export-employees').addEventListener('click', exportEmployees);
-  bindEmployeeEdit();
 }
 
 function openEmployeeEditor(employee = null, applicant = null) {
@@ -2310,7 +2595,7 @@ function bindEmployeeEdit() {
 
 async function downloadEmployeeTemplateXlsx() {
   try {
-    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const XLSX = await loadXlsxLib();
     const sample = [{
       Nama: 'ABD. KHAMID',
       Nik: 'ST 130116',
@@ -2345,9 +2630,10 @@ async function exportEmployees() {
   button.disabled = true;
   button.textContent = 'Preparing XLSX…';
   try {
-    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const XLSX = await loadXlsxLib();
+    const idx = getWorkspaceIndexes();
     const rowsData = employees.map(employee => {
-      const applicant = applicants.find(a => a.id === employee.applicant_id);
+      const applicant = idx.applicantById.get(employee.applicant_id) || null;
       return formatEmployeeExportRow(employee, applicant);
     });
     const workbook = XLSX.utils.book_new();
@@ -2688,7 +2974,7 @@ function buildContractRecordFromInterview(intv, cand = null) {
   };
 }
 
-function openPkwtForRecord(record) {
+async function openPkwtForRecord(record) {
   const nextDocSequence = computeNextDocSequence({
     contractHistory,
     contractRequests: [],
@@ -2696,34 +2982,39 @@ function openPkwtForRecord(record) {
     lastDocSequence: contractSettings?.lastDocSequence || 0
   });
 
-  openPkwtConfigModal({
-    record,
-    contractSettings,
-    nextDocSequence,
-    onAfterPrint: async ({ record: rec, config, payload }) => {
-      const printedSeqNum = Number(String(payload.docSequence || '').replace(/\D/g, '')) || 0;
-      if (printedSeqNum > (Number(contractSettings.lastDocSequence) || 0)) {
-        await saveContractSettingsState({ lastDocSequence: printedSeqNum }).catch(() => {});
+  try {
+    const { openPkwtConfigModal } = await loadContractModalModule();
+    await openPkwtConfigModal({
+      record,
+      contractSettings,
+      nextDocSequence,
+      onAfterPrint: async ({ record: rec, config, payload }) => {
+        const printedSeqNum = Number(String(payload.docSequence || '').replace(/\D/g, '')) || 0;
+        if (printedSeqNum > (Number(contractSettings.lastDocSequence) || 0)) {
+          await saveContractSettingsState({ lastDocSequence: printedSeqNum }).catch(() => {});
+        }
+
+        const queueKey = rec.queueKey ||
+          (rec.employeeId ? `emp:${rec.employeeId}` : rec.interviewId ? `intv:${rec.interviewId}` : `name:${rec.fullName}`);
+
+        if (queueKey) {
+          printedContractsMap.set(queueKey, {
+            queueKey,
+            record: rec,
+            config,
+            payload,
+            printedAt: new Date().toISOString()
+          });
+          savePrintedContractsMap();
+        }
+
+        say(`Contract printed for ${rec.fullName || 'employee'}. Use "Sync to Employee Directory" beside their name when ready.`);
+        if (activeView === 'contracts') await renderContractsView();
       }
-
-      const queueKey = rec.queueKey ||
-        (rec.employeeId ? `emp:${rec.employeeId}` : rec.interviewId ? `intv:${rec.interviewId}` : `name:${rec.fullName}`);
-
-      if (queueKey) {
-        printedContractsMap.set(queueKey, {
-          queueKey,
-          record: rec,
-          config,
-          payload,
-          printedAt: new Date().toISOString()
-        });
-        savePrintedContractsMap();
-      }
-
-      say(`Contract printed for ${rec.fullName || 'employee'}. Use "Sync to Employee Directory" beside their name when ready.`);
-      if (activeView === 'contracts') await renderContractsView();
-    }
-  }).catch(err => say(err.message || 'Unable to open PKWT configuration.'));
+    });
+  } catch (err) {
+    say(err.message || 'Unable to open PKWT configuration.');
+  }
 }
 
 function formatIdrShort(amount) {
@@ -2867,10 +3158,11 @@ async function renderContractsView() {
       applyFilter();
     });
   });
-  $('#contract-search')?.addEventListener('input', event => {
+  const onContractSearch = debounce(event => {
     currentQuery = event.target.value.trim().toLowerCase();
     applyFilter();
-  });
+  }, 160);
+  $('#contract-search')?.addEventListener('input', onContractSearch);
   applyFilter();
 }
 
@@ -2985,7 +3277,11 @@ async function renderContractSettings() {
     const input = form.elements[field];
     if (!input) return;
     input.addEventListener('input', () => {
-      input.value = formatDigitsId(input.value);
+      const { formatted, caretPos } = preserveCaretCurrencyValue(input.value, input.selectionStart);
+      if (input.value !== formatted) input.value = formatted;
+      if (typeof input.setSelectionRange === 'function') {
+        try { input.setSelectionRange(caretPos, caretPos); } catch {}
+      }
     });
   });
 
@@ -3114,7 +3410,7 @@ async function readSpreadsheetFileObjects(file) {
   if (/\.csv$/i.test(file.name)) {
     return parseCsvTextToObjects(await file.text());
   }
-  const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+  const XLSX = await loadXlsxLib();
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
   const firstSheet = wb.SheetNames[0];
@@ -3124,7 +3420,7 @@ async function readSpreadsheetFileObjects(file) {
 
 async function downloadSpreadsheetTemplateXlsx(headers, sampleRow, sheetName, filename) {
   try {
-    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const XLSX = await loadXlsxLib();
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet([sampleRow], { header: headers });
     ws['!cols'] = headers.map(h => ({ wch: Math.max(16, h.length + 4) }));
@@ -4223,44 +4519,46 @@ function renderRecruitDistrictSummary(list = []) {
 }
 
 function renderRecruitVacanciesTab(host) {
-  const term = recruitSearchQuery.trim().toLowerCase();
-  const filtered = term
-    ? recruitVacancies.filter(v =>
-        v.name.toLowerCase().includes(term) ||
-        v.primaryDistricts.some(d => d.toLowerCase().includes(term)) ||
-        v.questions.some(q => q.label.toLowerCase().includes(term))
-      )
-    : recruitVacancies;
   const activeCount = recruitVacancies.filter(v => v.active !== false).length;
   const gModeLabel = recruitScoringConfig.scoringMode === 'points' ? 'pts' : '%';
 
-  const desktopRows = filtered.length
-    ? filtered.map(v => {
-        const maxScore = calculateVacancyMaxScore(v);
-        const effMode = v.minScoreMode !== 'inherit' ? (v.minScoreMode === 'points' ? 'pts' : '%') : gModeLabel;
-        const effMin = v.minScore !== null && v.minScore !== undefined ? v.minScore : recruitScoringConfig.defaultMinScore;
-        return `
-        <tr data-vacancy-id="${esc(v.id)}">
-          <td class="col-pos">
-            <div class="pos-name-title">${esc(v.name)}</div>
-            <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts · Min ${esc(effMin)}${effMode}</div>
-          </td>
-          <td class="col-loc">${renderRecruitDistrictSummary(v.primaryDistricts)}</td>
-          <td class="col-score">${esc(v.primaryLocationScore)}</td>
-          <td class="col-other">${esc(v.otherLocationLabel)}</td>
-          <td class="col-score">${esc(v.otherLocationScore)}</td>
-          <td class="col-questions">${renderRecruitQuestionSummary(v.questions)}</td>
-          <td class="col-actions">
-            <div class="vacancy-row-actions">
-              <button type="button" class="icon-btn primary-action" data-vac-action="edit" data-id="${esc(v.id)}">Edit</button>
-              <button type="button" class="icon-btn" data-vac-action="share" data-id="${esc(v.id)}">Share</button>
-              <button type="button" class="icon-btn" data-vac-action="duplicate" data-id="${esc(v.id)}">Duplicate</button>
-              <button type="button" class="icon-btn danger" data-vac-action="delete" data-id="${esc(v.id)}">Delete</button>
-            </div>
-          </td>
-        </tr>`;
-      }).join('')
-    : '<tr><td colspan="7" class="table-empty">No vacancies match your search.</td></tr>';
+  const buildVacancyRowsHtml = () => {
+    const term = recruitSearchQuery.trim().toLowerCase();
+    const filtered = term
+      ? recruitVacancies.filter(v =>
+          v.name.toLowerCase().includes(term) ||
+          v.primaryDistricts.some(d => d.toLowerCase().includes(term)) ||
+          v.questions.some(q => q.label.toLowerCase().includes(term))
+        )
+      : recruitVacancies;
+    return filtered.length
+      ? filtered.map(v => {
+          const maxScore = calculateVacancyMaxScore(v);
+          const effMode = v.minScoreMode !== 'inherit' ? (v.minScoreMode === 'points' ? 'pts' : '%') : gModeLabel;
+          const effMin = v.minScore !== null && v.minScore !== undefined ? v.minScore : recruitScoringConfig.defaultMinScore;
+          return `
+          <tr data-vacancy-id="${esc(v.id)}">
+            <td class="col-pos">
+              <div class="pos-name-title">${esc(v.name)}</div>
+              <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts · Min ${esc(effMin)}${effMode}</div>
+            </td>
+            <td class="col-loc">${renderRecruitDistrictSummary(v.primaryDistricts)}</td>
+            <td class="col-score">${esc(v.primaryLocationScore)}</td>
+            <td class="col-other">${esc(v.otherLocationLabel)}</td>
+            <td class="col-score">${esc(v.otherLocationScore)}</td>
+            <td class="col-questions">${renderRecruitQuestionSummary(v.questions)}</td>
+            <td class="col-actions">
+              <div class="vacancy-row-actions">
+                <button type="button" class="icon-btn primary-action" data-vac-action="edit" data-id="${esc(v.id)}">Edit</button>
+                <button type="button" class="icon-btn" data-vac-action="share" data-id="${esc(v.id)}">Share</button>
+                <button type="button" class="icon-btn" data-vac-action="duplicate" data-id="${esc(v.id)}">Duplicate</button>
+                <button type="button" class="icon-btn danger" data-vac-action="delete" data-id="${esc(v.id)}">Delete</button>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="7" class="table-empty">No vacancies match your search.</td></tr>';
+  };
 
   host.innerHTML = `
     <div class="card ops-card" style="margin-bottom:16px">
@@ -4319,11 +4617,28 @@ function renderRecruitVacanciesTab(host) {
               <th>ACTIONS</th>
             </tr>
           </thead>
-          <tbody>${desktopRows}</tbody>
+          <tbody id="vacancy-tbody"></tbody>
         </table>
       </div>
     </section>
   `;
+
+  const paintVacancyTable = () => {
+    const tbody = $('#vacancy-tbody', host);
+    if (tbody) tbody.innerHTML = buildVacancyRowsHtml();
+    $$('[data-vac-action]', host).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const action = btn.dataset.vacAction;
+        if (action === 'edit') openRecruitVacancyModal(id, host);
+        else if (action === 'duplicate') duplicateRecruitVacancy(id, host);
+        else if (action === 'delete') deleteRecruitVacancy(id, host);
+        else if (action === 'share') openRecruitShareModal(id);
+      });
+    });
+  };
+
+  paintVacancyTable();
 
   $('#recruit-save-scoring', host).addEventListener('click', async () => {
     try {
@@ -4340,28 +4655,13 @@ function renderRecruitVacanciesTab(host) {
     }
   });
 
-  $('#vacancy-search', host).addEventListener('input', event => {
+  const onVacancySearch = debounce(event => {
     recruitSearchQuery = event.target.value;
-    renderRecruitVacanciesTab(host);
-    const input = $('#vacancy-search', host);
-    if (input) {
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    }
-  });
+    paintVacancyTable();
+  }, 140);
+  $('#vacancy-search', host).addEventListener('input', onVacancySearch);
 
   $('#add-vacancy-btn', host).addEventListener('click', () => openRecruitVacancyModal(null, host));
-
-  $$('[data-vac-action]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.id;
-      const action = btn.dataset.vacAction;
-      if (action === 'edit') openRecruitVacancyModal(id, host);
-      else if (action === 'duplicate') duplicateRecruitVacancy(id, host);
-      else if (action === 'delete') deleteRecruitVacancy(id, host);
-      else if (action === 'share') openRecruitShareModal(id);
-    });
-  });
 }
 
 async function duplicateRecruitVacancy(id, host) {
@@ -4761,10 +5061,11 @@ function openRecruitVacancyModal(id, host) {
       recruitPickerCityFilter = event.target.value;
       renderRecruitDistrictPicker(backdrop);
     });
-    $('#district-search', backdrop).addEventListener('input', event => {
+    const onDistrictSearch = debounce(event => {
       recruitPickerSearch = event.target.value;
       renderRecruitDistrictPicker(backdrop);
-    });
+    }, 140);
+    $('#district-search', backdrop).addEventListener('input', onDistrictSearch);
     $('#district-clear-all', backdrop).addEventListener('click', () => {
       if (!recruitDraftVacancy) return;
       recruitDraftVacancy.primaryDistricts = [];
@@ -5705,8 +6006,15 @@ async function renderUserManagement() {
  * ============================================================================ */
 function renderPrintRows(rows) {
   if (!rows.length) return emptyRow(4);
+  const idx = getWorkspaceIndexes();
   return rows.map(applicant => {
-    const progress = deriveCandidateProgress(applicant, getInterviewsForApplicant(applicant.id, applicant), getEmployeeForApplicant(applicant), null, { applicants });
+    const progress = deriveCandidateProgress(
+      applicant,
+      getInterviewsForApplicant(applicant.id, applicant),
+      getEmployeeForApplicant(applicant),
+      null,
+      { applicants, indexes: idx }
+    );
     return `<tr><td><b>${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
       <td>${esc(applicant.position || '—')}</td>
       <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
@@ -5756,16 +6064,42 @@ function templateManagerHtml(migrationError = null) {
 }
 
 function renderPrint() {
+  const indexedPrint = applicants.map(a => ({
+    applicant: a,
+    searchText: `${a.full_name} ${a.nik} ${a.position}`.toLowerCase()
+  }));
+
   content.innerHTML = header('Application Print', '') + `
     <section class="panel table-panel">${tableToolbar('Search candidates…', 'Application Print')}<div class="table-wrap"><table class="data-table">
       <thead><tr><th>APPLICANT</th><th>POSITION</th><th>STAGE</th><th>DOCUMENTS</th></tr></thead>
-      <tbody id="candidate-rows">${renderPrintRows(applicants)}</tbody>
-    </table></div></section>`;
-  bindSearch('#table-search', query => {
-    $('#candidate-rows').innerHTML = renderPrintRows(applicants.filter(a => `${a.full_name} ${a.nik} ${a.position}`.toLowerCase().includes(query)));
+      <tbody id="candidate-rows"></tbody>
+    </table></div><div id="print-pager"></div></section>`;
+
+  let printQuery = '';
+  let printPage = 1;
+  let printPageSize = 50;
+
+  const paintPrint = () => {
+    const filtered = printQuery
+      ? indexedPrint.filter(item => item.searchText.includes(printQuery)).map(item => item.applicant)
+      : applicants;
+    const paged = paginateRows(filtered, printPage, printPageSize);
+    printPage = paged.page;
+    $('#candidate-rows').innerHTML = renderPrintRows(paged.items);
     bindPrint();
+    renderPaginationFooter($('#print-pager'), paged, (nextPage, nextSize) => {
+      printPage = nextPage;
+      printPageSize = nextSize;
+      paintPrint();
+    });
+  };
+
+  paintPrint();
+  bindSearch('#table-search', query => {
+    printQuery = query;
+    printPage = 1;
+    paintPrint();
   });
-  bindPrint();
 }
 
 function renderPlaceholder(title) {
@@ -5810,7 +6144,8 @@ function printBrandModal() {
       pendingPrintSourceButton = null;
       const originalText = sourceBtn?.textContent || '';
       if (sourceBtn) { sourceBtn.disabled = true; sourceBtn.textContent = 'Preparing…'; }
-      Promise.resolve().then(() => printApplication(record, { brand }))
+      loadPrintModule()
+        .then(({ printApplication }) => printApplication(record, { brand }))
         .catch(error => say(error.message || 'Unable to prepare document.'))
         .finally(() => { if (sourceBtn) { sourceBtn.disabled = false; sourceBtn.textContent = originalText; } });
     });
@@ -5927,6 +6262,7 @@ function bindTemplateManager(migrationMissing) {
     try {
       await storeAndActivateTemplate(await file.text(), file.name);
       await markDefaultMasterSynced();
+      const { invalidateMasterHtmlCache } = await loadPrintModule();
       await invalidateMasterHtmlCache();
       say('New Master HTML activated.');
       await loadView('settings');
@@ -5942,6 +6278,7 @@ function bindTemplateManager(migrationMissing) {
       if (!response.ok) throw new Error('Default master file not found.');
       await storeAndActivateTemplate(await response.text(), 'Master bawaan repository');
       await markDefaultMasterSynced();
+      const { invalidateMasterHtmlCache } = await loadPrintModule();
       await invalidateMasterHtmlCache();
       say('Default master restored and activated.');
       await loadView('settings');
@@ -5954,6 +6291,7 @@ function bindTemplateManager(migrationMissing) {
       const { error } = await supabase.rpc('activate_print_template', { p_template_id: button.dataset.templateActivate });
       if (error) throw error;
       await markDefaultMasterSynced();
+      const { invalidateMasterHtmlCache } = await loadPrintModule();
       await invalidateMasterHtmlCache();
       say('Selected master version activated.');
       await loadView('settings');
@@ -6051,18 +6389,18 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'contracts') await renderContractsView();
     else if (view === 'contractSettings') await renderContractSettings();
     else if (view === 'recruitmentSettings') await renderRecruitmentSettings(forceRefresh);
-    else if (view === 'opsSettings') await renderOpsSettingsView(content, opsCtx);
-    else if (view === 'attendanceUpload') await renderAttendanceUploadView(content, opsCtx);
-    else if (view === 'attendanceCalendar') await renderAttendanceCalendarView(content, opsCtx);
-    else if (view === 'attendanceStaffHoliday') await renderStaffHolidayView(content, opsCtx);
-    else if (view === 'attendanceStaffManagement') await renderStaffManagementView(content, opsCtx);
-    else if (view === 'attendanceStaffReports') await renderStaffReportsView(content, opsCtx);
-    else if (view === 'attendanceDriverSchedule') await renderDriverScheduleView(content, opsCtx);
-    else if (view === 'attendanceDriverManagement') await renderDriverManagementView(content, opsCtx);
-    else if (view === 'attendanceDriverReports') await renderDriverReportsView(content, opsCtx);
-    else if (view === 'stationeryInput') await renderStationeryInputView(content, opsCtx);
-    else if (view === 'stationeryStock') await renderStationeryStockView(content, opsCtx);
-    else if (view === 'stationeryReports') await renderStationeryReportsView(content, opsCtx);
+    else if (view === 'opsSettings') await (await loadOpsViewsModule()).renderOpsSettingsView(content, opsCtx);
+    else if (view === 'attendanceUpload') await (await loadOpsViewsModule()).renderAttendanceUploadView(content, opsCtx);
+    else if (view === 'attendanceCalendar') await (await loadOpsViewsModule()).renderAttendanceCalendarView(content, opsCtx);
+    else if (view === 'attendanceStaffHoliday') await (await loadOpsViewsModule()).renderStaffHolidayView(content, opsCtx);
+    else if (view === 'attendanceStaffManagement') await (await loadOpsViewsModule()).renderStaffManagementView(content, opsCtx);
+    else if (view === 'attendanceStaffReports') await (await loadOpsViewsModule()).renderStaffReportsView(content, opsCtx);
+    else if (view === 'attendanceDriverSchedule') await (await loadOpsViewsModule()).renderDriverScheduleView(content, opsCtx);
+    else if (view === 'attendanceDriverManagement') await (await loadOpsViewsModule()).renderDriverManagementView(content, opsCtx);
+    else if (view === 'attendanceDriverReports') await (await loadOpsViewsModule()).renderDriverReportsView(content, opsCtx);
+    else if (view === 'stationeryInput') await (await loadOpsViewsModule()).renderStationeryInputView(content, opsCtx);
+    else if (view === 'stationeryStock') await (await loadOpsViewsModule()).renderStationeryStockView(content, opsCtx);
+    else if (view === 'stationeryReports') await (await loadOpsViewsModule()).renderStationeryReportsView(content, opsCtx);
     else if (view === 'systemImport') renderSystemImport();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
@@ -6112,13 +6450,15 @@ async function resolveAdminProfileFromServer(session) {
   let isRootAdmin = false;
 
   const rpcProfile = await supabase.rpc('get_my_admin_profile').then(res => res, () => ({ data: null, error: true }));
-  if (!rpcProfile.error && Array.isArray(rpcProfile.data) && rpcProfile.data[0]) {
-    const p = rpcProfile.data[0];
-    username = p.username || username;
-    employeeNik = p.employee_nik || employeeNik;
-    displayName = p.display_name || displayName;
-    role = p.role || role;
-    isRootAdmin = Boolean(p.is_root_admin);
+  const rpcProfileRow = !rpcProfile.error && rpcProfile.data
+    ? (Array.isArray(rpcProfile.data) ? rpcProfile.data[0] : (typeof rpcProfile.data === 'object' ? rpcProfile.data : null))
+    : null;
+  if (rpcProfileRow) {
+    username = rpcProfileRow.username || username;
+    employeeNik = rpcProfileRow.employee_nik || employeeNik;
+    displayName = rpcProfileRow.display_name || displayName;
+    role = rpcProfileRow.role || role;
+    isRootAdmin = Boolean(rpcProfileRow.is_root_admin);
   }
 
   if (rpcProfile.error || !displayName) {
@@ -6273,6 +6613,8 @@ $('#admin-nav').addEventListener('click', event => {
 $('#logout-btn').addEventListener('click', () => {
   localStorage.removeItem(SESSION_PROFILE_KEY);
   invalidateDataCache();
+  workspaceIndexesCache = null;
+  opsViewsModuleRef?.invalidateOpsStateCache?.();
   currentAdminProfile = null;
   currentUserId = null;
   applicants = [];

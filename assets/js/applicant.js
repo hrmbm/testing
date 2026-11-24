@@ -1,13 +1,13 @@
-import { supabase, isConfigured } from './supabase.js?v=20261122-hrga-workspace-16';
-import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261122-hrga-workspace-16';
-import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261122-hrga-workspace-16';
+import { supabase, isConfigured } from './supabase.js?v=20261123-hrga-workspace-18';
+import { MAX_CV_BYTES, CV_BUCKET, CV_PATH_PREFIX } from './config.js?v=20261123-hrga-workspace-18';
+import { $, esc, ageFrom, cacheCandidateNik, setBusy } from './common.js?v=20261123-hrga-workspace-18';
 import {
   DEFAULT_STAGE2_SCHEMA,
   STEP_SECTION_DEFAULTS,
   STAGE2_SECTION_META,
   MANDATORY_STAGE2_SECTIONS,
   normalizeStage2Schema
-} from './form-schema.js?v=20261122-hrga-workspace-16';
+} from './form-schema.js?v=20261123-hrga-workspace-18';
 
 function formatKtpAddress(data={}){
   const tidyPart=v=>String(v||'').replace(/\s+/g,' ').replace(/^\s*[:：\-]+\s*/,'').replace(/[,;]+$/,'').trim();
@@ -664,13 +664,18 @@ export async function bindAdminEditorForm(form, values={}){
   host.querySelector('#admin-wizard-next')?.addEventListener('click',()=>showStep(pos+1));
 
   const numericFields=['nik','alamat_rt','alamat_rw','alamat_kodepos'];
+  let addressPreviewTimer=null;
+  const scheduleAddressPreview=()=>{
+    clearTimeout(addressPreviewTimer);
+    addressPreviewTimer=setTimeout(()=>{updateAddressPreview(form);},120);
+  };
   form.addEventListener('input',event=>{
     const el=event.target;if(!(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement||el instanceof HTMLSelectElement))return;
     if(numericFields.includes(el.name))normalizeDigitInput(el,el.name==='nik'?16:el.name==='alamat_kodepos'?5:3);
     if(el.name==='telepon')normalizeDigitInput(el,16);
     if(el.dataset.formatNumber==='idr')formatCurrencyInput(el);
     if(['nama','tanggal_lahir','gender'].includes(el.name))syncApplicantRow(form);
-    if(ADDRESS_FIELD_NAMES.includes(el.name))updateAddressPreview(form);
+    if(ADDRESS_FIELD_NAMES.includes(el.name))scheduleAddressPreview();
   });
   form.addEventListener('change',async event=>{
     const key=event.target?.name;
@@ -684,7 +689,9 @@ export async function bindAdminEditorForm(form, values={}){
       const eduField=stage2Schema.sections?.education?.fields?.find(f=>f.type==='system_education_repeater');
       if(eduBlock)eduBlock.innerHTML=renderEducationBlock(eduField,old);
     }else if(key==='status_kawin'||key==='domisili_berbeda')updateDynamic(form,collect(form));
-    syncApplicantRow(form);updateAddressPreview(form);
+    syncApplicantRow(form);
+    clearTimeout(addressPreviewTimer);
+    updateAddressPreview(form);
   });
   showStep(0,false);
   rerenderGroups(form);
@@ -785,9 +792,17 @@ function collect(form){
   return buildAddress(data);
 }
 function syncApplicantRow(form){
-  const values=collect(form);
-  const set=(name,value)=>{const el=form.querySelector(`[name="${name}"]`);if(el)el.value=value||'';};
-  set('saudara1_nama',values.nama);set('saudara1_lp',values.gender==='L'?'Laki-laki':values.gender==='P'?'Perempuan':'');set('saudara1_umur',values.umur);set('umur',values.umur);set('nama_terang',values.nama);
+  const read=(name)=>{const el=form.elements?.namedItem(name);return el?String(el.value||''):'';};
+  const set=(name,value)=>{const el=form.elements?.namedItem(name)||form.querySelector(`[name="${name}"]`);if(el&&'value'in el)el.value=value||'';};
+  const nama=read('nama');
+  const rawGender=read('gender');
+  const normGender=rawGender==='Laki-laki'?'L':rawGender==='Perempuan'?'P':rawGender;
+  const umur=ageFrom(read('tanggal_lahir'));
+  set('saudara1_nama',nama);
+  set('saudara1_lp',normGender==='L'?'Laki-laki':normGender==='P'?'Perempuan':'');
+  set('saudara1_umur',umur);
+  set('umur',umur);
+  set('nama_terang',nama);
 }
 function updateDynamic(form,values){
   const marital=form.querySelector('[name="status_kawin"]')?.value||values.status_kawin||'';
@@ -1186,8 +1201,8 @@ async function runOcr(canvas,generation){
   ktpPhotoDataUrl=canvasToKtpDataUrl(canvas);
   setOcrProgress('Menyiapkan mesin OCR lokal…');
   const [{ recognizeWithPaddle }, { extractKtpText }] = await Promise.all([
-    import('./ocr-engine.js?v=20261122-hrga-workspace-16'),
-    import('./ktp-ocr.js?v=20261122-hrga-workspace-16')
+    import('./ocr-engine.js?v=20261123-hrga-workspace-18'),
+    import('./ktp-ocr.js?v=20261123-hrga-workspace-18')
   ]);
   let result;
   try{

@@ -1,5 +1,5 @@
 // Operational Views: Attendance Upload, Calendar, Staff Management & Reports, Directory Delta & Cuti, Drivers & Payroll, Stationery & ATK, and System Operations Settings
-import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings } from './ops-settings-logic.js';
+import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings } from './ops-settings-logic.js?v=20261123-hrga-workspace-18';
 import {
   SEED_STATIONERY_ITEMS,
   SEED_STATIONERY_MOVEMENTS,
@@ -12,7 +12,7 @@ import {
   SEED_DRIVER_SCHEDULES,
   SEED_DRIVER_ADJUSTMENTS,
   SEED_STAFF_REVIEWS
-} from './ops-seed-data.js';
+} from './ops-seed-data.js?v=20261123-hrga-workspace-18';
 import {
   compactNik,
   parseLaporanTransaksiRows,
@@ -23,23 +23,72 @@ import {
   computeEmployeeDirectoryDelta,
   parseCutiSpreadsheetRows,
   evaluateCutiConfirmationGate
-} from './attendance-logic.js';
+} from './attendance-logic.js?v=20261123-hrga-workspace-18';
 import {
   computeDriverWorkHours,
   validateDriverSchedules,
   generateDriverChecksheetGrid,
   calculateDriverPayroll,
   terbilangRupiah
-} from './driver-logic.js';
+} from './driver-logic.js?v=20261123-hrga-workspace-18';
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
   buildStationeryReports
-} from './stationery-logic.js';
-import { parseEmployeeSpreadsheetRows } from './workspace-logic.js';
+} from './stationery-logic.js?v=20261123-hrga-workspace-18';
+import { parseEmployeeSpreadsheetRows, paginateRows } from './workspace-logic.js?v=20261123-hrga-workspace-18';
 
 const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v1';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
+const DRIVER_ADJUSTMENTS_KEY = 'hrga_driver_adjustments_v1';
+const OPS_STATE_TTL_MS = 120000;
+
+let opsStateCache = null;
+let opsStateCacheAt = 0;
+let opsStateCacheMode = '';
+let opsStatePromise = null;
+
+export function invalidateOpsStateCache() {
+  opsStateCache = null;
+  opsStateCacheAt = 0;
+  opsStateCacheMode = '';
+  opsStatePromise = null;
+}
+
+function buildOpsPaginationHtml(paged) {
+  if (!paged || paged.totalItems <= 0) return '';
+  const sizeVal = paged.pageSize === 'all' ? 'all' : String(paged.pageSize);
+  return `<div class="table-pagination">
+    <div class="pagination-info">Showing ${paged.startIndex}–${paged.endIndex} of ${paged.totalItems}</div>
+    <div class="pagination-controls">
+      <label>Rows:
+        <select class="select page-size-select ops-page-size" aria-label="Rows per page">
+          <option value="25" ${sizeVal === '25' ? 'selected' : ''}>25</option>
+          <option value="50" ${sizeVal === '50' ? 'selected' : ''}>50</option>
+          <option value="100" ${sizeVal === '100' ? 'selected' : ''}>100</option>
+          <option value="all" ${sizeVal === 'all' ? 'selected' : ''}>All</option>
+        </select>
+      </label>
+      <button type="button" class="btn btn-sm btn-secondary ops-page-prev" ${paged.page <= 1 ? 'disabled' : ''}>Prev</button>
+      <span class="pagination-page-label">Page ${paged.page} / ${paged.totalPages}</span>
+      <button type="button" class="btn btn-sm btn-secondary ops-page-next" ${paged.page >= paged.totalPages ? 'disabled' : ''}>Next</button>
+    </div>
+  </div>`;
+}
+
+function bindOpsPagination(slotEl, paged, onChange) {
+  if (!slotEl || !paged || paged.totalItems <= 0) return;
+  slotEl.querySelector('.ops-page-size')?.addEventListener('change', e => {
+    const val = e.target.value;
+    onChange(1, val === 'all' ? 'all' : Number(val));
+  });
+  slotEl.querySelector('.ops-page-prev')?.addEventListener('click', () => {
+    if (paged.page > 1) onChange(paged.page - 1, paged.pageSize);
+  });
+  slotEl.querySelector('.ops-page-next')?.addEventListener('click', () => {
+    if (paged.page < paged.totalPages) onChange(paged.page + 1, paged.pageSize);
+  });
+}
 
 let xlsxModulePromise = null;
 export async function loadXlsx() {
@@ -157,40 +206,62 @@ export function saveDemoOpsState(nextState) {
   return nextState;
 }
 
-async function loadOpsState(ctx) {
-  if (ctx.isDemoMode) {
-    return readDemoOpsState();
+async function loadOpsState(ctx, force = false) {
+  const modeKey = ctx.isDemoMode ? 'demo' : (ctx.supabase ? 'live' : 'fallback');
+  if (!force && opsStateCache && opsStateCacheMode === modeKey && (Date.now() - opsStateCacheAt) < OPS_STATE_TTL_MS) {
+    return opsStateCache;
+  }
+  if (ctx.isDemoMode || !ctx.supabase) {
+    const demoState = readDemoOpsState();
+    opsStateCache = demoState;
+    opsStateCacheAt = Date.now();
+    opsStateCacheMode = modeKey;
+    return demoState;
+  }
+  if (!force && opsStatePromise) {
+    return opsStatePromise;
   }
   const sb = ctx.supabase;
-  if (!sb) return readDemoOpsState();
-  const state = buildInitialDemoOpsState();
-  try {
-    const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
-      sb.from('portal_settings').select('value').eq('key', OPS_SETTINGS_KEY).maybeSingle(),
-      sb.from('attendance_calendar_days').select('*').order('cal_date', { ascending: true }),
-      sb.from('attendance_upload_batches').select('*').order('created_at', { ascending: false }).limit(30),
-      sb.from('attendance_raw_events').select('*').order('work_date', { ascending: false }).limit(2500),
-      sb.from('staff_attendance_reviews').select('*'),
-      sb.from('staff_conditional_holidays').select('*'),
-      sb.from('employee_leave_balances').select('*').order('employee_name', { ascending: true }),
-      sb.from('driver_daily_schedules').select('*').order('work_date', { ascending: false }),
-      sb.from('stationery_items').select('*').order('item_name', { ascending: true }),
-      sb.from('stationery_movements').select('*').order('created_at', { ascending: false }).limit(600)
-    ]);
-    if (setRes.data?.value) state.settings = normalizeOpsSettings(setRes.data.value);
-    if (Array.isArray(calRes.data)) state.calendarDays = calRes.data;
-    if (Array.isArray(batRes.data)) state.uploadBatches = batRes.data;
-    if (Array.isArray(evRes.data)) state.rawEvents = evRes.data;
-    if (Array.isArray(revRes.data)) state.staffReviews = revRes.data;
-    if (Array.isArray(holRes.data)) state.conditionalHolidays = holRes.data;
-    if (Array.isArray(cutiRes.data)) state.cutiBalances = cutiRes.data;
-    if (Array.isArray(drvRes.data)) state.driverSchedules = drvRes.data;
-    if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) state.stationeryItems = stkItemRes.data;
-    if (Array.isArray(stkMvRes.data)) state.stationeryMovements = stkMvRes.data;
-  } catch (err) {
-    console.warn('Operational schema check fallback:', err?.message || err);
-  }
-  return state;
+  opsStatePromise = (async () => {
+    const state = buildInitialDemoOpsState();
+    try {
+      const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
+        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY]),
+        sb.from('attendance_calendar_days').select('*').order('cal_date', { ascending: true }),
+        sb.from('attendance_upload_batches').select('*').order('created_at', { ascending: false }).limit(30),
+        sb.from('attendance_raw_events').select('*').order('work_date', { ascending: false }).limit(2500),
+        sb.from('staff_attendance_reviews').select('*'),
+        sb.from('staff_conditional_holidays').select('*'),
+        sb.from('employee_leave_balances').select('*').order('employee_name', { ascending: true }),
+        sb.from('driver_daily_schedules').select('*').order('work_date', { ascending: false }),
+        sb.from('stationery_items').select('*').order('item_name', { ascending: true }),
+        sb.from('stationery_movements').select('*').order('created_at', { ascending: false }).limit(600)
+      ]);
+      if (Array.isArray(setRes.data)) {
+        const opsRow = setRes.data.find(r => r.key === OPS_SETTINGS_KEY);
+        const adjRow = setRes.data.find(r => r.key === DRIVER_ADJUSTMENTS_KEY);
+        if (opsRow?.value) state.settings = normalizeOpsSettings(opsRow.value);
+        if (adjRow?.value && typeof adjRow.value === 'object') state.driverAdjustments = adjRow.value;
+      }
+      if (Array.isArray(calRes.data)) state.calendarDays = calRes.data;
+      if (Array.isArray(batRes.data)) state.uploadBatches = batRes.data;
+      if (Array.isArray(evRes.data)) state.rawEvents = evRes.data;
+      if (Array.isArray(revRes.data)) state.staffReviews = revRes.data;
+      if (Array.isArray(holRes.data)) state.conditionalHolidays = holRes.data;
+      if (Array.isArray(cutiRes.data)) state.cutiBalances = cutiRes.data;
+      if (Array.isArray(drvRes.data)) state.driverSchedules = drvRes.data;
+      if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) state.stationeryItems = stkItemRes.data;
+      if (Array.isArray(stkMvRes.data)) state.stationeryMovements = stkMvRes.data;
+    } catch (err) {
+      console.warn('Operational schema check fallback:', err?.message || err);
+    }
+    opsStateCache = state;
+    opsStateCacheAt = Date.now();
+    opsStateCacheMode = modeKey;
+    opsStatePromise = null;
+    return state;
+  })();
+  return opsStatePromise;
 }
 
 function getAllKnownEmployees(ctx) {
@@ -332,10 +403,20 @@ export async function renderAttendanceUploadView(host, ctx) {
       state.rawEvents = [...result.accepted, ...state.rawEvents];
       saveDemoOpsState(state);
     } else {
-      await ctx.supabase.from('attendance_upload_batches').insert(result.batch);
-      if (result.accepted.length) {
-        await ctx.supabase.from('attendance_raw_events').insert(result.accepted);
+      const { error: batErr } = await ctx.supabase.from('attendance_upload_batches').insert(result.batch);
+      if (batErr) {
+        showInlineBanner(host, `Gagal menyimpan batch absensi: ${batErr.message}`, 'error');
+        return;
       }
+      if (result.accepted.length) {
+        const { error: evErr } = await ctx.supabase.from('attendance_raw_events').insert(result.accepted);
+        if (evErr) {
+          showInlineBanner(host, `Batch tersimpan, namun sebagian log gagal disimpan: ${evErr.message}`, 'error');
+          invalidateOpsStateCache();
+          return;
+        }
+      }
+      invalidateOpsStateCache();
     }
     await renderAttendanceUploadView(host, ctx);
     showInlineBanner(
@@ -401,12 +482,17 @@ export async function renderAttendanceUploadView(host, ctx) {
           saveDemoOpsState(state);
         }
       } else {
-        await ctx.supabase.from('attendance_raw_events').update({
+        const { error } = await ctx.supabase.from('attendance_raw_events').update({
           employee_no: targetNik,
           employee_name: emp?.full_name || targetNik,
           is_exception: false,
           exception_reason: null
         }).eq('id', id);
+        if (error) {
+          showInlineBanner(host, `Gagal memetakan pengecualian: ${error.message}`, 'error');
+          return;
+        }
+        invalidateOpsStateCache();
       }
       await renderAttendanceUploadView(host, ctx);
       showInlineBanner(host, `Pengecualian berhasil dipetakan ke ${targetNik}.`, 'ok');
@@ -485,7 +571,12 @@ export async function renderAttendanceCalendarView(host, ctx) {
       state.calendarDays = [...others, ...nonWorking].sort((a, b) => a.cal_date.localeCompare(b.cal_date));
       saveDemoOpsState(state);
     } else {
-      await ctx.supabase.from('attendance_calendar_days').upsert(entries, { onConflict: 'cal_date' });
+      const { error } = await ctx.supabase.from('attendance_calendar_days').upsert(entries, { onConflict: 'cal_date' });
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan kalender: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
     }
     showInlineBanner(host, `Kalender ${currentMonth} berhasil disimpan.`, 'ok');
   });
@@ -550,7 +641,12 @@ export async function renderStaffHolidayView(host, ctx) {
       state.conditionalHolidays = [row, ...state.conditionalHolidays];
       saveDemoOpsState(state);
     } else {
-      await ctx.supabase.from('staff_conditional_holidays').upsert(row, { onConflict: 'work_date,employee_no' });
+      const { error } = await ctx.supabase.from('staff_conditional_holidays').upsert(row, { onConflict: 'work_date,employee_no' });
+      if (error) {
+        showInlineBanner(host, `Gagal menambah jadwal libur kondisional: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
     }
     renderStaffHolidayView(host, ctx);
   });
@@ -562,7 +658,12 @@ export async function renderStaffHolidayView(host, ctx) {
         state.conditionalHolidays = state.conditionalHolidays.filter(h => h.id !== id);
         saveDemoOpsState(state);
       } else {
-        await ctx.supabase.from('staff_conditional_holidays').delete().eq('id', id);
+        const { error } = await ctx.supabase.from('staff_conditional_holidays').delete().eq('id', id);
+        if (error) {
+          showInlineBanner(host, `Gagal menghapus jadwal libur kondisional: ${error.message}`, 'error');
+          return;
+        }
+        invalidateOpsStateCache();
       }
       renderStaffHolidayView(host, ctx);
     });
@@ -665,6 +766,11 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
 
   // Cuti Tab
   const refDate = '2026-11-23';
+  const cutiPage = Number(host.dataset.cutiPage || 1) || 1;
+  const cutiSizeRaw = host.dataset.cutiPageSize || '50';
+  const cutiSize = cutiSizeRaw === 'all' ? 'all' : (Number(cutiSizeRaw) || 50);
+  const cutiPaged = paginateRows(state.cutiBalances, cutiPage, cutiSize);
+
   host.innerHTML = `
     <div class="card ops-card">
       <div class="ops-head">
@@ -696,7 +802,7 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
             </tr>
           </thead>
           <tbody>
-            ${state.cutiBalances.map(c => {
+            ${cutiPaged.items.map(c => {
               const gate = evaluateCutiConfirmationGate(c, refDate, state.settings);
               return `
                 <tr>
@@ -718,8 +824,15 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
           </tbody>
         </table>
       </div>
+      <div id="ops-cuti-pager">${buildOpsPaginationHtml(cutiPaged)}</div>
     </div>
   `;
+
+  bindOpsPagination(host.querySelector('#ops-cuti-pager'), cutiPaged, (nextPage, nextSize) => {
+    host.dataset.cutiPage = String(nextPage);
+    host.dataset.cutiPageSize = String(nextSize);
+    renderEmployeeExtensionsView(host, 'cuti', ctx);
+  });
 
   host.querySelector('#ops-cuti-import')?.addEventListener('click', async () => {
     const file = host.querySelector('#ops-cuti-file')?.files?.[0];
@@ -736,7 +849,12 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
       state.cutiBalances = parsed.rows;
       saveDemoOpsState(state);
     } else if (parsed.rows.length) {
-      await ctx.supabase.from('employee_leave_balances').upsert(parsed.rows, { onConflict: 'employee_no,period_label' });
+      const { error } = await ctx.supabase.from('employee_leave_balances').upsert(parsed.rows, { onConflict: 'employee_no,period_label' });
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan data cuti: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
     }
     await renderEmployeeExtensionsView(host, 'cuti', ctx);
     showInlineBanner(host, `Import ${parsed.rows.length} baris Cuti selesai (${parsed.errors.length} baris error Excel dibersihkan).`, 'ok');
@@ -756,7 +874,14 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
       row.remaining_leave = Math.max(0, Number(row.annual_quota || 12) - Number(row.cuti_bersama_used || 6) - row.diambil_dates.length);
       state.cutiBalances[idx] = row;
       if (ctx.isDemoMode) saveDemoOpsState(state);
-      else await ctx.supabase.from('employee_leave_balances').upsert(row);
+      else {
+        const { error } = await ctx.supabase.from('employee_leave_balances').upsert(row);
+        if (error) {
+          showInlineBanner(host, `Gagal menyimpan pemakaian cuti: ${error.message}`, 'error');
+          return;
+        }
+        invalidateOpsStateCache();
+      }
       await renderEmployeeExtensionsView(host, 'cuti', ctx);
     });
   });
@@ -783,6 +908,10 @@ export async function renderStaffManagementView(host, ctx) {
   const attCfg = state.settings.attendance;
   const totalPending = computed.summaries.reduce((s, r) => s + r.counts.PENDING, 0);
   const totalLate = computed.summaries.reduce((s, r) => s + r.counts.T, 0);
+  const staffPage = Number(host.dataset.staffPage || 1) || 1;
+  const staffSizeRaw = host.dataset.staffPageSize || '50';
+  const staffSize = staffSizeRaw === 'all' ? 'all' : (Number(staffSizeRaw) || 50);
+  const staffPaged = paginateRows(computed.summaries, staffPage, staffSize);
 
   host.innerHTML = `
     <div class="ops-stack">
@@ -827,7 +956,7 @@ export async function renderStaffManagementView(host, ctx) {
               </tr>
             </thead>
             <tbody>
-              ${computed.summaries.map(row => {
+              ${staffPaged.items.map(row => {
                 const flaggedDay = row.days.find(d => d.code === 'PERLU_PEMERIKSAAN_HR' || d.code === 'T') || row.days.find(d => d.code !== 'O' && d.code !== '-');
                 return `
                   <tr>
@@ -867,12 +996,20 @@ export async function renderStaffManagementView(host, ctx) {
             </tbody>
           </table>
         </div>
+        <div id="ops-staff-pager">${buildOpsPaginationHtml(staffPaged)}</div>
       </div>
     </div>
   `;
 
+  bindOpsPagination(host.querySelector('#ops-staff-pager'), staffPaged, (nextPage, nextSize) => {
+    host.dataset.staffPage = String(nextPage);
+    host.dataset.staffPageSize = String(nextSize);
+    renderStaffManagementView(host, ctx);
+  });
+
   host.querySelector('#ops-staff-period')?.addEventListener('change', e => {
     host.dataset.staffPeriod = e.target.value || '2026-11';
+    host.dataset.staffPage = '1';
     renderStaffManagementView(host, ctx);
   });
 
@@ -913,7 +1050,12 @@ export async function renderStaffManagementView(host, ctx) {
         else state.staffReviews.push(rev);
         saveDemoOpsState(state);
       } else {
-        await ctx.supabase.from('staff_attendance_reviews').upsert(rev, { onConflict: 'employee_no,work_date' });
+        const { error } = await ctx.supabase.from('staff_attendance_reviews').upsert(rev, { onConflict: 'employee_no,work_date' });
+        if (error) {
+          showInlineBanner(host, `Gagal menyimpan koreksi absensi: ${error.message}`, 'error');
+          return;
+        }
+        invalidateOpsStateCache();
       }
       await renderStaffManagementView(host, ctx);
       showInlineBanner(host, `Status ${nik} tanggal ${workDate} dikunci sebagai ${finalCode}.`, 'ok');
@@ -1131,7 +1273,12 @@ export async function renderDriverScheduleView(host, ctx) {
       state.driverSchedules = [newRow, ...state.driverSchedules];
       saveDemoOpsState(state);
     } else {
-      await ctx.supabase.from('driver_daily_schedules').insert(newRow);
+      const { error } = await ctx.supabase.from('driver_daily_schedules').insert(newRow);
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan jadwal driver: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
     }
     await renderDriverScheduleView(host, ctx);
     showInlineBanner(host, `Jadwal ${newRow.driver_name} (${newRow.work_date}) tersimpan.`, 'ok');
@@ -1144,7 +1291,12 @@ export async function renderDriverScheduleView(host, ctx) {
         state.driverSchedules = state.driverSchedules.filter(s => s.id !== id);
         saveDemoOpsState(state);
       } else {
-        await ctx.supabase.from('driver_daily_schedules').delete().eq('id', id);
+        const { error } = await ctx.supabase.from('driver_daily_schedules').delete().eq('id', id);
+        if (error) {
+          showInlineBanner(host, `Gagal menghapus jadwal driver: ${error.message}`, 'error');
+          return;
+        }
+        invalidateOpsStateCache();
       }
       renderDriverScheduleView(host, ctx);
     });
@@ -1355,7 +1507,7 @@ export async function renderDriverReportsView(host, ctx) {
     </div>
   `;
 
-  host.querySelector('#ops-drv-save-adj')?.addEventListener('click', () => {
+  host.querySelector('#ops-drv-save-adj')?.addEventListener('click', async () => {
     const nextAdj = { ...state.driverAdjustments };
     host.querySelectorAll('.ops-adj-short').forEach(inp => {
       const nik = inp.dataset.nik;
@@ -1364,8 +1516,17 @@ export async function renderDriverReportsView(host, ctx) {
       nextAdj[nik] = { priorShortfall: Number(inp.value || 0), bpjsDeduction: bpjs, claimHours: claim };
     });
     state.driverAdjustments = nextAdj;
-    saveDemoOpsState(state);
-    renderDriverReportsView(host, ctx);
+    if (ctx.isDemoMode) {
+      saveDemoOpsState(state);
+    } else {
+      const { error } = await ctx.supabase.from('portal_settings').upsert({ key: DRIVER_ADJUSTMENTS_KEY, value: nextAdj });
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan potongan BPJS/Claim driver: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
+    }
+    await renderDriverReportsView(host, ctx);
     showInlineBanner(host, 'Potongan BPJS/Claim dan rekap BKK berhasil diperbarui.', 'ok');
   });
 
@@ -1520,6 +1681,7 @@ export async function renderStationeryInputView(host, ctx) {
           p_created_by: res.entry.created_by
         });
         if (error) throw error;
+        invalidateOpsStateCache();
       }
       await renderStationeryInputView(host, ctx);
       showInlineBanner(host, `Transaksi ${res.entry.tx_type} ${res.entry.item_name} (${res.entry.qty}) tersimpan. Saldo baru: ${res.entry.balance_after}.`, 'ok');
@@ -1531,11 +1693,6 @@ export async function renderStationeryInputView(host, ctx) {
 
 export async function renderStationeryStockView(host, ctx) {
   const state = await loadOpsState(ctx);
-  const query = (host.dataset.atkSearch || '').toLowerCase();
-  const filtered = state.stationeryItems.filter(it =>
-    !query || it.item_name.toLowerCase().includes(query) || it.item_code.toLowerCase().includes(query)
-  );
-
   host.innerHTML = `
     <div class="card ops-card">
       <div class="ops-head">
@@ -1551,27 +1708,61 @@ export async function renderStationeryStockView(host, ctx) {
       <div class="table-wrap" style="margin-top:12px">
         <table>
           <thead><tr><th>Kode</th><th>Nama Item</th><th>Satuan</th><th class="num">Stok Awal</th><th class="num">Stok Saat Ini</th><th class="num">Min Stok</th><th>Status</th></tr></thead>
-          <tbody>
-            ${filtered.map(it => `
-              <tr>
-                <td><code>${esc(it.item_code)}</code></td>
-                <td><b>${esc(it.item_name)}</b></td>
-                <td>${esc(it.unit)}</td>
-                <td class="num">${it.opening_stock}</td>
-                <td class="num"><b>${it.current_stock}</b></td>
-                <td class="num">${it.min_stock}</td>
-                <td>${it.current_stock <= 0 ? '<span class="pill danger">Kosong</span>' : (it.current_stock <= it.min_stock ? '<span class="pill gold">Menipis</span>' : '<span class="pill green">Aman</span>')}</td>
-              </tr>
-            `).join('')}
-          </tbody>
+          <tbody id="ops-stk-tbody"></tbody>
         </table>
       </div>
+      <div id="ops-stk-pager"></div>
     </div>
   `;
 
+  const paintStockTable = () => {
+    const query = (host.dataset.atkSearch || '').toLowerCase();
+    const filtered = state.stationeryItems.filter(it =>
+      !query || it.item_name.toLowerCase().includes(query) || it.item_code.toLowerCase().includes(query)
+    );
+    const stkPage = Number(host.dataset.atkPage || 1) || 1;
+    const stkSizeRaw = host.dataset.atkPageSize || '50';
+    const stkSize = stkSizeRaw === 'all' ? 'all' : (Number(stkSizeRaw) || 50);
+    const paged = paginateRows(filtered, stkPage, stkSize);
+    host.dataset.atkPage = String(paged.page);
+
+    const tbody = host.querySelector('#ops-stk-tbody');
+    if (tbody) {
+      tbody.innerHTML = paged.items.length
+        ? paged.items.map(it => `
+            <tr>
+              <td><code>${esc(it.item_code)}</code></td>
+              <td><b>${esc(it.item_name)}</b></td>
+              <td>${esc(it.unit)}</td>
+              <td class="num">${it.opening_stock}</td>
+              <td class="num"><b>${it.current_stock}</b></td>
+              <td class="num">${it.min_stock}</td>
+              <td>${it.current_stock <= 0 ? '<span class="pill danger">Kosong</span>' : (it.current_stock <= it.min_stock ? '<span class="pill gold">Menipis</span>' : '<span class="pill green">Aman</span>')}</td>
+            </tr>
+          `).join('')
+        : '<tr><td colspan="7" class="empty">Tidak ada item ATK yang cocok.</td></tr>';
+    }
+    const pagerEl = host.querySelector('#ops-stk-pager');
+    if (pagerEl) {
+      pagerEl.innerHTML = buildOpsPaginationHtml(paged);
+      bindOpsPagination(pagerEl, paged, (nextPage, nextSize) => {
+        host.dataset.atkPage = String(nextPage);
+        host.dataset.atkPageSize = String(nextSize);
+        paintStockTable();
+      });
+    }
+  };
+
+  paintStockTable();
+
+  let stkSearchTimer = null;
   host.querySelector('#ops-stk-search')?.addEventListener('input', e => {
     host.dataset.atkSearch = e.target.value;
-    renderStationeryStockView(host, ctx);
+    host.dataset.atkPage = '1';
+    clearTimeout(stkSearchTimer);
+    stkSearchTimer = setTimeout(() => {
+      paintStockTable();
+    }, 140);
   });
 
   host.querySelector('#ops-stk-export')?.addEventListener('click', async () => {
@@ -1782,15 +1973,29 @@ export async function renderOpsSettingsView(host, ctx) {
 
   host.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      host.dataset.opsSetTab = btn.dataset.tab;
-      renderOpsSettingsView(host, ctx);
+      const nextTab = btn.dataset.tab;
+      if (!nextTab) return;
+      host.dataset.opsSetTab = nextTab;
+      host.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === nextTab);
+      });
+      host.querySelectorAll('[data-panel]').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.panel !== nextTab);
+      });
     });
   });
 
   host.querySelector('#ops-set-reset')?.addEventListener('click', async () => {
     state.settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
     if (ctx.isDemoMode) saveDemoOpsState(state);
-    else await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: state.settings });
+    else {
+      const { error } = await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: state.settings });
+      if (error) {
+        showInlineBanner(host, `Gagal mereset pengaturan: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
+    }
     await renderOpsSettingsView(host, ctx);
     showInlineBanner(host, 'Seluruh parameter rumus dikembalikan ke standar awal.', 'ok');
   });
@@ -1854,6 +2059,7 @@ export async function renderOpsSettingsView(host, ctx) {
       } else {
         const { error } = await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: next });
         if (error) throw error;
+        invalidateOpsStateCache();
       }
       await renderOpsSettingsView(host, ctx);
       showInlineBanner(host, 'Pengaturan Operations & Formulas berhasil disimpan dan aktif.', 'ok');
