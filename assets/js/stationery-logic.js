@@ -684,8 +684,7 @@ export const STATIONERY_MASTER_IMPORT_HEADERS = [
   'Satuan',
   'Satuan Minimal Pembelian',
   'Konversi Satuan',
-  'Stock Awal',
-  'Min Stock'
+  'Saldo Awal'
 ];
 
 export const STATIONERY_MASTER_SAMPLE_ROW = {
@@ -694,8 +693,7 @@ export const STATIONERY_MASTER_SAMPLE_ROW = {
   'Satuan': 'PCS',
   'Satuan Minimal Pembelian': 'PACK',
   'Konversi Satuan': 36,
-  'Stock Awal': 0,
-  'Min Stock': 10
+  'Saldo Awal': 0
 };
 
 export const STATIONERY_MOVEMENT_IMPORT_HEADERS = [
@@ -788,7 +786,7 @@ export function parseStationeryMasterImportRows(rawRows = []) {
     const purchaseUnit = normText(getCellCI(raw, ['Satuan Minimal Pembelian', 'Purchase Unit', 'Satuan Pembelian', 'Satuan Beli']) || '') || deriveDefaultPurchaseUnit(itemName, unit);
     const convRaw = getCellCI(raw, ['Konversi Satuan', 'Conversion Qty', 'Isi per Satuan', 'Isi Satuan', 'Konversi']);
     const conversionQty = Math.max(1, Number(String(convRaw !== '' ? convRaw : 1).replace(/,/g, '.')) || 1);
-    const openingRaw = getCellCI(raw, ['Stock Awal', 'Saldo Awal', 'Opening Stock', 'Current Stock', 'Stok Awal', 'Stok']);
+    const openingRaw = getCellCI(raw, ['Saldo Awal', 'Stock Awal', 'Opening Stock', 'Current Stock', 'Stok Awal', 'Stok']);
     const openingStock = Math.max(0, Number(String(openingRaw || 0).replace(/,/g, '.')) || 0);
     const minRaw = getCellCI(raw, ['Min Stock', 'Minimum Stock', 'Minimal Stock', 'Min Stok']);
     const minStock = Math.max(0, Number(String(minRaw !== '' ? minRaw : 2).replace(/,/g, '.')) || 2);

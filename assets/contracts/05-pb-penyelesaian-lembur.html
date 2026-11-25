@@ -126,7 +126,7 @@
 
   .kop-reholz-info {
     text-align: right;
-    color: #111111;
+    color: #000000;
     line-height: 1.3;
   }
 
@@ -136,11 +136,12 @@
     letter-spacing: 0.3px;
     text-transform: uppercase;
     margin-bottom: 2px;
+    color: #000000;
   }
 
   .kop-reholz-meta {
     font-size: 8.8pt;
-    color: #111111;
+    color: #000000;
     line-height: 1.26;
   }
 
@@ -249,8 +250,9 @@
   }
 
   .pb-note-box {
-    border: 1px solid #cbd5e1;
-    background: #f8fafc;
+    border: 1px solid #000000;
+    background: #ffffff;
+    color: #000000;
     padding: 7px 11px;
     margin: 10px 0;
     font-size: 9.4pt;
@@ -259,11 +261,11 @@
 
   /* ---- SIGNATURES ---- */
   .pb-signature-section {
-    margin-top: 16px;
+    margin-top: 14px;
   }
 
   .pb-signature-date {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .pb-signature-table {
@@ -284,7 +286,7 @@
   }
 
   .pb-sig-space {
-    height: 74px;
+    height: 108px;
   }
 
   .pb-sig-emp,
@@ -307,13 +309,13 @@
     justify-content: space-between;
     padding-top: 6px;
     font-size: 9pt;
-    color: #111111;
+    color: #000000;
     flex-shrink: 0;
   }
 
   .pb-paraf {
     font-style: italic;
-    color: #333333;
+    color: #000000;
   }
   </style>
 </head>
@@ -347,7 +349,7 @@
 
       <div class="pb-title-wrap">
         <div class="pb-title">PERJANJIAN BERSAMA</div>
-        <div class="pb-subtitle">Tentang : Penyelesaian Kekurangan Pembayaran Upah Lembur Tahun {{tahun_umk_sekarang}}</div>
+        <div class="pb-subtitle">Tentang : Penyelesaian Kekurangan Pembayaran Upah Lembur Tahun {{tahun_kontrak}}</div>
         <div class="pb-number">{{no_pb}}</div>
       </div>
 
@@ -393,7 +395,7 @@
       </ol>
 
       <div class="pb-pasal-heading">PASAL 1</div>
-      <p>Bahwa sebelumnya antara Pihak Pertama dengan Pihak Kedua telah membuat Perjanjian Bersama ( PB ) tanggal {{tgl_mulai}} mengenai kesepakatan pembayaran upah lembur Tahun {{tahun_umk_sekarang}}.</p>
+      <p>Bahwa sebelumnya antara Pihak Pertama dengan Pihak Kedua telah membuat Perjanjian Bersama ( PB ) tanggal {{tgl_mulai}} mengenai kesepakatan pembayaran upah lembur Tahun {{tahun_kontrak}}.</p>
 
       <div class="pb-pasal-heading">PASAL 2</div>
       <p>Bahwa oleh karena agar Pihak Pertama dapat tetap eksis menjalankan usahanya sebagaimana mestinya dan para karyawannya juga tetap dapat mendapatkan pekerjaan serta bekerja sebagaimana biasanya, maka atas hutang pembayaran upah lembur Pihak Pertama kepada Pihak Kedua dalam kurun waktu tanggal {{tgl_mulai}} sampai dengan tanggal {{tgl_akhir}} / atau sampai dengan berakhirnya Perjanjian Kerja Waktu Tertentu ( PKWT ) Pihak Kedua, Pihak Kedua menghibahkan seluruh hutang tersebut kepada Pihak Pertama</p>
@@ -456,7 +458,7 @@
               <div class="pb-sig-role">PIHAK KEDUA,</div>
               <div class="pb-sig-role">KARYAWAN</div>
               <div class="pb-sig-space"></div>
-              <div class="pb-sig-emp">{{nama_karyawan}}</div>
+              <div class="pb-sig-emp">{{nama_karyawan_ttd}}</div>
             </td>
             <td>
               <div class="pb-sig-role">PIHAK PERTAMA,</div>

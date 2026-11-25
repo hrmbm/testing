@@ -1,6 +1,6 @@
 import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-22';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-22';
-import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-22';
+import { $, $$, esc, idDate, formatAppError, savePortalSettingsBatch, parseSortableDateMs } from './common.js?v=20261124-hrga-workspace-22';
 import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
 import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-22';
 import {
@@ -28,6 +28,7 @@ import {
   formatEmployeeExportRow,
   formatCompanyEntityName,
   normalizeCompanyEntity,
+  normalizeEmployeeRecordUppercase,
   formatDmyDash,
   isRootAdminAccount,
   maskPin,
@@ -64,6 +65,8 @@ import {
   buildContractWorkspaceQueue,
   buildDashboardAttentionItems,
   determineRequiredContractDocuments,
+  normalizeSalaryTier,
+  getContractPackageInfo,
   parseNumericCurrency,
   computeNextDocSequence,
   buildDirectContractSyncPayloads,
@@ -203,10 +206,13 @@ let invitedTableMissing = false;
 let cvScreeningsTableMissing = false;
 let interviewDateColMissing = false;
 let interviewContractNoColMissing = false;
+let interviewOfficialDeptColMissing = false;
+let interviewSalaryTierColMissing = false;
 let stage1HasRecommendationCol = true;
 let stage1HasSourceCol = true;
 let employeesExtendedMissing = false;
 let employeesV8Missing = false;
+let employeesSalaryTierMissing = false;
 let lastDataFetchedAt = 0;
 let inflightRefreshPromise = null;
 let bgRevalidatePromise = null;
@@ -474,7 +480,9 @@ function seedDemoWorkspaceData() {
       contract_start_date: isoDay(y, m, 2),
       contract_end_date: isoDay(y + 1, m, 1),
       official_position: 'Foreman Packing',
+      official_department: 'PACKING',
       assigned_nik: 'MBM-2026-0184',
+      salary_tier: 'below_umk',
       contract_number: '184/PKWT/XI/2026',
       notes: 'Below UMK sample case'
     },
@@ -491,11 +499,13 @@ function seedDemoWorkspaceData() {
       pic_name: 'Diana Anita Sari',
       decision: 'Accepted',
       work_start_date: isoDay(y, m, 15),
-      salary: 5400000,
+      salary: 5187681,
+      salary_tier: 'umk_or_above',
       contract_duration_months: 12,
       contract_start_date: isoDay(y, m, 15),
       contract_end_date: isoDay(y + 1, m, 14),
       official_position: 'Senior Spray Finishing',
+      official_department: 'FINISHING',
       assigned_nik: 'MBM-2026-0201',
       contract_number: '201/PKWT/XI/2026',
       notes: 'Above UMK sample case'
@@ -726,11 +736,18 @@ function bindSearch(selector, rerender, delay = 180) {
 }
 
 async function fetchEmployeesSafe() {
+  const fullV10Cols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,home_base,company_entity,salary,salary_tier,notes,created_at,updated_at';
   const fullCols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,home_base,company_entity,salary,notes,created_at,updated_at';
   employeesV8Missing = false;
-  let res = await supabase.from('employees').select(fullCols).order('created_at', { ascending: false }).limit(1000);
+  employeesSalaryTierMissing = false;
+  let res = await supabase.from('employees').select(fullV10Cols).order('created_at', { ascending: false }).limit(1000);
+  if (res.error && isMissingSchemaError(res.error) && String(res.error.message || '').toLowerCase().includes('salary_tier')) {
+    employeesSalaryTierMissing = true;
+    res = await supabase.from('employees').select(fullCols).order('created_at', { ascending: false }).limit(1000);
+  }
   if (res.error && isMissingSchemaError(res.error)) {
     employeesV8Missing = true;
+    employeesSalaryTierMissing = true;
     const legacyV3Cols = 'id,applicant_id,employee_no,full_name,department,position,employment_status,join_date,contract_start_date,contract_end_date,address,ktp_nik,birth_place,birth_date,phone,education,gender,religion,salary,notes,created_at,updated_at';
     res = await supabase.from('employees').select(legacyV3Cols).order('created_at', { ascending: false }).limit(1000);
     if (res.error && isMissingSchemaError(res.error)) {
@@ -1311,9 +1328,8 @@ async function renderSettings() {
   </div>`;
   $('#ocr-feature-toggle').addEventListener('change', async event => {
     const value = event.target.checked;
-    const { error: upsertErr } = await supabase.from('portal_settings')
-      .upsert({ key: 'ktp_ocr_enabled', value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-    if (upsertErr) { event.target.checked = !value; say(upsertErr.message); }
+    const { error: upsertErr } = await savePortalSettingsBatch(supabase, { key: 'ktp_ocr_enabled', value });
+    if (upsertErr) { event.target.checked = !value; say(formatAppError(upsertErr, 'Gagal menyimpan pengaturan OCR.')); }
     else { say(value ? 'OCR enabled.' : 'OCR disabled.'); loadView('settings'); }
   });
   bindPositionManager(positions);
@@ -1419,7 +1435,7 @@ function openSignedDocumentInNewTab(bucket, path, label, button) {
     tab.location.replace(data.signedUrl);
   }).catch(error => {
     try { tab.close(); } catch {}
-    say(error.message || `Unable to open ${label}.`);
+    say(formatAppError(error, `Unable to open ${label}.`));
   }).finally(() => {
     if (button) { button.disabled = false; button.textContent = original || `Open ${label}`; }
   });
@@ -1456,8 +1472,7 @@ async function savePositionList(positions) {
   const clean = [...new Set(positions.map(value => String(value || '').trim()).filter(Boolean))];
   if (!clean.length) throw new Error('Position list cannot be empty.');
   if (clean.length !== positions.length) throw new Error('Position names must be unique and non-empty.');
-  const { error } = await supabase.from('portal_settings')
-    .upsert({ key: 'application_positions', value: clean, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  const { error } = await savePortalSettingsBatch(supabase, { key: 'application_positions', value: clean });
   if (error) throw error;
   stage2PositionsCache = clean;
   cacheSet('positions_list', clean).catch(() => {});
@@ -1476,20 +1491,20 @@ function bindPositionManager(positions) {
     if (!value) { say('Please enter a position title first.'); return; }
     if (positions.some(item => item.toLowerCase() === value.toLowerCase())) { say('Position title already exists.'); return; }
     try { await savePositionList([...positions, value]); say('New position added.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Failed to add position.'); }
+    catch (error) { say(formatAppError(error, 'Failed to add position.')); }
   });
   $$('[data-position-delete]').forEach(button => button.addEventListener('click', async () => {
     const index = Number(button.dataset.positionDelete);
     const next = positions.filter((_, i) => i !== index);
     try { await savePositionList(next); say('Position removed.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Failed to remove position.'); }
+    catch (error) { say(formatAppError(error, 'Failed to remove position.')); }
   }));
   $('#save-positions')?.addEventListener('click', async () => {
     const values = $$('[data-position-index]').map(input => input.value.trim());
     if (values.some(value => !value)) { say('Position titles cannot be empty.'); return; }
     if (new Set(values.map(value => value.toLowerCase())).size !== values.length) { say('Duplicate position titles are not allowed.'); return; }
     try { await savePositionList(values); say('Position list updated.'); loadView('settings'); }
-    catch (error) { say(error.message || 'Failed to save position list.'); }
+    catch (error) { say(formatAppError(error, 'Failed to save position list.')); }
   });
 }
 
@@ -1596,7 +1611,7 @@ async function saveStage2Candidate() {
     adminEditorBinding = null;
     await loadView('stage2', true);
   } catch (saveError) {
-    errorBox.textContent = saveError.message || 'Failed to save candidate record.';
+    errorBox.textContent = formatAppError(saveError, 'Failed to save candidate record.');
   } finally {
     save.disabled = false;
     save.textContent = 'Save Changes';
@@ -1611,7 +1626,7 @@ function bindStage2CandidateActions() {
       await loadPositionList();
       await openStage2CandidateEditor(applicant);
     } catch (error) {
-      say(error.message || 'Unable to open candidate editor.');
+      say(formatAppError(error, 'Unable to open candidate editor.'));
     }
   }));
 
@@ -1704,7 +1719,7 @@ function bindStage2CandidateActions() {
     } catch (error) {
       button.disabled = false;
       button.textContent = 'Delete';
-      say(error.message || 'Failed to delete candidate.');
+      say(formatAppError(error, 'Failed to delete candidate.'));
     }
   }));
 }
@@ -1802,7 +1817,7 @@ function renderStage3() {
 function invitedCandidateRowHtml(row) {
   const statusTone = row.status === 'Responded' ? 'green' : 'gray';
   return `<tr>
-    <td style="white-space:nowrap"><span class="interview-date-meta">${esc(formatDmyDash(row.inviteDate || ''))}</span></td>
+    <td style="white-space:nowrap" data-sort-value="${esc(row.inviteDate || '')}"><span class="interview-date-meta">${esc(formatDmyDash(row.inviteDate || ''))}</span></td>
     <td><b>${esc(row.candidateName)}</b>${row.notes ? `<small class="table-subline">${esc(row.notes)}</small>` : ''}</td>
     <td>${esc(row.appliedPosition)}${row.isDuplicated ? '<small class="table-subline">Duplicated position</small>' : ''}</td>
     <td>${esc(row.source)}</td>
@@ -1942,7 +1957,7 @@ function renderInvitedView() {
         say('Invited candidate deleted.');
         await loadView('invited', true);
       } catch (err) {
-        say(err.message || 'Failed to delete invited candidate.');
+        say(formatAppError(err, 'Failed to delete invited candidate.'));
       }
     }));
   };
@@ -2018,7 +2033,7 @@ function renderInvitedView() {
       say('CV screening entry removed.');
       await loadView('invited', true);
     } catch (err) {
-      say(err.message || 'Failed to delete CV screening entry.');
+      say(formatAppError(err, 'Failed to delete CV screening entry.'));
     }
   }));
 
@@ -2092,7 +2107,8 @@ function renderInterviewStageCard(stage) {
           : dec === 'Not Recommended' || dec === 'Rejected'
             ? 'gray'
             : 'gold';
-        const dateLabel = formatDmyDash(row.interview_date || String(row.created_at || '').slice(0, 10));
+        const dateRaw = row.interview_date || String(row.created_at || '').slice(0, 10);
+        const dateLabel = formatDmyDash(dateRaw);
         let extra = esc(row.notes || '-');
         if (isFinal) {
           if (dec === 'Rejected') {
@@ -2101,8 +2117,9 @@ function renderInterviewStageCard(stage) {
             const period = row.contract_start_date && row.contract_end_date
               ? `${formatDmyDash(row.contract_start_date)} to ${formatDmyDash(row.contract_end_date)}`
               : '-';
+            const deptPart = row.official_department ? ` · ${esc(row.official_department)}` : '';
             const contractPart = row.contract_number ? ` · Contract ${esc(row.contract_number)}` : '';
-            extra = `${esc(row.official_position || row.applied_position)} · NIK ${esc(row.assigned_nik)}${contractPart} · ${period}`;
+            extra = `${esc(row.official_position || row.applied_position)}${deptPart} · NIK ${esc(row.assigned_nik)}${contractPart} · ${period}`;
           }
         }
         const actionHtml = isFinal && dec === 'Accepted'
@@ -2113,7 +2130,7 @@ function renderInterviewStageCard(stage) {
           : `<button type="button" class="icon-btn" data-interview-edit="${esc(row.id)}">Edit</button>`;
         return `<tr>
           <td><b>${esc(row.candidate_name)}</b><small class="table-subline">${esc(row.applied_position || '-')}</small></td>
-          <td style="white-space:nowrap"><span class="interview-date-meta">${esc(dateLabel)}</span></td>
+          <td style="white-space:nowrap" data-sort-value="${esc(dateRaw)}"><span class="interview-date-meta">${esc(dateLabel)}</span></td>
           <td>${esc(row.pic_name || '-')}</td>
           <td><span class="status-pill ${tone}">${esc(dec)}</span></td>
           <td style="max-width:210px;white-space:normal">${extra}</td>
@@ -2155,27 +2172,82 @@ function renderInterviewView() {
       existing,
       candidates,
       employees,
+      currUmkAmount: getActiveUmkThreshold(),
       onPrintPkwt: (draftRow, cand) => {
         openPkwtForRecord(buildContractRecordFromInterview(draftRow, cand));
       },
       onSave: async (payload, selectedCand) => {
+        const dec = normalizeInterviewDecision(payload.decision);
+        const nowIso = new Date().toISOString();
+        const buildFinalEmpPayload = () => {
+          const app = selectedCand?.applicantRef || applicants.find(a => a.id === payload.applicant_id);
+          const appData = app?.application_data || {};
+          const genderRaw = appData.gender || '';
+          const genderNormalized = genderRaw === 'L' ? 'Laki-laki' : genderRaw === 'P' ? 'Perempuan' : genderRaw;
+          const baseNotes = payload.notes || `Passed Final Interview (${payload.pic_name})`;
+          return normalizeEmployeeRecordUppercase({
+            applicant_id: payload.applicant_id || null,
+            employee_no: payload.assigned_nik,
+            full_name: payload.candidate_name,
+            department: payload.official_department || '',
+            position: payload.official_position || payload.applied_position,
+            employment_status: 'KONTRAK',
+            join_date: payload.work_start_date,
+            contract_start_date: payload.contract_start_date,
+            contract_end_date: payload.contract_end_date,
+            address: appData.alamat_asal || appData.domisili || '',
+            ktp_nik: payload.candidate_nik || app?.nik || appData.nik || '',
+            birth_place: appData.tempat_lahir || '',
+            birth_date: appData.tanggal_lahir || null,
+            phone: payload.candidate_whatsapp || appData.telepon || '',
+            education: appData.pendidikan_terakhir || '',
+            gender: genderNormalized,
+            religion: appData.agama || '',
+            salary: payload.salary,
+            salary_tier: normalizeSalaryTier(payload.salary_tier, payload.salary, getActiveUmkThreshold()),
+            notes: baseNotes,
+            updated_at: nowIso
+          });
+        };
+
         if (isDemoMode) {
           const demoRow = {
             id: payload.id || `intv-demo-${Date.now()}`,
             ...payload,
-            updated_at: new Date().toISOString()
+            decision: dec,
+            updated_at: nowIso
           };
           const idx = interviews.findIndex(i => i.id === demoRow.id);
           if (idx >= 0) interviews[idx] = demoRow;
           else interviews.unshift(demoRow);
-          say(`Saved ${INTERVIEW_STAGE_LABELS[stage]} record.`);
+          if (stage === 'Final Interview' && dec === 'Accepted') {
+            const empFields = buildFinalEmpPayload();
+            const nikKey = String(empFields.employee_no || '').trim().toUpperCase();
+            const existingEmpIdx = employees.findIndex(e =>
+              (payload.applicant_id && e.applicant_id === payload.applicant_id) ||
+              (nikKey && String(e.employee_no || '').trim().toUpperCase() === nikKey)
+            );
+            if (existingEmpIdx >= 0) {
+              employees[existingEmpIdx] = { ...employees[existingEmpIdx], ...empFields };
+            } else {
+              employees.unshift({ id: `emp-demo-${Date.now()}`, ...empFields });
+            }
+            if (payload.applicant_id) {
+              const appIdx = applicants.findIndex(a => a.id === payload.applicant_id);
+              if (appIdx >= 0) applicants[appIdx] = { ...applicants[appIdx], stage: 'hired' };
+            }
+            workspaceIndexesCache = null;
+            say(`${payload.candidate_name} accepted & added to Employee Directory.`);
+          } else {
+            workspaceIndexesCache = null;
+            say(`Saved ${INTERVIEW_STAGE_LABELS[stage]} record.`);
+          }
           await loadView('interview', false);
           return;
         }
         if (interviewsTableMissing) {
           throw new Error('Please run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
         }
-        const dec = normalizeInterviewDecision(payload.decision);
         const recordPayload = {
           source_type: payload.source_type,
           applicant_id: payload.applicant_id,
@@ -2195,13 +2267,15 @@ function renderInterviewView() {
           rejection_reason_detail: payload.rejection_reason_detail,
           work_start_date: payload.work_start_date,
           salary: payload.salary,
+          ...(interviewSalaryTierColMissing ? {} : { salary_tier: payload.salary_tier || 'umk_or_above' }),
           contract_duration_months: payload.contract_duration_months,
           contract_start_date: payload.contract_start_date,
           contract_end_date: payload.contract_end_date,
           official_position: payload.official_position,
+          ...(interviewOfficialDeptColMissing ? {} : { official_department: payload.official_department || '' }),
           assigned_nik: payload.assigned_nik,
           ...(interviewContractNoColMissing ? {} : { contract_number: payload.contract_number || '' }),
-          updated_at: new Date().toISOString()
+          updated_at: nowIso
         };
 
         const persistRecord = async body => {
@@ -2216,70 +2290,52 @@ function renderInterviewView() {
           const msg = String(error.message || '').toLowerCase();
           if (msg.includes('interview_date')) interviewDateColMissing = true;
           if (msg.includes('contract_number')) interviewContractNoColMissing = true;
+          if (msg.includes('official_department')) interviewOfficialDeptColMissing = true;
+          if (msg.includes('salary_tier')) interviewSalaryTierColMissing = true;
           const fallbackBody = { ...recordPayload };
           if (interviewDateColMissing) delete fallbackBody.interview_date;
           if (interviewContractNoColMissing) delete fallbackBody.contract_number;
+          if (interviewOfficialDeptColMissing) delete fallbackBody.official_department;
+          if (interviewSalaryTierColMissing) delete fallbackBody.salary_tier;
           ({ error } = await persistRecord(fallbackBody));
         }
         if (error) throw error;
 
         if (stage === 'Final Interview') {
           if (dec === 'Accepted') {
-            const app = selectedCand?.applicantRef || applicants.find(a => a.id === payload.applicant_id);
-            const appData = app?.application_data || {};
-            const genderRaw = appData.gender || '';
-            const genderNormalized = genderRaw === 'L' ? 'Laki-laki' : genderRaw === 'P' ? 'Perempuan' : genderRaw;
-            const contractPrefix = payload.contract_number ? `Contract No. ${payload.contract_number}` : '';
-            const baseNotes = payload.notes || `Passed Final Interview (${payload.pic_name})`;
-            const mergedNotes = [contractPrefix, baseNotes].filter(Boolean).join(' · ');
-            const empPayload = {
-              applicant_id: payload.applicant_id || null,
-              employee_no: payload.assigned_nik,
-              full_name: payload.candidate_name,
-              department: '',
-              position: payload.official_position || payload.applied_position,
-              employment_status: 'KONTRAK',
-              join_date: payload.work_start_date,
-              contract_start_date: payload.contract_start_date,
-              contract_end_date: payload.contract_end_date,
-              address: appData.alamat_asal || appData.domisili || '',
-              ktp_nik: payload.candidate_nik || app?.nik || appData.nik || '',
-              birth_place: appData.tempat_lahir || '',
-              birth_date: appData.tanggal_lahir || null,
-              phone: payload.candidate_whatsapp || appData.telepon || '',
-              education: appData.pendidikan_terakhir || '',
-              gender: genderNormalized,
-              religion: appData.agama || '',
-              salary: payload.salary,
-              notes: mergedNotes,
-              updated_at: new Date().toISOString()
-            };
-            const { error: empErr } = await supabase.from('employees')
+            const empPayload = buildFinalEmpPayload();
+            if (employeesSalaryTierMissing) delete empPayload.salary_tier;
+            let { error: empErr } = await supabase.from('employees')
               .upsert(empPayload, { onConflict: 'employee_no' });
+            if (empErr && isMissingSchemaError(empErr) && String(empErr.message || '').toLowerCase().includes('salary_tier')) {
+              employeesSalaryTierMissing = true;
+              delete empPayload.salary_tier;
+              ({ error: empErr } = await supabase.from('employees').upsert(empPayload, { onConflict: 'employee_no' }));
+            }
             if (empErr) throw empErr;
             if (payload.applicant_id) {
               await supabase.from('applicants')
-                .update({ stage: 'hired', updated_at: new Date().toISOString() })
+                .update({ stage: 'hired', updated_at: nowIso })
                 .eq('id', payload.applicant_id);
             }
             say(`${payload.candidate_name} accepted & added to Employee Directory.`);
           } else if (dec === 'Rejected' && payload.applicant_id) {
             await supabase.from('applicants')
-              .update({ stage: 'rejected', updated_at: new Date().toISOString() })
+              .update({ stage: 'rejected', updated_at: nowIso })
               .eq('id', payload.applicant_id);
             say(`Final Interview decision (${payload.candidate_name}: Rejected) saved.`);
           } else if (dec === 'Holded' && payload.applicant_id) {
             await supabase.from('applicants')
-              .update({ stage: 'stage4_pending', updated_at: new Date().toISOString() })
+              .update({ stage: 'stage4_pending', updated_at: nowIso })
               .eq('id', payload.applicant_id);
             say(`Final Interview decision (${payload.candidate_name}: Holded) saved.`);
           } else if (dec === 'Sent to OS' && payload.applicant_id) {
             const { error: osErr } = await supabase.from('applicants')
-              .update({ stage: 'os_sent', updated_at: new Date().toISOString() })
+              .update({ stage: 'os_sent', updated_at: nowIso })
               .eq('id', payload.applicant_id);
             if (osErr) {
               await supabase.from('applicants')
-                .update({ stage: 'stage4_pending', updated_at: new Date().toISOString() })
+                .update({ stage: 'stage4_pending', updated_at: nowIso })
                 .eq('id', payload.applicant_id);
             }
             say(`${payload.candidate_name} marked as Sent to OS.`);
@@ -2291,7 +2347,7 @@ function renderInterviewView() {
             const app = applicants.find(a => a.id === payload.applicant_id);
             if (app && ['application_submitted', 'disc_completed'].includes(app.stage)) {
               await supabase.from('applicants')
-                .update({ stage: 'stage4_pending', updated_at: new Date().toISOString() })
+                .update({ stage: 'stage4_pending', updated_at: nowIso })
                 .eq('id', payload.applicant_id);
             }
           }
@@ -2329,9 +2385,11 @@ function trackingStageCellHtml(cell) {
       ? 'gray'
       : 'gold';
   const dateText = cell.date ? formatDmyDash(cell.date) : '';
+  const noteText = String(cell.notes || '').trim();
   return `<div class="tracking-stage-cell">
     <span class="status-pill ${tone}" title="${esc(cell.picName || '')}">${esc(dec)}</span>
     ${dateText ? `<small class="tracking-date-sub">${esc(dateText)}</small>` : ''}
+    ${noteText ? `<small class="stage-note" title="${esc(noteText)}">${esc(noteText)}</small>` : ''}
   </div>`;
 }
 
@@ -2357,27 +2415,27 @@ function renderTrackingView() {
     ? rows.map(r => `<tr>
         <td><b>${esc(r.name)}</b><small class="table-subline">${esc(r.sub)}</small></td>
         <td>${esc(r.inviteSource || '-')}</td>
-        <td><div class="tracking-stage-cell">
+        <td data-sort-value="${esc(r.inviteDate || '')}"><div class="tracking-stage-cell">
           <span class="status-pill ${r.inviteStatus === 'Responded' ? 'green' : r.inviteStatus === 'Lead Register' ? 'blue' : 'gray'}">${esc(r.inviteStatus)}</span>
           ${r.inviteDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.inviteDate))}</small>` : ''}
         </div></td>
-        <td>${r.formSubmittedDate
+        <td data-sort-value="${esc(r.formSubmittedDate || '')}">${r.formSubmittedDate
           ? `<div class="tracking-stage-cell"><span class="status-pill green">Submitted</span><small class="tracking-date-sub">${esc(formatDmyDash(r.formSubmittedDate))}</small></div>`
           : '<span class="status-pill gray">-</span>'}</td>
-        <td>${r.hrTestDone
+        <td data-sort-value="${esc(r.hrTestDate || '')}">${r.hrTestDone
           ? `<div class="tracking-stage-cell"><span class="status-pill green">Completed</span>${r.hrTestDate ? `<small class="tracking-date-sub">${esc(formatDmyDash(r.hrTestDate))}</small>` : ''}</div>`
           : '<span class="status-pill gray">-</span>'}</td>
-        <td>${trackingStageCellHtml(r.hr1)}</td>
-        <td>${trackingStageCellHtml(r.hr2)}</td>
-        <td>${trackingStageCellHtml(r.user1)}</td>
-        <td>${trackingStageCellHtml(r.user2)}</td>
-        <td>${trackingStageCellHtml(r.finalInt)}</td>
+        <td data-sort-value="${esc(r.hr1?.date || '')}">${trackingStageCellHtml(r.hr1)}</td>
+        <td data-sort-value="${esc(r.hr2?.date || '')}">${trackingStageCellHtml(r.hr2)}</td>
+        <td data-sort-value="${esc(r.user1?.date || '')}">${trackingStageCellHtml(r.user1)}</td>
+        <td data-sort-value="${esc(r.user2?.date || '')}">${trackingStageCellHtml(r.user2)}</td>
+        <td data-sort-value="${esc(r.finalInt?.date || '')}">${trackingStageCellHtml(r.finalInt)}</td>
         <td>
           <span class="status-pill ${r.decisionTone}">${esc(r.decision)}</span>
           ${r.rejectionReason ? `<small class="tracking-reason-sub">${esc(r.rejectionReason)}</small>` : ''}
         </td>
-        <td style="white-space:nowrap">${r.decisionDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.decisionDate))}</span>` : '-'}</td>
-        <td style="white-space:nowrap">${r.joinDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.joinDate))}</span>` : '-'}</td>
+        <td style="white-space:nowrap" data-sort-value="${esc(r.decisionDate || '')}">${r.decisionDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.decisionDate))}</span>` : '-'}</td>
+        <td style="white-space:nowrap" data-sort-value="${esc(r.joinDate || '')}">${r.joinDate ? `<span class="interview-date-meta">${esc(formatDmyDash(r.joinDate))}</span>` : '-'}</td>
       </tr>`).join('')
     : emptyRow(13, 'No candidate tracking records yet');
 
@@ -2453,7 +2511,7 @@ function renderTrackingView() {
       XLSX.writeFile(workbook, `Tracking_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
       say(`Exported ${trackingRowsData.length} tracking row(s) to XLSX.`);
     } catch (err) {
-      say(err.message || 'Failed to export Tracking & Report XLSX.');
+      say(formatAppError(err, 'Failed to export Tracking & Report XLSX.'));
     } finally {
       if (button) {
         button.disabled = false;
@@ -2478,7 +2536,7 @@ function renderTrackingView() {
       const { printTrackingReport } = await loadPrintModule();
       printTrackingReport({ summary, rows: activeFilteredRows, filterQuery: query });
     } catch (err) {
-      say(err.message || 'Unable to prepare Tracking & Report print view.');
+      say(formatAppError(err, 'Unable to prepare Tracking & Report print view.'));
     }
   });
   bindSearch('#table-search', query => {
@@ -2491,6 +2549,9 @@ function renderTrackingView() {
 /* ============================================================================
  * EMPLOYEE DIRECTORY — 18 Columns (Home Base + Perusahaan) + Upload XLSX/CSV
  * ============================================================================ */
+const empSortCollator = new Intl.Collator('id', { numeric: true, sensitivity: 'base' });
+const EMP_DATE_COLS = new Set([3, 5, 6, 10]);
+
 function employeeRows(rows) {
   if (!rows.length) return emptyRow(19, 'No employee records found');
   const idx = getWorkspaceIndexes();
@@ -2500,18 +2561,18 @@ function employeeRows(rows) {
     const statusUpper = String(formatted.Status || '').toUpperCase();
     const statusTone = statusUpper === 'TETAP' ? 'green' : statusUpper === 'KONTRAK' ? 'blue' : statusUpper === 'NONAKTIF' ? 'gray' : 'gold';
     const entityCode = normalizeCompanyEntity(formatted.Perusahaan);
-    return `<tr>
+    return `<tr class="emp-row-clickable" data-employee-id="${esc(employee.id)}">
       <td><b>${esc(formatted.Nama || '—')}</b></td>
       <td style="font-family:var(--font-mono)">${esc(formatted.Nik || '—')}</td>
       <td>${esc(formatted.Departement || '—')}</td>
-      <td>${esc(formatted['Tgl Masuk'])}</td>
+      <td style="white-space:nowrap" data-sort-value="${esc(employee.join_date || '')}">${esc(formatted['Tgl Masuk'])}</td>
       <td>${esc(formatted.Jabatan || '—')}</td>
-      <td>${esc(formatted['Mulai Kontrak'])}</td>
-      <td>${esc(formatted['Kontrak Berakhir'])}</td>
+      <td style="white-space:nowrap" data-sort-value="${esc(employee.contract_start_date || '')}">${esc(formatted['Mulai Kontrak'])}</td>
+      <td style="white-space:nowrap" data-sort-value="${esc(employee.contract_end_date || '')}">${esc(formatted['Kontrak Berakhir'])}</td>
       <td style="max-width:240px;white-space:normal"><div class="cell-clamp-2" title="${esc(formatted.Alamat)}">${esc(formatted.Alamat || '—')}</div></td>
       <td style="font-family:var(--font-mono)">${esc(formatted.Nik2 || '—')}</td>
       <td>${esc(formatted['Tempat Lahir'] || '—')}</td>
-      <td>${esc(formatted['Tanggal Lahir'])}</td>
+      <td style="white-space:nowrap" data-sort-value="${esc(employee.birth_date || applicant?.application_data?.tanggal_lahir || '')}">${esc(formatted['Tanggal Lahir'])}</td>
       <td>${esc(formatted['No. Telp'] || '—')}</td>
       <td><span class="status-pill ${statusTone}">${esc(formatted.Status || '—')}</span></td>
       <td>${esc(formatted.Pendidikan || '—')}</td>
@@ -2519,9 +2580,34 @@ function employeeRows(rows) {
       <td>${esc(formatted.Agama || '—')}</td>
       <td>${esc(formatted['Home Base'] || 'PASURUAN')}</td>
       <td><span class="status-pill ${entityCode === 'REHOLZ' ? 'gold' : 'blue'}" title="${esc(formatCompanyEntityName(entityCode))}">${esc(entityCode)}</span></td>
-      <td><button class="icon-btn" data-edit-employee="${esc(employee.id)}">Edit</button></td>
+      <td><button type="button" class="icon-btn" data-edit-employee="${esc(employee.id)}">Edit</button></td>
     </tr>`;
   }).join('');
+}
+
+function getEmployeeSortKey(item, colIdx) {
+  const { employee: e, applicant: a, formatted: f } = item;
+  switch (colIdx) {
+    case 0: return f.Nama || '';
+    case 1: return f.Nik || '';
+    case 2: return f.Departement || '';
+    case 3: return e.join_date || f['Tgl Masuk'] || '';
+    case 4: return f.Jabatan || '';
+    case 5: return e.contract_start_date || f['Mulai Kontrak'] || '';
+    case 6: return e.contract_end_date || f['Kontrak Berakhir'] || '';
+    case 7: return f.Alamat || '';
+    case 8: return f.Nik2 || '';
+    case 9: return f['Tempat Lahir'] || '';
+    case 10: return e.birth_date || a?.application_data?.tanggal_lahir || f['Tanggal Lahir'] || '';
+    case 11: return f['No. Telp'] || '';
+    case 12: return f.Status || '';
+    case 13: return f.Pendidikan || '';
+    case 14: return f['Jenis Kelamin'] || '';
+    case 15: return f.Agama || '';
+    case 16: return f['Home Base'] || '';
+    case 17: return f.Perusahaan || '';
+    default: return '';
+  }
 }
 
 function renderEmployees() {
@@ -2563,6 +2649,8 @@ function renderEmployees() {
     const row = formatEmployeeExportRow(e, a);
     return {
       employee: e,
+      applicant: a,
+      formatted: row,
       searchText: `${Object.values(row).join(' ')} ${formatCompanyEntityName(row.Perusahaan)}`.toLowerCase()
     };
   });
@@ -2574,8 +2662,8 @@ function renderEmployees() {
   ) + migrationWarn + subTabsHtml + `
     <section class="panel table-panel">${tableToolbar('Search name / NIK / department / home base / company…', 'Employee Directory')}
       <div class="table-wrap recruitment-data-scroll">
-        <table class="data-table">
-          <thead><tr>${EMPLOYEE_UI_HEADERS.map(h => `<th>${esc(h.toUpperCase())}</th>`).join('')}<th>ACTIONS</th></tr></thead>
+        <table id="employee-table" class="data-table" data-custom-sort="true">
+          <thead><tr>${EMPLOYEE_UI_HEADERS.map((h, i) => `<th data-emp-sort="${i}">${esc(h.toUpperCase())}</th>`).join('')}<th data-no-sort="true">ACTIONS</th></tr></thead>
           <tbody id="employee-rows"></tbody>
         </table>
       </div><div id="employee-pager"></div>
@@ -2589,12 +2677,39 @@ function renderEmployees() {
   let empQuery = '';
   let empPage = 1;
   let empPageSize = 50;
+  let empSortCol = null;
+  let empSortDir = 'asc';
 
   const paintEmployees = () => {
-    const filtered = empQuery
-      ? indexedEmployees.filter(item => item.searchText.includes(empQuery)).map(item => item.employee)
-      : employees;
-    const paged = paginateRows(filtered, empPage, empPageSize);
+    let list = empQuery
+      ? indexedEmployees.filter(item => item.searchText.includes(empQuery))
+      : indexedEmployees;
+
+    if (empSortCol !== null) {
+      const mul = empSortDir === 'asc' ? 1 : -1;
+      const isDateCol = EMP_DATE_COLS.has(empSortCol);
+      list = [...list].sort((a, b) => {
+        const rawA = String(getEmployeeSortKey(a, empSortCol) || '').trim();
+        const rawB = String(getEmployeeSortKey(b, empSortCol) || '').trim();
+        const cleanA = rawA === '-' || rawA === '—' ? '' : rawA;
+        const cleanB = rawB === '-' || rawB === '—' ? '' : rawB;
+        if (!cleanA && !cleanB) return 0;
+        if (!cleanA) return 1;
+        if (!cleanB) return -1;
+        if (isDateCol) {
+          const msA = parseSortableDateMs(cleanA);
+          const msB = parseSortableDateMs(cleanB);
+          if (msA === null && msB === null) return 0;
+          if (msA === null) return 1;
+          if (msB === null) return -1;
+          return (msA - msB) * mul;
+        }
+        return empSortCollator.compare(cleanA, cleanB) * mul;
+      });
+    }
+
+    const sortedEmployees = list.map(item => item.employee);
+    const paged = paginateRows(sortedEmployees, empPage, empPageSize);
     empPage = paged.page;
     $('#employee-rows').innerHTML = employeeRows(paged.items);
     renderPaginationFooter($('#employee-pager'), paged, (nextPage, nextSize) => {
@@ -2605,6 +2720,26 @@ function renderEmployees() {
     bindEmployeeEdit();
   };
   paintEmployees();
+
+  $$('#employee-table thead th[data-emp-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = Number(th.dataset.empSort);
+      if (empSortCol === col) {
+        empSortDir = empSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        empSortCol = col;
+        empSortDir = 'asc';
+      }
+      $$('#employee-table thead th').forEach(h => {
+        delete h.dataset.sortDirection;
+        h.removeAttribute('aria-sort');
+      });
+      th.dataset.sortDirection = empSortDir;
+      th.setAttribute('aria-sort', empSortDir === 'asc' ? 'ascending' : 'descending');
+      empPage = 1;
+      paintEmployees();
+    });
+  });
 
   bindSearch('#table-search', query => {
     empQuery = query;
@@ -2617,9 +2752,10 @@ function renderEmployees() {
     openEmployeeUploadModal({
       onDownloadTemplate: downloadEmployeeTemplateXlsx,
       onImport: async parsedRows => {
+        const normalizedRows = parsedRows.map(r => normalizeEmployeeRecordUppercase(r));
         if (isDemoMode || !supabase) {
           const nowIso = new Date().toISOString();
-          parsedRows.forEach(r => {
+          normalizedRows.forEach(r => {
             const key = String(r.employee_no || '').trim().toUpperCase();
             const existingIdx = employees.findIndex(e => String(e.employee_no || '').trim().toUpperCase() === key);
             if (existingIdx >= 0) {
@@ -2629,7 +2765,7 @@ function renderEmployees() {
             }
           });
           workspaceIndexesCache = null;
-          say(`${parsedRows.length} employee records imported into Employee Directory (Demo).`);
+          say(`${normalizedRows.length} employee records imported into Employee Directory (Demo).`);
           renderEmployees();
           return;
         }
@@ -2637,12 +2773,15 @@ function renderEmployees() {
           throw new Error('Please run SQL migration v8 (database/migrations/20261124_hrga_v8_dk_integration_and_clear_attendance.sql) before importing the 18-column Employee Directory.');
         }
         const chunkSize = 100;
-        for (let i = 0; i < parsedRows.length; i += chunkSize) {
-          const batch = parsedRows.slice(i, i + chunkSize).map(r => {
+        for (let i = 0; i < normalizedRows.length; i += chunkSize) {
+          const batch = normalizedRows.slice(i, i + chunkSize).map(r => {
             const item = { ...r, updated_at: new Date().toISOString() };
             if (employeesV8Missing) {
               delete item.home_base;
               delete item.company_entity;
+            }
+            if (employeesSalaryTierMissing) {
+              delete item.salary_tier;
             }
             return item;
           });
@@ -2650,7 +2789,7 @@ function renderEmployees() {
           if (error) throw error;
         }
         invalidateDataCache();
-        say(`${parsedRows.length} employee records imported into Employee Directory.`);
+        say(`${normalizedRows.length} employee records imported into Employee Directory.`);
         await loadView('employees', true);
       }
     });
@@ -2662,7 +2801,8 @@ function openEmployeeEditor(employee = null, applicant = null) {
   openFullEmployeeModal({
     employee,
     applicant,
-    onSave: async fields => {
+    onSave: async rawFields => {
+      const fields = normalizeEmployeeRecordUppercase(rawFields);
       const nowIso = new Date().toISOString();
       if (isDemoMode || !supabase) {
         if (fields.id) {
@@ -2705,6 +2845,9 @@ function openEmployeeEditor(employee = null, applicant = null) {
           delete updatePayload.home_base;
           delete updatePayload.company_entity;
         }
+        if (employeesSalaryTierMissing) {
+          delete updatePayload.salary_tier;
+        }
         const { error } = await supabase.from('employees').update(updatePayload).eq('id', fields.id);
         if (error) throw error;
         say('Employee record updated.');
@@ -2728,6 +2871,9 @@ function openEmployeeEditor(employee = null, applicant = null) {
           delete insertPayload.home_base;
           delete insertPayload.company_entity;
         }
+        if (employeesSalaryTierMissing) {
+          delete insertPayload.salary_tier;
+        }
         const { error } = await supabase.from('employees').upsert(insertPayload, { onConflict: 'employee_no' });
         if (error) throw error;
         if (fields.applicant_id) {
@@ -2742,8 +2888,14 @@ function openEmployeeEditor(employee = null, applicant = null) {
 }
 
 function bindEmployeeEdit() {
-  $$('[data-edit-employee]').forEach(button => button.addEventListener('click', () => {
+  $$('[data-edit-employee]').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
     const employee = employees.find(e => e.id === button.dataset.editEmployee);
+    if (employee) openEmployeeEditor(employee);
+  }));
+  $$('#employee-rows tr.emp-row-clickable').forEach(tr => tr.addEventListener('click', event => {
+    if (event.target.closest('button, a, input, select, label')) return;
+    const employee = employees.find(e => e.id === tr.dataset.employeeId);
     if (employee) openEmployeeEditor(employee);
   }));
 }
@@ -2778,7 +2930,7 @@ async function downloadEmployeeTemplateXlsx() {
     XLSX.writeFile(wb, 'Template_Employee_Directory.xlsx');
     say('XLSX template downloaded.');
   } catch (err) {
-    say(err.message || 'Failed to prepare XLSX template.');
+    say(formatAppError(err, 'Failed to prepare XLSX template.'));
   }
 }
 
@@ -2800,7 +2952,7 @@ async function exportEmployees() {
     XLSX.writeFile(workbook, `Employee_Directory_${new Date().toISOString().slice(0, 10)}.xlsx`);
     say(`${employees.length} employee records exported to XLSX.`);
   } catch (error) {
-    say(error.message || 'Failed to export XLSX file.');
+    say(formatAppError(error, 'Failed to export XLSX file.'));
   } finally {
     button.disabled = false;
     button.textContent = 'Download XLSX ↓';
@@ -2888,11 +3040,10 @@ async function saveContractSettingsState(nextSettings) {
   contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...contractSettings, ...nextSettings };
   writeSavedContractSettings(contractSettings);
   if (isDemoMode || !supabase) return;
-  const { error } = await supabase.from('portal_settings').upsert({
+  const { error } = await savePortalSettingsBatch(supabase, {
     key: 'contract_settings',
-    value: contractSettings,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'key' });
+    value: contractSettings
+  });
   if (error) throw error;
 }
 
@@ -2901,11 +3052,10 @@ async function saveContractHistoryFallback() {
     writeLocalJson(DEMO_CONTRACT_HISTORY_KEY, contractHistory);
     return;
   }
-  const { error } = await supabase.from('portal_settings').upsert({
+  const { error } = await savePortalSettingsBatch(supabase, {
     key: 'contract_history',
-    value: contractHistory,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'key' });
+    value: contractHistory
+  });
   if (error) throw error;
 }
 
@@ -2970,25 +3120,52 @@ async function syncPrintedContractToDirectory(queueKey) {
       if (aIdx >= 0) applicants[aIdx] = { ...applicants[aIdx], stage: 'hired' };
     }
   } else {
+    const buildEmpWriteBody = () => {
+      const body = { ...empFields };
+      if (employeesSalaryTierMissing) delete body.salary_tier;
+      return body;
+    };
     if (targetEmployeeId) {
-      const { error } = await supabase.from('employees').update(empFields).eq('id', targetEmployeeId);
+      let { error } = await supabase.from('employees').update(buildEmpWriteBody()).eq('id', targetEmployeeId);
+      if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('salary_tier')) {
+        employeesSalaryTierMissing = true;
+        ({ error } = await supabase.from('employees').update(buildEmpWriteBody()).eq('id', targetEmployeeId));
+      }
       if (error) throw error;
     } else {
       const existingByNik = employees.find(e =>
         String(e.employee_no || '').trim().toUpperCase() === String(empFields.employee_no || '').trim().toUpperCase()
       );
-      const { data: upserted, error } = await supabase.from('employees')
-        .upsert(empFields, { onConflict: 'employee_no' })
+      let { data: upserted, error } = await supabase.from('employees')
+        .upsert(buildEmpWriteBody(), { onConflict: 'employee_no' })
         .select('id')
         .single();
+      if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('salary_tier')) {
+        employeesSalaryTierMissing = true;
+        ({ data: upserted, error } = await supabase.from('employees')
+          .upsert(buildEmpWriteBody(), { onConflict: 'employee_no' })
+          .select('id')
+          .single());
+      }
       if (error) throw error;
       targetEmployeeId = upserted?.id || existingByNik?.id || null;
       if (!existingByNik && targetEmployeeId) createdEmployeeId = targetEmployeeId;
     }
     if (sync.interviewPatch?.id) {
-      const patchBody = { ...sync.interviewPatch };
-      delete patchBody.id;
-      await supabase.from('candidate_interviews').update(patchBody).eq('id', sync.interviewPatch.id);
+      const buildIntPatch = () => {
+        const patchBody = { ...sync.interviewPatch };
+        delete patchBody.id;
+        if (interviewOfficialDeptColMissing) delete patchBody.official_department;
+        if (interviewSalaryTierColMissing) delete patchBody.salary_tier;
+        return patchBody;
+      };
+      let { error: intPatchErr } = await supabase.from('candidate_interviews').update(buildIntPatch()).eq('id', sync.interviewPatch.id);
+      if (intPatchErr && isMissingSchemaError(intPatchErr)) {
+        const msg = String(intPatchErr.message || '').toLowerCase();
+        if (msg.includes('official_department')) interviewOfficialDeptColMissing = true;
+        if (msg.includes('salary_tier')) interviewSalaryTierColMissing = true;
+        await supabase.from('candidate_interviews').update(buildIntPatch()).eq('id', sync.interviewPatch.id);
+      }
     }
     if (sync.applicantId) {
       await supabase.from('applicants')
@@ -3118,13 +3295,14 @@ function buildContractRecordFromInterview(intv, cand = null) {
     fullName: intv.candidate_name || emp?.full_name || app?.full_name || '',
     employeeNik: intv.assigned_nik || emp?.employee_no || '',
     ktpNik: intv.candidate_nik || emp?.ktp_nik || app?.nik || '',
-    department: emp?.department || '',
+    department: intv.official_department || emp?.department || '',
     position: intv.official_position || emp?.position || intv.applied_position || app?.position || '',
     homeBase: emp?.home_base || 'PASURUAN',
     companyEntity: normalizeCompanyEntity(emp?.company_entity || 'MITRA'),
     address: emp?.address || appData.alamat_asal || appData.domisili || '',
     phone: intv.candidate_whatsapp || emp?.phone || appData.telepon || '',
     salary: intv.salary ?? emp?.salary ?? null,
+    salaryTier: intv.salary_tier || emp?.salary_tier || '',
     contractStartDate: intv.contract_start_date || intv.work_start_date || emp?.contract_start_date || '',
     contractEndDate: intv.contract_end_date || emp?.contract_end_date || '',
     durationMonths: intv.contract_duration_months || 12,
@@ -3172,7 +3350,7 @@ async function openPkwtForRecord(record) {
       }
     });
   } catch (err) {
-    say(err.message || 'Unable to open PKWT configuration.');
+    say(formatAppError(err, 'Unable to open PKWT configuration.'));
   }
 }
 
@@ -3191,16 +3369,14 @@ async function renderContractsView() {
   const rowsHtml = list => {
     if (!list.length) return emptyRow(6, 'No expiring contracts (2-month window) or Final Interview passed candidates');
     return list.map(row => {
-      const rule = determineRequiredContractDocuments(row.salary, activeUmk);
+      const pkg = getContractPackageInfo(row.salaryTier || '', row.salary, activeUmk);
       const periodText = row.contractStartDate && row.contractEndDate
         ? `${formatDmyDash(row.contractStartDate)} → ${formatDmyDash(row.contractEndDate)}`
         : (row.contractEndDate ? `Ends ${formatDmyDash(row.contractEndDate)}` : 'Pending start date');
       const urgencySub = typeof row.daysRemaining === 'number'
         ? (row.daysRemaining < 0 ? `${Math.abs(row.daysRemaining)}d overdue` : `${row.daysRemaining}d remaining`)
         : 'New hire PKWT';
-      const wageBadge = row.salary > 0
-        ? `<span class="status-pill ${rule.meetsUmk ? 'green' : 'gold'}">${rule.meetsUmk ? 'PKWT Only (1 Doc)' : 'PKWT + 4 PB (5 Docs)'}</span>`
-        : `<span class="status-pill gray">Set Salary in PKWT</span>`;
+      const packageBadge = `<span class="status-pill ${pkg.meetsUmk ? 'green' : 'gold'}">${esc(pkg.packageLabel)} (${pkg.documentCount} Doc${pkg.documentCount === 1 ? '' : 's'})</span>`;
       const printedEntry = printedContractsMap.get(row.queueKey);
       const syncInlineHtml = printedEntry
         ? (printedEntry.syncedAt
@@ -3224,13 +3400,12 @@ async function renderContractsView() {
           <b>${esc(row.position || '—')}</b>
           <small class="table-subline">${esc(row.department || 'No department')}</small>
         </td>
-        <td>
+        <td data-sort-value="${esc(row.contractEndDate || row.contractStartDate || '')}">
           <span>${esc(periodText)}</span>
           ${row.contractNumber ? `<small class="table-subline">${esc(row.contractNumber)}</small>` : ''}
         </td>
         <td>
-          <b>${esc(formatIdrShort(row.salary))}</b>
-          <div style="margin-top:4px">${wageBadge}</div>
+          ${packageBadge}
         </td>
         <td>
           <button type="button" class="btn btn-primary btn-xs" data-configure-pkwt="${esc(row.queueKey)}">Configure PKWT</button>
@@ -3274,7 +3449,7 @@ async function renderContractsView() {
         } catch (err) {
           btn.disabled = false;
           btn.textContent = 'Sync to Employee Directory';
-          say(err.message || 'Failed to sync contract to Employee Directory.');
+          say(formatAppError(err, 'Failed to sync contract to Employee Directory.'));
         }
       });
     });
@@ -3300,7 +3475,7 @@ async function renderContractsView() {
               <th>PRIORITY &amp; SOURCE</th>
               <th>POSITION &amp; DEPT</th>
               <th>CONTRACT PERIOD</th>
-              <th>SALARY &amp; UMK RULE</th>
+              <th>DOCUMENT PACKAGE</th>
               <th>ACTIONS</th>
             </tr>
           </thead>
@@ -3340,11 +3515,15 @@ async function renderContractSettings() {
   const historyRowsHtml = contractHistory.length
     ? contractHistory.map(h => {
         const isCancelled = h.status === 'cancelled';
+        const hPkg = getContractPackageInfo(h.salaryTier || '', h.salary, s.currUmkAmount);
+        const hPkgText = hPkg.meetsUmk
+          ? `${hPkg.packageLabel} (UMK / Diatas UMK)`
+          : `${hPkg.packageLabel} · ${formatIdrShort(h.salary)}`;
         return `<tr>
           <td><b>${esc(h.fullName)}</b><small class="table-subline">${esc(h.employeeNik || '—')}</small></td>
           <td style="font-family:var(--font-mono)">${esc(h.contractNumber || '—')}</td>
-          <td>${esc(h.position || '—')}<small class="table-subline">${esc(formatIdrShort(h.salary))}</small></td>
-          <td>${esc(formatDmyDash(h.contractStartDate))} → ${esc(formatDmyDash(h.contractEndDate))}</td>
+          <td>${esc(h.position || '—')}<small class="table-subline">${esc(hPkgText)}</small></td>
+          <td data-sort-value="${esc(h.contractStartDate || '')}">${esc(formatDmyDash(h.contractStartDate))} → ${esc(formatDmyDash(h.contractEndDate))}</td>
           <td>${esc(h.appliedBy || 'Administrator')}<small class="table-subline">${esc(idDate(h.appliedAt))}</small></td>
           <td><span class="status-pill ${isCancelled ? 'gray' : 'green'}">${isCancelled ? 'Cancelled' : 'Applied'}</span></td>
           <td>${isCancelled
@@ -3418,7 +3597,7 @@ async function renderContractSettings() {
             <tr>
               <th>EMPLOYEE</th>
               <th>CONTRACT NO.</th>
-              <th>POSITION &amp; SALARY</th>
+              <th>POSITION &amp; PACKAGE</th>
               <th>PERIOD</th>
               <th>APPLIED BY</th>
               <th>STATUS</th>
@@ -3466,7 +3645,7 @@ async function renderContractSettings() {
       });
       say('PKWT settings saved.');
     } catch (err) {
-      say(err.message || 'Failed to save PKWT settings.');
+      say(formatAppError(err, 'Failed to save PKWT settings.'));
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save PKWT Settings';
@@ -3492,7 +3671,7 @@ async function renderContractSettings() {
     } catch (err) {
       btn.disabled = false;
       btn.textContent = 'Cancel Contract';
-      say(err.message || 'Failed to cancel contract.');
+      say(formatAppError(err, 'Failed to cancel contract.'));
     }
   }));
 }
@@ -3589,7 +3768,7 @@ async function downloadSpreadsheetTemplateXlsx(headers, sampleRowOrRows, sheetNa
     XLSX.writeFile(wb, filename);
     say(`Downloaded ${filename}.`);
   } catch (err) {
-    say(err.message || 'Failed to generate XLSX template.');
+    say(formatAppError(err, 'Failed to generate XLSX template.'));
   }
 }
 
@@ -3613,6 +3792,7 @@ function renderSystemImport(opsCtx = null) {
           <button type="button" class="btn btn-primary" id="import-cand-submit" disabled>Import Candidates</button>
         </div>
         <div id="import-cand-preview" class="upload-preview-box hidden"></div>
+        <div id="import-cand-warn" class="form-warning" role="status"></div>
         <div id="import-cand-error" class="form-error" role="alert"></div>
       </div>
     </section>
@@ -3635,6 +3815,7 @@ function renderSystemImport(opsCtx = null) {
           <button type="button" class="btn btn-primary" id="import-lead-submit" disabled>Import Leads</button>
         </div>
         <div id="import-lead-preview" class="upload-preview-box hidden"></div>
+        <div id="import-lead-warn" class="form-warning" role="status"></div>
         <div id="import-lead-error" class="form-error" role="alert"></div>
       </div>
     </section>
@@ -3658,6 +3839,7 @@ function renderSystemImport(opsCtx = null) {
           <button type="button" class="btn btn-primary" id="import-disc-submit" disabled>Import DISC Results</button>
         </div>
         <div id="import-disc-preview" class="upload-preview-box hidden"></div>
+        <div id="import-disc-warn" class="form-warning" role="status"></div>
         <div id="import-disc-error" class="form-error" role="alert"></div>
       </div>
     </section>
@@ -3685,6 +3867,7 @@ function renderSystemImport(opsCtx = null) {
         </div>
         <div id="import-atk-master-preview" class="upload-preview-box hidden"></div>
         <div id="import-atk-master-result" class="upload-preview-box hidden"></div>
+        <div id="import-atk-master-warn" class="form-warning" role="status"></div>
         <div id="import-atk-master-error" class="form-error" role="alert"></div>
       </div>
     </section>
@@ -3716,6 +3899,7 @@ function renderSystemImport(opsCtx = null) {
         </div>
         <div id="import-atk-mv-preview" class="upload-preview-box hidden"></div>
         <div id="import-atk-mv-result" class="upload-preview-box hidden"></div>
+        <div id="import-atk-mv-warn" class="form-warning" role="status"></div>
         <div id="import-atk-mv-error" class="form-error" role="alert"></div>
       </div>
     </section>
@@ -3744,11 +3928,13 @@ function renderSystemImport(opsCtx = null) {
   const candFile = $('#import-cand-file');
   const candSubmit = $('#import-cand-submit');
   const candPreview = $('#import-cand-preview');
+  const candWarn = $('#import-cand-warn');
   const candError = $('#import-cand-error');
 
   candFile.addEventListener('change', async () => {
     parsedCandidates = [];
     candSubmit.disabled = true;
+    candWarn.textContent = '';
     candError.textContent = '';
     candPreview.classList.add('hidden');
     const file = candFile.files?.[0];
@@ -3756,17 +3942,19 @@ function renderSystemImport(opsCtx = null) {
     try {
       const raw = await readSpreadsheetFileObjects(file);
       const { rows, errors } = parseCandidateImportRows(raw);
-      if (errors.length) candError.textContent = errors.slice(0, 3).join(' ');
       if (!rows.length) {
-        if (!candError.textContent) candError.textContent = 'No valid candidate rows found.';
+        candError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada baris kandidat yang valid.';
         return;
+      }
+      if (errors.length) {
+        candWarn.textContent = `${errors.length} baris dilewati saat membaca file (${errors.slice(0, 2).join('; ')}).`;
       }
       parsedCandidates = rows;
       candSubmit.disabled = false;
       candPreview.classList.remove('hidden');
       candPreview.innerHTML = `<b>${rows.length} candidate row(s) ready</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.full_name)}</b> (${esc(r.nik)}) — ${esc(r.position)}</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
     } catch (err) {
-      candError.textContent = err.message || 'Failed to parse Candidate List file.';
+      candError.textContent = formatAppError(err, 'Gagal membaca file Candidate List.');
     }
   });
 
@@ -3774,6 +3962,7 @@ function renderSystemImport(opsCtx = null) {
     if (!parsedCandidates.length) return;
     candSubmit.disabled = true;
     candSubmit.textContent = 'Importing…';
+    candWarn.textContent = '';
     candError.textContent = '';
     try {
       const existingKeys = new Set(applicants.map(a => `${String(a.nik || '').trim()}|${String(a.position || '').trim().toLowerCase()}`));
@@ -3803,9 +3992,12 @@ function renderSystemImport(opsCtx = null) {
       parsedCandidates = [];
       candFile.value = '';
       candPreview.classList.add('hidden');
+      if (skipped) {
+        candWarn.textContent = `${skipped} data duplikat (NIK & posisi sudah ada) dilewati.`;
+      }
       say(`Imported ${toInsert.length} candidate(s)${skipped ? ` (${skipped} duplicate skipped)` : ''}.`);
     } catch (err) {
-      candError.textContent = err.message || 'Failed to import candidates.';
+      candError.textContent = formatAppError(err, 'Gagal mengimport data kandidat.');
     } finally {
       candSubmit.disabled = true;
       candSubmit.textContent = 'Import Candidates';
@@ -3816,11 +4008,13 @@ function renderSystemImport(opsCtx = null) {
   const leadFile = $('#import-lead-file');
   const leadSubmit = $('#import-lead-submit');
   const leadPreview = $('#import-lead-preview');
+  const leadWarn = $('#import-lead-warn');
   const leadError = $('#import-lead-error');
 
   leadFile.addEventListener('change', async () => {
     parsedLeads = [];
     leadSubmit.disabled = true;
+    leadWarn.textContent = '';
     leadError.textContent = '';
     leadPreview.classList.add('hidden');
     const file = leadFile.files?.[0];
@@ -3828,17 +4022,19 @@ function renderSystemImport(opsCtx = null) {
     try {
       const raw = await readSpreadsheetFileObjects(file);
       const { rows, errors } = parseLeadImportRows(raw);
-      if (errors.length) leadError.textContent = errors.slice(0, 3).join(' ');
       if (!rows.length) {
-        if (!leadError.textContent) leadError.textContent = 'No valid lead rows found.';
+        leadError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada baris Lead Register yang valid.';
         return;
+      }
+      if (errors.length) {
+        leadWarn.textContent = `${errors.length} baris dilewati saat membaca file (${errors.slice(0, 2).join('; ')}).`;
       }
       parsedLeads = rows;
       leadSubmit.disabled = false;
       leadPreview.classList.remove('hidden');
       leadPreview.innerHTML = `<b>${rows.length} lead row(s) ready</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.full_name)}</b> — ${esc(r.position)} (${esc(r.source)})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
     } catch (err) {
-      leadError.textContent = err.message || 'Failed to parse Lead Register file.';
+      leadError.textContent = formatAppError(err, 'Gagal membaca file Lead Register.');
     }
   });
 
@@ -3846,6 +4042,7 @@ function renderSystemImport(opsCtx = null) {
     if (!parsedLeads.length) return;
     leadSubmit.disabled = true;
     leadSubmit.textContent = 'Importing…';
+    leadWarn.textContent = '';
     leadError.textContent = '';
     try {
       if (isDemoMode || !supabase) {
@@ -3871,7 +4068,7 @@ function renderSystemImport(opsCtx = null) {
       leadPreview.classList.add('hidden');
       say(`Imported ${importedCount} lead record(s) into Lead Register.`);
     } catch (err) {
-      leadError.textContent = err.message || 'Failed to import leads.';
+      leadError.textContent = formatAppError(err, 'Gagal mengimport Lead Register.');
     } finally {
       leadSubmit.disabled = true;
       leadSubmit.textContent = 'Import Leads';
@@ -3882,11 +4079,13 @@ function renderSystemImport(opsCtx = null) {
   const discFile = $('#import-disc-file');
   const discSubmit = $('#import-disc-submit');
   const discPreview = $('#import-disc-preview');
+  const discWarn = $('#import-disc-warn');
   const discError = $('#import-disc-error');
 
   discFile.addEventListener('change', async () => {
     parsedDiscRows = [];
     discSubmit.disabled = true;
+    discWarn.textContent = '';
     discError.textContent = '';
     discPreview.classList.add('hidden');
     const file = discFile.files?.[0];
@@ -3894,10 +4093,12 @@ function renderSystemImport(opsCtx = null) {
     try {
       const raw = await readSpreadsheetFileObjects(file);
       const { rows, errors } = parseDiscImportRows(raw);
-      if (errors.length) discError.textContent = errors.slice(0, 3).join(' ');
       if (!rows.length) {
-        if (!discError.textContent) discError.textContent = 'No valid DISC assessment rows found.';
+        discError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada baris DISC assessment yang valid.';
         return;
+      }
+      if (errors.length) {
+        discWarn.textContent = `${errors.length} baris dilewati saat membaca file (${errors.slice(0, 2).join('; ')}).`;
       }
       parsedDiscRows = rows;
       discSubmit.disabled = false;
@@ -3907,7 +4108,7 @@ function renderSystemImport(opsCtx = null) {
         return `<div>• <b>${esc(matched?.full_name || r.full_name || r.nik)}</b> (${esc(r.nik)}) — Dominant ${esc(r.result?.hurufDominan || '-')} ${matched ? '<span class="status-pill green">Matched</span>' : '<span class="status-pill gold">NIK not found</span>'}</div>`;
       }).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more</div>` : ''}</div>`;
     } catch (err) {
-      discError.textContent = err.message || 'Failed to parse DISC file.';
+      discError.textContent = formatAppError(err, 'Gagal membaca file DISC assessment.');
     }
   });
 
@@ -3915,6 +4116,7 @@ function renderSystemImport(opsCtx = null) {
     if (!parsedDiscRows.length) return;
     discSubmit.disabled = true;
     discSubmit.textContent = 'Importing…';
+    discWarn.textContent = '';
     discError.textContent = '';
     try {
       const appByNik = new Map();
@@ -3936,11 +4138,8 @@ function renderSystemImport(opsCtx = null) {
         matchedPairs.push({ row, app: matchedApp });
       });
 
-      if (unmatched.length) {
-        discError.textContent = `Unmatched NIK (${unmatched.length}): ${unmatched.slice(0, 4).join(', ')}${unmatched.length > 4 ? '…' : ''}`;
-      }
       if (!matchedPairs.length) {
-        throw new Error('None of the uploaded NIKs match existing candidates in Candidate List.');
+        throw new Error('Tidak ada NIK yang cocok dengan kandidat di Candidate List.');
       }
 
       if (isDemoMode || !supabase) {
@@ -3987,9 +4186,12 @@ function renderSystemImport(opsCtx = null) {
       parsedDiscRows = [];
       discFile.value = '';
       discPreview.classList.add('hidden');
+      if (unmatched.length) {
+        discWarn.textContent = `${unmatched.length} NIK belum terdaftar di Candidate List dilewati: ${unmatched.slice(0, 4).join(', ')}${unmatched.length > 4 ? '…' : ''}`;
+      }
       say(`Imported ${importedCount} DISC assessment(s)${unmatched.length ? ` (${unmatched.length} unmatched NIK skipped)` : ''}.`);
     } catch (err) {
-      discError.textContent = err.message || 'Failed to import DISC assessment results.';
+      discError.textContent = formatAppError(err, 'Gagal mengimport hasil DISC assessment.');
     } finally {
       discSubmit.disabled = true;
       discSubmit.textContent = 'Import DISC Results';
@@ -4016,12 +4218,14 @@ function renderSystemImport(opsCtx = null) {
   const atkMasterSubmit = $('#import-atk-master-submit');
   const atkMasterPreview = $('#import-atk-master-preview');
   const atkMasterResult = $('#import-atk-master-result');
+  const atkMasterWarn = $('#import-atk-master-warn');
   const atkMasterError = $('#import-atk-master-error');
   const atkMasterReplace = $('#import-atk-master-replace');
 
   atkMasterFile.addEventListener('change', async () => {
     rawAtkMasterRows = [];
     atkMasterSubmit.disabled = true;
+    atkMasterWarn.textContent = '';
     atkMasterError.textContent = '';
     atkMasterPreview.classList.add('hidden');
     atkMasterResult.classList.add('hidden');
@@ -4030,17 +4234,19 @@ function renderSystemImport(opsCtx = null) {
     try {
       const raw = await readSpreadsheetFileObjects(file);
       const { rows, errors } = parseStationeryMasterImportRows(raw);
-      if (errors.length) atkMasterError.textContent = errors.slice(0, 3).join(' ');
       if (!rows.length) {
-        if (!atkMasterError.textContent) atkMasterError.textContent = 'Tidak ada baris Master Item ATK yang valid.';
+        atkMasterError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada baris Master Item ATK yang valid.';
         return;
+      }
+      if (errors.length) {
+        atkMasterWarn.textContent = `${errors.length} baris dilewati saat membaca file (${errors.slice(0, 2).join('; ')}).`;
       }
       rawAtkMasterRows = raw;
       atkMasterSubmit.disabled = false;
       atkMasterPreview.classList.remove('hidden');
-      atkMasterPreview.innerHTML = `<b>${rows.length} master item ATK siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <code>${esc(r.raw_code || 'AUTO')}</code> <b>${esc(r.item_name)}</b> — Stok Awal: ${r.opening_stock} ${esc(r.unit)} (1 ${esc(r.purchase_unit)} = ${r.conversion_qty || 1} ${esc(r.unit)})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} item lainnya</div>` : ''}</div>`;
+      atkMasterPreview.innerHTML = `<b>${rows.length} master item ATK siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <code>${esc(r.raw_code || 'AUTO')}</code> <b>${esc(r.item_name)}</b> — Saldo Awal: ${r.opening_stock} ${esc(r.unit)} (1 ${esc(r.purchase_unit)} = ${r.conversion_qty || 1} ${esc(r.unit)})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} item lainnya</div>` : ''}</div>`;
     } catch (err) {
-      atkMasterError.textContent = err.message || 'Gagal membaca file Master ATK.';
+      atkMasterError.textContent = formatAppError(err, 'Gagal membaca file Master ATK.');
     }
   });
 
@@ -4048,6 +4254,7 @@ function renderSystemImport(opsCtx = null) {
     if (!rawAtkMasterRows.length) return;
     atkMasterSubmit.disabled = true;
     atkMasterSubmit.textContent = 'Importing…';
+    atkMasterWarn.textContent = '';
     atkMasterError.textContent = '';
     atkMasterResult.classList.add('hidden');
     try {
@@ -4067,9 +4274,12 @@ function renderSystemImport(opsCtx = null) {
           <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryStock">Buka Report ATK →</button>
         </div>`;
       atkMasterResult.querySelectorAll('[data-jump-view]').forEach(b => b.addEventListener('click', () => loadView(b.dataset.jumpView)));
+      if (res.errors?.length) {
+        atkMasterWarn.textContent = `${res.errors.length} baris dilewati (${res.errors.slice(0, 2).join('; ')}).`;
+      }
       say(`Master Item ATK berhasil diimport (${res.insertedCount} baru, ${res.updatedCount} diperbarui).`);
     } catch (err) {
-      atkMasterError.textContent = err.message || 'Gagal mengimport Master ATK.';
+      atkMasterError.textContent = formatAppError(err, 'Gagal mengimport Master ATK.');
       atkMasterSubmit.disabled = false;
     } finally {
       if (!rawAtkMasterRows.length) atkMasterSubmit.disabled = true;
@@ -4090,6 +4300,7 @@ function renderSystemImport(opsCtx = null) {
   const atkMvSubmit = $('#import-atk-mv-submit');
   const atkMvPreview = $('#import-atk-mv-preview');
   const atkMvResult = $('#import-atk-mv-result');
+  const atkMvWarn = $('#import-atk-mv-warn');
   const atkMvError = $('#import-atk-mv-error');
   const atkMvReplace = $('#import-atk-mv-replace');
   const atkMvAutoseed = $('#import-atk-mv-autoseed');
@@ -4097,6 +4308,7 @@ function renderSystemImport(opsCtx = null) {
   atkMvFile.addEventListener('change', async () => {
     rawAtkMvRows = [];
     atkMvSubmit.disabled = true;
+    atkMvWarn.textContent = '';
     atkMvError.textContent = '';
     atkMvPreview.classList.add('hidden');
     atkMvResult.classList.add('hidden');
@@ -4105,10 +4317,12 @@ function renderSystemImport(opsCtx = null) {
     try {
       const raw = await readSpreadsheetFileObjects(file);
       const { rows, errors } = parseStationeryMovementImportRows(raw);
-      if (errors.length) atkMvError.textContent = errors.slice(0, 3).join(' ');
       if (!rows.length) {
-        if (!atkMvError.textContent) atkMvError.textContent = 'Tidak ada baris transaksi Stock Movement yang valid.';
+        atkMvError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada baris transaksi Stock Movement yang valid.';
         return;
+      }
+      if (errors.length) {
+        atkMvWarn.textContent = `${errors.length} baris dilewati saat membaca file (${errors.slice(0, 2).join('; ')}).`;
       }
       rawAtkMvRows = raw;
       atkMvSubmit.disabled = false;
@@ -4126,7 +4340,7 @@ function renderSystemImport(opsCtx = null) {
         <div style="margin-top:4px;font-size:12px">Masuk: <b>${inRows.length}</b> trx (${totalInQty} qty) · Keluar: <b>${outRows.length}</b> trx (${totalOutQty} qty)</div>
         <div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• ${esc(r.tx_date)} · <b>${r.tx_type === 'IN' ? 'Masuk' : 'Keluar'}</b> · ${esc(r.department)} · <b>${esc(r.item_name)}</b> (${r.qty} ${esc(r.unit || '')})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} transaksi lainnya</div>` : ''}</div>`;
     } catch (err) {
-      atkMvError.textContent = err.message || 'Gagal membaca file Stock Movement ATK.';
+      atkMvError.textContent = formatAppError(err, 'Gagal membaca file Stock Movement ATK.');
     }
   });
 
@@ -4134,6 +4348,7 @@ function renderSystemImport(opsCtx = null) {
     if (!rawAtkMvRows.length) return;
     atkMvSubmit.disabled = true;
     atkMvSubmit.textContent = 'Importing…';
+    atkMvWarn.textContent = '';
     atkMvError.textContent = '';
     atkMvResult.classList.add('hidden');
     try {
@@ -4155,9 +4370,12 @@ function renderSystemImport(opsCtx = null) {
           <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryInput">Stock Movement Input →</button>
         </div>`;
       atkMvResult.querySelectorAll('[data-jump-view]').forEach(b => b.addEventListener('click', () => loadView(b.dataset.jumpView)));
+      if (res.errors?.length) {
+        atkMvWarn.textContent = `${res.errors.length} baris dilewati (${res.errors.slice(0, 2).join('; ')}).`;
+      }
       say(`Berhasil import ${res.importedEntries.length} transaksi ATK.`);
     } catch (err) {
-      atkMvError.textContent = err.message || 'Gagal mengimport transaksi Stock Movement ATK.';
+      atkMvError.textContent = formatAppError(err, 'Gagal mengimport transaksi Stock Movement ATK.');
       atkMvSubmit.disabled = false;
     } finally {
       if (!rawAtkMvRows.length) atkMvSubmit.disabled = true;
@@ -4362,11 +4580,10 @@ async function persistRecruitScoringConfig(nextScoring) {
   if (isDemoMode || !supabase) {
     writeDemoRecruitmentStore({ recruitment_scoring_config: clean });
   } else {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from('portal_settings').upsert(
-      [{ key: 'recruitment_scoring_config', value: clean, updated_at: now }],
-      { onConflict: 'key' }
-    );
+    const { error } = await savePortalSettingsBatch(supabase, {
+      key: 'recruitment_scoring_config',
+      value: clean
+    });
     if (error) throw error;
   }
   recruitScoringConfig = clean;
@@ -4382,11 +4599,10 @@ async function persistRecruitVacancies(nextList) {
   if (isDemoMode || !supabase) {
     writeDemoRecruitmentStore({ job_vacancies_config: clean });
   } else {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from('portal_settings').upsert(
-      [{ key: 'job_vacancies_config', value: clean, updated_at: now }],
-      { onConflict: 'key' }
-    );
+    const { error } = await savePortalSettingsBatch(supabase, {
+      key: 'job_vacancies_config',
+      value: clean
+    });
     if (error) throw error;
   }
   recruitVacancies = clean;
@@ -4397,11 +4613,10 @@ async function persistRecruitApplySchema(nextSchema) {
   if (isDemoMode || !supabase) {
     writeDemoRecruitmentStore({ apply_form_schema: clean });
   } else {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from('portal_settings').upsert(
-      [{ key: 'apply_form_schema', value: clean, updated_at: now }],
-      { onConflict: 'key' }
-    );
+    const { error } = await savePortalSettingsBatch(supabase, {
+      key: 'apply_form_schema',
+      value: clean
+    });
     if (error) throw error;
   }
   recruitApplySchema = clean;
@@ -4419,14 +4634,10 @@ async function persistRecruitFormSchema(nextSchema) {
       stage2_form_schema: clean
     });
   } else {
-    const now = new Date().toISOString();
-    const { error } = await supabase.from('portal_settings').upsert(
-      [
-        { key: 'application_positions', value: clean.positions, updated_at: now },
-        { key: 'stage2_form_schema', value: clean, updated_at: now }
-      ],
-      { onConflict: 'key' }
-    );
+    const { error } = await savePortalSettingsBatch(supabase, [
+      { key: 'application_positions', value: clean.positions },
+      { key: 'stage2_form_schema', value: clean }
+    ]);
     if (error) throw error;
   }
   recruitFormSchema = clean;
@@ -4868,7 +5079,7 @@ function renderRecruitApplyFieldsTab(host) {
       renderRecruitApplyFieldsTab(host);
       say('/apply field configuration saved.');
     } catch (error) {
-      say(error.message || 'Failed to save /apply field configuration.');
+      say(formatAppError(error, 'Failed to save /apply field configuration.'));
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save Changes';
@@ -4884,10 +5095,12 @@ function renderRecruitQuestionSummary(questions = []) {
     const typeLabel = RECRUIT_Q_TYPE_LABELS[q.type] || q.type;
     let scoreText = '';
     if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
-      const opts = (q.options || []).map(o => `${esc(o.label)} (${o.score})`).join(' · ');
-      scoreText = opts || 'No options configured';
+      const opts = (q.options || []).map(o => `<span class="vacancy-score-chip">${esc(o.label)} <b>+${esc(o.score)} pts</b></span>`).join('');
+      scoreText = opts ? `<div class="vacancy-score-pill-row">${opts}</div>` : 'No options configured';
     } else {
-      scoreText = q.filledScore ? `Filled score: ${q.filledScore} pts` : 'Unscored text response';
+      scoreText = q.filledScore
+        ? `<div class="vacancy-score-pill-row"><span class="vacancy-score-chip">Filled <b>+${esc(q.filledScore)} pts</b></span></div>`
+        : 'Unscored text response (0 pts)';
     }
     return `
       <li class="q-summary-item">
@@ -4930,11 +5143,18 @@ function renderRecruitVacanciesTab(host) {
               <div class="pos-name-title">${esc(v.name)}</div>
               <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts · Min ${esc(effMin)}${effMode}</div>
             </td>
-            <td class="col-loc">${renderRecruitDistrictSummary(v.primaryDistricts)}</td>
-            <td class="col-score">${esc(v.primaryLocationScore)}</td>
-            <td class="col-other">${esc(v.otherLocationLabel)}</td>
-            <td class="col-score">${esc(v.otherLocationScore)}</td>
-            <td class="col-questions">${renderRecruitQuestionSummary(v.questions)}</td>
+            <td class="col-loc-score">
+              <div class="vacancy-score-block">
+                <div class="vacancy-score-pill-row">
+                  <span class="vacancy-score-chip">Lokasi Utama <b>+${esc(v.primaryLocationScore)} pts</b></span>
+                  <span class="vacancy-score-chip">${esc(v.otherLocationLabel)} <b>+${esc(v.otherLocationScore)} pts</b></span>
+                </div>
+                ${renderRecruitDistrictSummary(v.primaryDistricts)}
+              </div>
+              <div class="vacancy-score-block">
+                ${renderRecruitQuestionSummary(v.questions)}
+              </div>
+            </td>
             <td class="col-actions">
               <div class="vacancy-row-actions">
                 <button type="button" class="icon-btn primary-action" data-vac-action="edit" data-id="${esc(v.id)}">Edit</button>
@@ -4945,7 +5165,7 @@ function renderRecruitVacanciesTab(host) {
             </td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="7" class="table-empty">No vacancies match your search.</td></tr>';
+      : '<tr><td colspan="3" class="table-empty">No vacancies match your search.</td></tr>';
   };
 
   host.innerHTML = `
@@ -4996,13 +5216,9 @@ function renderRecruitVacanciesTab(host) {
         <table class="data-table vacancy-table">
           <thead>
             <tr>
-              <th>POSITION</th>
-              <th>PRIMARY DISTRICTS</th>
-              <th>SCORE</th>
-              <th>OTHER LOCATION</th>
-              <th>SCORE</th>
-              <th>QUESTIONS &amp; WEIGHTS</th>
-              <th>ACTIONS</th>
+              <th class="col-pos">POSITION</th>
+              <th class="col-loc-score">LOCATION &amp; QUESTION - SCORE</th>
+              <th class="col-actions">ACTIONS</th>
             </tr>
           </thead>
           <tbody id="vacancy-tbody"></tbody>
@@ -5039,7 +5255,7 @@ function renderRecruitVacanciesTab(host) {
       renderRecruitVacanciesTab(host);
       say(`Threshold updated: min ${recruitScoringConfig.defaultMinScore}${recruitScoringConfig.scoringMode === 'points' ? ' pts' : '%'}.`);
     } catch (err) {
-      say(err.message || 'Failed to save scoring configuration.');
+      say(formatAppError(err, 'Failed to save scoring configuration.'));
     }
   });
 
@@ -5071,7 +5287,7 @@ async function duplicateRecruitVacancy(id, host) {
     renderRecruitVacanciesTab(host);
     say(`Vacancy "${copy.name}" created.`);
   } catch (error) {
-    say(error.message || 'Failed to duplicate vacancy.');
+    say(formatAppError(error, 'Failed to duplicate vacancy.'));
   }
 }
 
@@ -5099,7 +5315,7 @@ async function deleteRecruitVacancy(id, host) {
     renderRecruitVacanciesTab(host);
     say(`Vacancy "${target.name}" deleted.`);
   } catch (error) {
-    say(error.message || 'Failed to delete vacancy.');
+    say(formatAppError(error, 'Failed to delete vacancy.'));
   }
 }
 
@@ -5553,7 +5769,7 @@ function openRecruitVacancyModal(id, host) {
       renderRecruitVacanciesTab(host);
       say(`Vacancy "${normalized.name}" saved.`);
     } catch (error) {
-      errorBox.textContent = error.message || 'Failed to save vacancy.';
+      errorBox.textContent = formatAppError(error, 'Failed to save vacancy.');
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save Vacancy';
@@ -6207,7 +6423,7 @@ function renderRecruitFormFieldsTab(host) {
       renderRecruitFormFieldsTab(host);
       say('/form schema configuration saved.');
     } catch (error) {
-      say(error.message || 'Failed to save /form schema configuration.');
+      say(formatAppError(error, 'Failed to save /form schema configuration.'));
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save Changes';
@@ -6353,7 +6569,7 @@ async function renderUserManagement() {
         say('User removed.');
         await loadView('userManagement');
       } catch (err) {
-        say(err.message || 'Failed to remove user.');
+        say(formatAppError(err, 'Failed to remove user.'));
       }
     }));
   };
@@ -6534,7 +6750,7 @@ function printBrandModal() {
       if (sourceBtn) { sourceBtn.disabled = true; sourceBtn.textContent = 'Preparing…'; }
       loadPrintModule()
         .then(({ printApplication }) => printApplication(record, { brand }))
-        .catch(error => say(error.message || 'Unable to prepare document.'))
+        .catch(error => say(formatAppError(error, 'Unable to prepare document.')))
         .finally(() => { if (sourceBtn) { sourceBtn.disabled = false; sourceBtn.textContent = originalText; } });
     });
   });
@@ -6599,11 +6815,10 @@ function versionedTemplateUrl() {
 async function markDefaultMasterSynced() {
   if (!supabase || !currentUserId) return;
   try {
-    await supabase.from('portal_settings').upsert({
+    await savePortalSettingsBatch(supabase, {
       key: 'default_master_revision',
-      value: DEFAULT_MASTER_REVISION,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'key' });
+      value: DEFAULT_MASTER_REVISION
+    });
   } catch {}
 }
 
@@ -6654,7 +6869,7 @@ function bindTemplateManager(migrationMissing) {
       await invalidateMasterHtmlCache();
       say('New Master HTML activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Failed to save Master HTML.'); }
+    } catch (error) { say(formatAppError(error, 'Failed to save Master HTML.')); }
     finally { button.disabled = false; button.textContent = 'Save & Activate'; }
   });
   $('#restore-template')?.addEventListener('click', async () => {
@@ -6670,7 +6885,7 @@ function bindTemplateManager(migrationMissing) {
       await invalidateMasterHtmlCache();
       say('Default master restored and activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Failed to restore default master.'); }
+    } catch (error) { say(formatAppError(error, 'Failed to restore default master.')); }
     finally { button.disabled = false; button.textContent = 'Restore Default Master'; }
   });
   $$('[data-template-activate]').forEach(button => button.addEventListener('click', async () => {
@@ -6683,7 +6898,7 @@ function bindTemplateManager(migrationMissing) {
       await invalidateMasterHtmlCache();
       say('Selected master version activated.');
       await loadView('settings');
-    } catch (error) { say(error.message || 'Failed to activate template version.'); button.disabled = false; }
+    } catch (error) { say(formatAppError(error, 'Failed to activate template version.')); button.disabled = false; }
   }));
 }
 
@@ -6805,7 +7020,7 @@ async function loadView(view, forceRefresh = false) {
     else if (TITLES[view]) renderPlaceholder(TITLES[view]);
     else renderPlaceholder('Page not found');
   } catch (error) {
-    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h2>Unable to load data</h2><p>${esc(error.message || 'Check your Supabase connection.')}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Retry</button></div></section>`;
+    content.innerHTML = `<section class="panel placeholder-panel"><div><div class="placeholder-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h2>Unable to load data</h2><p>${esc(formatAppError(error, 'Check your Supabase connection.'))}</p><button id="retry-load" class="btn btn-secondary" style="margin-top:18px">Retry</button></div></section>`;
     $('#retry-load')?.addEventListener('click', () => loadView(view, true));
   }
 }
@@ -6995,7 +7210,7 @@ $('#login-form').addEventListener('submit', async event => {
     $('#login-pin').value = '';
   } catch (error) {
     console.error('NIK/PIN login failed:', error);
-    errorBox.textContent = error.message || 'Sign in failed. Please check your Employee NIK and PIN.';
+    errorBox.textContent = formatAppError(error, 'Sign in failed. Please check your Employee NIK and PIN.');
   } finally {
     button.disabled = false;
     button.textContent = 'Sign In ↗';
@@ -7069,7 +7284,7 @@ async function init() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
     try { await openAdmin(session, { fromSessionRestore: true }); }
-    catch (error) { $('#login-error').textContent = error.message; }
+    catch (error) { $('#login-error').textContent = formatAppError(error, 'Sign in session failed.'); }
   }
 }
 

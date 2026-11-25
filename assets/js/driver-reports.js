@@ -1,6 +1,10 @@
 // Driver Payroll Reports (Summary, Support, Indoor, Outdoor, Radin), Manual Kurang Gaji Input,
 // Time Check Sheet, Audit, and Cetak-Lamaran-style Standalone Print Window
 import {
+  formatAppError,
+  savePortalSettingsBatch
+} from './common.js?v=20261124-hrga-workspace-22';
+import {
   CHECKSHEET_TIME_SLOTS,
   getEligibleDrivers,
   calculateDriverPayrollPeriod
@@ -171,10 +175,10 @@ const STANDALONE_PRINT_CSS = `
     text-align: center;
   }
   .drv-pdf-loc { margin-bottom: 2px; }
-  .drv-pdf-sig-role { font-weight: 400; }
-  .drv-pdf-sig-space { height: 50px; }
-  .drv-pdf-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
-  .drv-pdf-sig-title { font-weight: 400; margin-top: 1px; }
+  .drv-pdf-sig-role { font-weight: 400; color: #000000; }
+  .drv-pdf-sig-space { height: 90px; }
+  .drv-pdf-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; color: #000000; }
+  .drv-pdf-sig-title { font-weight: 400; margin-top: 1px; color: #000000; }
 
   .cs-landscape-page {
     width: 297mm;
@@ -189,7 +193,7 @@ const STANDALONE_PRINT_CSS = `
     align-items: start;
   }
   .cs-sheet-box {
-    border: 1px solid #333333;
+    border: 1px solid #000000;
     padding: 4mm 4mm 5mm;
     background: #ffffff;
     color: #000000;
@@ -291,9 +295,9 @@ const STANDALONE_PRINT_CSS = `
   }
   .cs-sig-block { min-width: 120px; }
   .cs-sig-right { text-align: center; }
-  .cs-sig-gap { height: 34px; }
-  .cs-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
-  .cs-sig-title { font-weight: 700; margin-top: 1px; }
+  .cs-sig-gap { height: 68px; }
+  .cs-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; color: #000000; }
+  .cs-sig-title { font-weight: 700; margin-top: 1px; color: #000000; }
 
   .stf-pdf-sheet {
     width: 297mm;
@@ -324,14 +328,14 @@ const STANDALONE_PRINT_CSS = `
   }
   .stf-print-table th.l, .stf-print-table td.l { text-align: left; white-space: nowrap; padding: 3px 5px; }
   .stf-print-table th.num, .stf-print-table td.num { text-align: right; white-space: nowrap; padding: 3px 5px; }
-  .stf-print-table thead th { font-weight: 700; background: #f8fafc; }
-  .stf-print-table tfoot th { font-weight: 700; background: #f8fafc; }
+  .stf-print-table thead th { font-weight: 700; background: #ffffff; color: #000000; }
+  .stf-print-table tfoot th { font-weight: 700; background: #ffffff; color: #000000; }
   .stf-print-sun { background: #fef9c3 !important; }
   .stf-print-hol { background: #fee2e2 !important; }
   .stf-print-legend {
     margin-top: 8px;
     font-size: 8px;
-    color: #111827;
+    color: #000000;
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
@@ -555,6 +559,7 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
       <td class="c">${fmtFixed1(r.overtimeHours)}</td>
       <td class="num">${fmtRpCell(r.normalPay)}</td>
       <td class="num">${fmtRpCell(r.overtimePay)}</td>
+      <td class="num">${fmtRpCell(r.ekstraMealPay)}</td>
       <td class="num">${fmtRpCell(r.priorShortfall)}</td>
       <td class="num">${fmtRpCell(r.grossPay)}</td>
       <td class="num">${fmtRpCell(r.bpjsDeduction)}</td>
@@ -562,7 +567,7 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
     </tr>
   `).join('') + Array.from({ length: fillerCount }, () => `
     <tr class="drv-empty-row">
-      <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
     </tr>
   `).join('');
 
@@ -570,25 +575,26 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
     <table class="drv-pdf-table drv-pdf-table-summary">
       <thead>
         <tr>
-          <th rowspan="3" style="width:26px">NO</th>
+          <th rowspan="3" style="width:24px">NO</th>
           <th rowspan="3">NAMA</th>
-          <th rowspan="3" style="width:72px">NIK</th>
-          <th rowspan="3" style="width:78px">UPAH PER<br>BULAN</th>
-          <th colspan="4">${esc(win.headerLabel)}</th>
-          <th rowspan="3" style="width:94px">KEKURANGAN<br>GAJI PERIODE LALU</th>
-          <th rowspan="3" style="width:78px">UPAH BRUTO</th>
-          <th rowspan="3" style="width:76px">JUMLAH<br>POT. BPJS</th>
-          <th rowspan="3" style="width:78px">UPAH NETTO</th>
+          <th rowspan="3" style="width:68px">NIK</th>
+          <th rowspan="3" style="width:74px">UPAH PER<br>BULAN</th>
+          <th colspan="5">${esc(win.headerLabel)}</th>
+          <th rowspan="3" style="width:88px">KEKURANGAN<br>GAJI PERIODE LALU</th>
+          <th rowspan="3" style="width:74px">UPAH BRUTO</th>
+          <th rowspan="3" style="width:72px">JUMLAH<br>POT. BPJS</th>
+          <th rowspan="3" style="width:74px">UPAH NETTO</th>
         </tr>
         <tr>
           <th colspan="2">TOTAL</th>
-          <th colspan="2">TOTAL UPAH</th>
+          <th colspan="3">TOTAL UPAH</th>
         </tr>
         <tr>
-          <th style="width:44px">HADIR</th>
-          <th style="width:50px">LEMBUR</th>
-          <th style="width:74px">HADIR (RP)</th>
-          <th style="width:74px">LEMBUR</th>
+          <th style="width:40px">HADIR</th>
+          <th style="width:46px">LEMBUR</th>
+          <th style="width:68px">HADIR (RP)</th>
+          <th style="width:68px">LEMBUR</th>
+          <th style="width:66px">EKSTRA<br>MEAL</th>
         </tr>
       </thead>
       <tbody>${bodyRows}</tbody>
@@ -599,6 +605,7 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
           <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
           <th class="num">${fmtRpCell(tot.normalPay, true)}</th>
           <th class="num">${fmtRpCell(tot.overtimePay, true)}</th>
+          <th class="num">${fmtRpCell(tot.ekstraMealPay, true)}</th>
           <th class="num">${fmtRpCell(tot.priorShortfall, true)}</th>
           <th class="num">${fmtRpCell(tot.grossPay, true)}</th>
           <th class="num">${fmtRpCell(tot.bpjsDeduction, true)}</th>
@@ -629,7 +636,7 @@ function buildSummaryPdfSheetHtml(payroll, settings) {
 function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } = {}) {
   const win = payroll.window;
   const rows = payroll.deptTables[sectionName] || [];
-  const tot = payroll.deptTotals[sectionName] || { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, priorShortfall: 0, grossPay: 0 };
+  const tot = payroll.deptTotals[sectionName] || { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, ekstraMealPay: 0, priorShortfall: 0, grossPay: 0 };
   const minRows = includeFillerRows ? Math.max(rows.length, 6) : Math.max(rows.length, 1);
   const fillerCount = Math.max(0, minRows - rows.length);
 
@@ -642,12 +649,13 @@ function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } =
       <td class="c">${fmtFixed1(r.overtimeHours)}</td>
       <td class="num">${fmtRpCell(r.normalPay)}</td>
       <td class="num">${fmtRpCell(r.overtimePay)}</td>
+      <td class="num">${fmtRpCell(r.ekstraMealPay)}</td>
       <td class="num">${fmtRpCell(r.priorShortfall)}</td>
       <td class="num">${fmtRpCell(r.grossPay)}</td>
     </tr>
   `).join('') + Array.from({ length: fillerCount }, () => `
     <tr class="drv-empty-row">
-      <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
     </tr>
   `).join('');
 
@@ -655,22 +663,23 @@ function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } =
     <table class="drv-pdf-table drv-pdf-table-dept">
       <thead>
         <tr>
-          <th rowspan="3" style="width:28px">NO</th>
+          <th rowspan="3" style="width:26px">NO</th>
           <th rowspan="3">NAMA</th>
-          <th rowspan="3" style="width:80px">NIK</th>
-          <th colspan="4">${esc(win.headerLabel)}</th>
-          <th rowspan="3" style="width:104px">KEKURANGAN<br>GAJI PERIODE LALU</th>
-          <th rowspan="3" style="width:92px">UPAH BRUTO</th>
+          <th rowspan="3" style="width:76px">NIK</th>
+          <th colspan="5">${esc(win.headerLabel)}</th>
+          <th rowspan="3" style="width:96px">KEKURANGAN<br>GAJI PERIODE LALU</th>
+          <th rowspan="3" style="width:84px">UPAH BRUTO</th>
         </tr>
         <tr>
           <th colspan="2">TOTAL</th>
-          <th colspan="2">TOTAL UPAH</th>
+          <th colspan="3">TOTAL UPAH</th>
         </tr>
         <tr>
-          <th style="width:54px">HADIR</th>
-          <th style="width:60px">LEMBUR</th>
-          <th style="width:88px">HADIR (RP)</th>
-          <th style="width:88px">LEMBUR (RP)</th>
+          <th style="width:48px">HADIR</th>
+          <th style="width:54px">LEMBUR</th>
+          <th style="width:78px">HADIR (RP)</th>
+          <th style="width:78px">LEMBUR (RP)</th>
+          <th style="width:74px">EKSTRA<br>MEAL</th>
         </tr>
       </thead>
       <tbody>${bodyRows}</tbody>
@@ -681,6 +690,7 @@ function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } =
           <th class="c">${fmtFixed1(tot.overtimeHours)}</th>
           <th class="num">${fmtRpCell(tot.normalPay, true)}</th>
           <th class="num">${fmtRpCell(tot.overtimePay, true)}</th>
+          <th class="num">${fmtRpCell(tot.ekstraMealPay, true)}</th>
           <th class="num">${fmtRpCell(tot.priorShortfall, true)}</th>
           <th class="num">${fmtRpCell(tot.grossPay, true)}</th>
         </tr>
@@ -862,7 +872,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
       return `<div class="table-wrap">${buildDeptTableHtml(activeUpahTab, payroll, { includeFillerRows: false })}</div>`;
     }
     if (activeUpahTab === 'kurang_gaji') {
-      const isP2 = win.halfPeriod === 'P2';
+      const isP2 = win.halfPeriod === 'P2' || win.halfPeriod === 'FULL';
       return `
         <div class="table-wrap">
           <table>
@@ -919,6 +929,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
               <th>Jam Kerja</th>
               <th class="num">Hadir</th>
               <th class="num">Lembur</th>
+              <th class="num">Ekstra Meal</th>
               <th class="num">Upah</th>
               <th>Departemen</th>
             </tr>
@@ -929,18 +940,20 @@ export async function renderDriverReportsView(host, ctx, helpers) {
                 .filter(s => s.presentDays > 0 || s.overtimeHours > 0)
                 .map(s => `${s.code}: ${s.presentDays.toFixed(1)}h / OT ${s.overtimeHours}j`)
                 .join(' · ');
+              const dayPayTotal = r.metrics.normalPay + r.metrics.overtimePay + (r.metrics.ekstraMealPay || 0);
               return `
                 <tr>
-                  <td class="nowrap"><b>${esc(r.work_date)}</b>${r.isOvernight ? ' <span class="pill gold">Lewat Hari</span>' : ''}</td>
+                  <td class="nowrap" data-sort-value="${esc(r.work_date)}"><b>${esc(r.work_date)}</b>${r.isOvernight ? ' <span class="pill gold">Lewat Hari</span>' : ''}</td>
                   <td class="nowrap"><b>${esc(r.driver_name)}</b></td>
                   <td class="nowrap">${esc(r.effectiveIn || '-')} – ${esc(r.effectiveOut || '-')}</td>
                   <td class="num">${fmtFixed1(r.metrics.presentDays)}</td>
                   <td class="num">${fmtFixed1(r.metrics.overtimeHours)}</td>
-                  <td class="num nowrap"><b>Rp ${(r.metrics.normalPay + r.metrics.overtimePay).toLocaleString('id-ID')}</b></td>
+                  <td class="num nowrap">Rp ${(r.metrics.ekstraMealPay || 0).toLocaleString('id-ID')}</td>
+                  <td class="num nowrap"><b>Rp ${dayPayTotal.toLocaleString('id-ID')}</b></td>
                   <td>${esc(splitText || '-')}</td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="7" class="empty">Belum ada aktivitas driver pada periode ini.</td></tr>'}
+            }).join('') : '<tr><td colspan="8" class="empty">Belum ada aktivitas driver pada periode ini.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -963,6 +976,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
             <select id="drv-rep-half" class="input" aria-label="Pilih periode payroll driver">
               <option value="P1" ${halfPeriod === 'P1' ? 'selected' : ''}>1 – 15 (Non BPJS)</option>
               <option value="P2" ${halfPeriod === 'P2' ? 'selected' : ''}>16 – Akhir Bulan (Pot. BPJS)</option>
+              <option value="FULL" ${halfPeriod === 'FULL' ? 'selected' : ''}>1 – Akhir Bulan (Pot. BPJS)</option>
             </select>
             <button type="button" class="btn btn-secondary" id="drv-rep-xlsx">Download Excel</button>
             <button type="button" class="btn btn-primary" id="drv-rep-print-all">Print Semua</button>
@@ -1089,10 +1103,10 @@ export async function renderDriverReportsView(host, ctx, helpers) {
 
   host.querySelector('#drv-rep-xlsx')?.addEventListener('click', async () => {
     const aoa = [
-      ['NO', 'NAMA', 'NIK', 'UPAH PER BULAN', 'HADIR', 'LEMBUR', 'HADIR (RP)', 'LEMBUR (RP)', 'KEKURANGAN GAJI PERIODE LALU', 'UPAH BRUTO', 'POT. BPJS', 'UPAH NETTO'],
+      ['NO', 'NAMA', 'NIK', 'UPAH PER BULAN', 'HADIR', 'LEMBUR', 'HADIR (RP)', 'LEMBUR (RP)', 'EKSTRA MEAL (RP)', 'KEKURANGAN GAJI PERIODE LALU', 'UPAH BRUTO', 'POT. BPJS', 'UPAH NETTO'],
       ...payroll.summaryRows.map((r, i) => [
         i + 1, r.driver_name, r.employee_no, r.monthlyWage, Number(r.presentDays.toFixed(1)), Number(r.overtimeHours.toFixed(1)),
-        r.normalPay, r.overtimePay, r.priorShortfall, r.grossPay, r.bpjsDeduction, r.netPay
+        r.normalPay, r.overtimePay, r.ekstraMealPay || 0, r.priorShortfall, r.grossPay, r.bpjsDeduction, r.netPay
       ])
     ];
     await exportSheetXlsx(`Laporan_Upah_Driver_${win.periodKey}.xlsx`, 'Summary Upah', aoa);
@@ -1100,7 +1114,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
 
   host.querySelector('#drv-adj-save-all')?.addEventListener('click', async () => {
     const nextPeriodMap = { ...(state.driverAdjustments?.[win.periodKey] || {}) };
-    const isP2 = win.halfPeriod === 'P2';
+    const isP2 = win.halfPeriod === 'P2' || win.halfPeriod === 'FULL';
     const defaultBpjs = isP2 ? state.settings.driver.bpjsDefaultAmount : 0;
 
     host.querySelectorAll('tr[data-adj-nik]').forEach(tr => {
@@ -1129,9 +1143,9 @@ export async function renderDriverReportsView(host, ctx, helpers) {
     if (ctx.isDemoMode) {
       saveDemoOpsState(state);
     } else {
-      const { error } = await ctx.supabase.from('portal_settings').upsert({ key: DRIVER_ADJUSTMENTS_KEY, value: nextAllAdj });
+      const { error } = await savePortalSettingsBatch(ctx.supabase, [{ key: DRIVER_ADJUSTMENTS_KEY, value: nextAllAdj }]);
       if (error) {
-        showInlineBanner(host, `Gagal menyimpan penyesuaian kurang gaji: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal menyimpan penyesuaian kurang gaji: ${formatAppError(error, 'Periksa izin akses Supabase')}`, 'error');
         return;
       }
       invalidateOpsStateCache();

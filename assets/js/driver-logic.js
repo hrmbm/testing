@@ -1,5 +1,5 @@
 // Pure Driver Eligibility, Period Window, Schedule & Reconciliation, Checksheet Grid, Tariff Lookup, Payroll & Audit Engine
-import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings } from './ops-settings-logic.js';
+import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings, calculateEkstraMeal } from './ops-settings-logic.js';
 import { compactNik, normKey, pad2 } from './attendance-logic.js';
 
 export const DRIVER_SECTION_CODES = {
@@ -80,9 +80,10 @@ export function getDriverPeriodWindow(monthKey = '2026-11', halfPeriod = 'P1') {
   const m = String(monthKey || '2026-11').match(/^(\d{4})-(\d{2})/);
   const year = m ? Number(m[1]) : 2026;
   const month = m ? Number(m[2]) : 11;
-  const half = String(halfPeriod || 'P1').toUpperCase() === 'P2' ? 'P2' : 'P1';
+  const rawHalf = String(halfPeriod || 'P1').trim().toUpperCase();
+  const half = rawHalf === 'P2' ? 'P2' : (rawHalf === 'FULL' ? 'FULL' : 'P1');
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const startDay = half === 'P1' ? 1 : 16;
+  const startDay = half === 'P2' ? 16 : 1;
   const endDay = half === 'P1' ? 15 : daysInMonth;
 
   const dates = [];
@@ -232,6 +233,7 @@ export function computeDriverDayMetrics({
       overtimeHours: 0,
       normalPay: 0,
       overtimePay: 0,
+      ekstraMealPay: 0,
       auditSteps: ['Durasi kerja 0 menit (tidak ada jam masuk/pulang lengkap).']
     };
   }
@@ -274,8 +276,12 @@ export function computeDriverDayMetrics({
 
   const normalPay = Math.round(presentDays * cfg.defaultDailyWage);
   const overtimePay = lookupOvertimeTariff(overtimeHours, dayRule.isHolidayTariff, settings);
+  const ekstraMealPay = calculateEkstraMeal(overtimeHours, settings);
   if (overtimeHours > 0) {
     auditSteps.push(`Tarif ${dayRule.isHolidayTariff ? 'Lembur Hari Minggu/Besar' : 'Lembur Hari Biasa'} (${overtimeHours}j) = Rp ${overtimePay.toLocaleString('id-ID')}.`);
+  }
+  if (ekstraMealPay > 0) {
+    auditSteps.push(`Ekstra Meal lembur (${overtimeHours}j) = Rp ${ekstraMealPay.toLocaleString('id-ID')}.`);
   }
 
   return {
@@ -289,6 +295,7 @@ export function computeDriverDayMetrics({
     overtimeHours,
     normalPay,
     overtimePay,
+    ekstraMealPay,
     auditSteps
   };
 }
@@ -466,7 +473,8 @@ function allocateDayAcrossDepartments({
       normalHours: 0,
       overtimeHours: 0,
       normalPay: 0,
-      overtimePay: 0
+      overtimePay: 0,
+      ekstraMealPay: 0
     };
   });
 
@@ -516,22 +524,30 @@ function allocateDayAcrossDepartments({
   });
 
   const activeOtSecs = Object.values(bySection).filter(s => s.overtimeMinutes > 0).sort((a, b) => b.overtimeMinutes - a.overtimeMinutes);
+  let remEkstraMealPay = Math.round(metrics.ekstraMealPay || 0);
   if (activeOtSecs.length === 1) {
     activeOtSecs[0].overtimeHours = metrics.overtimeHours;
     activeOtSecs[0].overtimePay = metrics.overtimePay;
+    activeOtSecs[0].ekstraMealPay = remEkstraMealPay;
   } else if (activeOtSecs.length > 1) {
     activeOtSecs.forEach((secObj, idx) => {
       if (idx === activeOtSecs.length - 1) {
         secObj.overtimeHours = Math.round(remOtHours * 100) / 100;
         secObj.overtimePay = Math.round(remOtPay);
+        secObj.ekstraMealPay = Math.round(remEkstraMealPay);
       } else {
         const ratio = totalOtMin > 0 ? secObj.overtimeMinutes / totalOtMin : 0;
         secObj.overtimeHours = Math.round(metrics.overtimeHours * ratio * 2) / 2;
         secObj.overtimePay = Math.round(metrics.overtimePay * ratio);
+        secObj.ekstraMealPay = Math.round((metrics.ekstraMealPay || 0) * ratio);
         remOtHours -= secObj.overtimeHours;
         remOtPay -= secObj.overtimePay;
+        remEkstraMealPay -= secObj.ekstraMealPay;
       }
     });
+  } else if (remEkstraMealPay > 0) {
+    const targetSec = Object.values(bySection).sort((a, b) => (b.normalMinutes + b.overtimeMinutes) - (a.normalMinutes + a.overtimeMinutes))[0] || bySection[fallbackSection] || bySection.Support;
+    if (targetSec) targetSec.ekstraMealPay = remEkstraMealPay;
   }
 
   return bySection;
@@ -779,7 +795,7 @@ export function calculateDriverPayrollPeriod({
 
   const win = reconciliation.window;
   const periodAdj = adjustmentsByPeriod?.[win.periodKey] || adjustmentsByPeriod || {};
-  const isPeriod2 = win.halfPeriod === 'P2';
+  const isPeriod2 = win.halfPeriod === 'P2' || win.halfPeriod === 'FULL';
   const defaultBpjs = cfg.bpjsPeriodRule === 'always' || (cfg.bpjsPeriodRule === 'period2_only' && isPeriod2)
     ? cfg.bpjsDefaultAmount
     : 0;
@@ -807,10 +823,11 @@ export function calculateDriverPayrollPeriod({
     let totalOvertimeHours = 0;
     let totalNormalPay = 0;
     let totalOvertimePay = 0;
+    let totalEkstraMealPay = 0;
 
     const deptAgg = {};
     cfg.sections.forEach(sec => {
-      deptAgg[sec] = { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0 };
+      deptAgg[sec] = { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, ekstraMealPay: 0 };
     });
 
     for (const day of drvDays) {
@@ -819,6 +836,7 @@ export function calculateDriverPayrollPeriod({
       totalOvertimeHours += day.metrics.overtimeHours;
       totalNormalPay += day.metrics.normalPay;
       totalOvertimePay += day.metrics.overtimePay;
+      totalEkstraMealPay += day.metrics.ekstraMealPay || 0;
 
       for (const sec of cfg.sections) {
         const s = day.bySection[sec];
@@ -828,6 +846,7 @@ export function calculateDriverPayrollPeriod({
         deptAgg[sec].overtimeHours += s.overtimeHours;
         deptAgg[sec].normalPay += s.normalPay;
         deptAgg[sec].overtimePay += s.overtimePay;
+        deptAgg[sec].ekstraMealPay += s.ekstraMealPay || 0;
       }
     }
 
@@ -858,7 +877,8 @@ export function calculateDriverPayrollPeriod({
     const roundedOtHours = Math.round(totalOvertimeHours * 100) / 100;
     const roundedNormalPay = Math.round(totalNormalPay);
     const roundedOtPay = Math.round(totalOvertimePay);
-    const grossPay = roundedNormalPay + roundedOtPay + totalShortfall;
+    const roundedEkstraMealPay = Math.round(totalEkstraMealPay);
+    const grossPay = roundedNormalPay + roundedOtPay + roundedEkstraMealPay + totalShortfall;
     const netPay = grossPay - bpjsAmount;
 
     summaryRows.push({
@@ -870,6 +890,7 @@ export function calculateDriverPayrollPeriod({
       overtimeHours: roundedOtHours,
       normalPay: roundedNormalPay,
       overtimePay: roundedOtPay,
+      ekstraMealPay: roundedEkstraMealPay,
       priorShortfall: totalShortfall,
       grossPay,
       bpjsDeduction: bpjsAmount,
@@ -885,7 +906,8 @@ export function calculateDriverPayrollPeriod({
       const dOtH = Math.round(da.overtimeHours * 100) / 100;
       const dNormP = Math.round(da.normalPay);
       const dOtP = Math.round(da.overtimePay);
-      const dGross = dNormP + dOtP + sf;
+      const dEkstraMealP = Math.round(da.ekstraMealPay || 0);
+      const dGross = dNormP + dOtP + dEkstraMealP + sf;
       if (dDays > 0 || dOtH > 0 || sf > 0 || dGross > 0) {
         deptTables[sec].push({
           employee_no: drv.employee_no,
@@ -896,6 +918,7 @@ export function calculateDriverPayrollPeriod({
           overtimeHours: dOtH,
           normalPay: dNormP,
           overtimePay: dOtP,
+          ekstraMealPay: dEkstraMealP,
           priorShortfall: sf,
           grossPay: dGross
         });
@@ -917,12 +940,13 @@ export function calculateDriverPayrollPeriod({
     acc.overtimeHours = Math.round((acc.overtimeHours + r.overtimeHours) * 100) / 100;
     acc.normalPay += r.normalPay;
     acc.overtimePay += r.overtimePay;
+    acc.ekstraMealPay += r.ekstraMealPay || 0;
     acc.priorShortfall += r.priorShortfall;
     acc.grossPay += r.grossPay;
     acc.bpjsDeduction += r.bpjsDeduction || 0;
     acc.netPay += r.netPay ?? r.grossPay;
     return acc;
-  }, { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, priorShortfall: 0, grossPay: 0, bpjsDeduction: 0, netPay: 0 });
+  }, { presentDays: 0, normalHours: 0, overtimeHours: 0, normalPay: 0, overtimePay: 0, ekstraMealPay: 0, priorShortfall: 0, grossPay: 0, bpjsDeduction: 0, netPay: 0 });
 
   const summaryTotals = sumSummary(summaryRows);
   const deptTotals = {};

@@ -2051,6 +2051,26 @@ export function preserveCaretCurrencyValue(rawValue = '', selectionStart = null)
   return { formatted, digits, caretPos };
 }
 
+export function normalizeEmployeeRecordUppercase(emp = {}) {
+  const up = v => (v === null || v === undefined ? v : String(v).trim().replace(/\s+/g, ' ').toUpperCase());
+  const upOpt = v => (v === null || v === undefined || String(v).trim() === '' ? v : up(v));
+  const out = { ...emp };
+  if ('employee_no' in out) out.employee_no = up(out.employee_no || '');
+  if ('full_name' in out) out.full_name = up(out.full_name || '');
+  if ('department' in out) out.department = up(out.department || '');
+  if ('position' in out) out.position = up(out.position || '');
+  if ('address' in out) out.address = up(out.address || '');
+  if ('birth_place' in out) out.birth_place = upOpt(out.birth_place);
+  if ('education' in out) out.education = upOpt(out.education);
+  if ('gender' in out) out.gender = upOpt(out.gender);
+  if ('religion' in out) out.religion = upOpt(out.religion);
+  if ('notes' in out) out.notes = upOpt(out.notes);
+  if ('employment_status' in out) out.employment_status = up(out.employment_status || 'KONTRAK');
+  if ('home_base' in out) out.home_base = normalizeHomeBase(out.home_base || 'PASURUAN');
+  if ('company_entity' in out) out.company_entity = normalizeCompanyEntity(out.company_entity || 'MITRA');
+  return out;
+}
+
 
 
 

@@ -3,7 +3,8 @@ import {
   DEFAULT_OPS_SETTINGS,
   STAFF_ATTENDANCE_CODE_ORDER,
   DEFAULT_STAFF_CODEBOOK,
-  normalizeOpsSettings
+  normalizeOpsSettings,
+  calculateEkstraMeal
 } from './ops-settings-logic.js';
 import {
   normalizeCompanyEntity,
@@ -607,6 +608,7 @@ export function processStaffAttendancePeriod({
       const review = reviewMap.get(`${nikKey}|${dateStr}`);
       const mealOverride = mealOvMap.get(`${nikKey}|${dateStr}`) || null;
 
+      const dow = meta.dow;
       const checkIn = ev?.check_in || '';
       const checkOut = ev?.check_out || '';
       const arrivalEval = checkIn
@@ -621,6 +623,7 @@ export function processStaffAttendancePeriod({
         ? evaluateStaffDepartureStatus({
             checkOutTime: checkOut,
             scheduleEnd: schedule.endTime,
+            workDate: dateStr,
             settings: cfg
           })
         : null;
@@ -680,6 +683,28 @@ export function processStaffAttendancePeriod({
         counts[finalCode]++;
       }
 
+      const mealResolution = resolveStaffDayMealEligibility({
+        workDate: dateStr,
+        dow: meta.dow,
+        isOffDay,
+        attCode: finalCode,
+        checkIn,
+        checkOut,
+        arrivalEval,
+        departureEval,
+        mealOverride,
+        settings: cfg
+      });
+      const staffOtHours = computeStaffDayOvertimeHours({
+        isOffDay,
+        checkIn,
+        checkOut,
+        scheduleEnd: schedule.endTime
+      });
+      const ekstraMealAmount = ['H', 'T', 'PA'].includes(finalCode) || (isOffDay && checkIn && checkOut)
+        ? calculateEkstraMeal(staffOtHours, cfg)
+        : 0;
+
       const rec = {
         employee_no: emp.employee_no,
         work_date: dateStr,
@@ -693,10 +718,12 @@ export function processStaffAttendancePeriod({
         scheduleStart: schedule.startTime,
         scheduleEnd: schedule.endTime,
         ruleFlags,
-        getsMealAllowance: mealOverride
-          ? Boolean(mealOverride.eligible)
-          : (['H', 'T', 'PA'].includes(finalCode) && Boolean(arrivalEval?.getsMealAllowance)),
-        mealOverridden: Boolean(mealOverride),
+        getsMealAllowance: mealResolution.eligible,
+        mealAmount: mealResolution.amount,
+        mealReason: mealResolution.reason,
+        mealOverridden: mealResolution.overridden,
+        overtimeHours: staffOtHours,
+        ekstraMealAmount,
         raw_code: ev?.raw_code || '',
         code: finalCode,
         is_confirmed: isConfirmed,
@@ -792,16 +819,26 @@ export function processStaffMealAllowanceReport({
     }
   }
 
-  const dailyTotals = win.dates.map(dateStr => ({ dateStr, eligibleCount: 0, totalAmount: 0 }));
+  const dailyTotals = win.dates.map(dateStr => ({
+    dateStr,
+    eligibleCount: 0,
+    totalAmount: 0,
+    ekstraMealCount: 0,
+    totalEkstraMealAmount: 0,
+    totalCombinedAmount: 0
+  }));
   const rows = [];
   let grandTotalEligibleDays = 0;
   let grandTotalAmount = 0;
+  let grandTotalEkstraMealAmount = 0;
+  let grandTotalCombinedAmount = 0;
 
   for (const emp of employees) {
     const nikKey = compactNik(emp.employee_no);
     const days = [];
     let empEligibleDays = 0;
     let empTotalAmount = 0;
+    let empTotalEkstraMealAmount = 0;
 
     for (let di = 0; di < win.dates.length; di++) {
       const dateStr = win.dates[di];
@@ -817,6 +854,7 @@ export function processStaffMealAllowanceReport({
       const review = reviewMap.get(`${nikKey}|${dateStr}`);
       const override = mealOvMap.get(`${nikKey}|${dateStr}`) || null;
       const checkIn = ev?.check_in || '';
+      const checkOut = ev?.check_out || '';
 
       let attCode = '';
       if (attCfg.preserveConfirmedReviews && review?.is_confirmed && review.final_code) {
@@ -824,71 +862,107 @@ export function processStaffMealAllowanceReport({
       } else if (ev) {
         const rawNorm = normalizeStaffAttendanceCode(ev.source_status || ev.raw_code);
         if (['S', 'I', 'A', 'CT', 'L', 'DS'].includes(rawNorm)) attCode = rawNorm;
-        else if (checkIn) attCode = 'H';
+        else if (checkIn || checkOut) attCode = 'H';
       } else if (review?.final_code) {
         attCode = normalizeStaffAttendanceCode(review.final_code);
       } else if (isOffDay) {
         attCode = 'L';
       }
 
+      const arrivalEval = checkIn
+        ? evaluateStaffArrivalStatus({
+            checkInTime: checkIn,
+            scheduleStart: schedule.startTime,
+            settings: cfg
+          })
+        : null;
+      const departureEval = checkOut
+        ? evaluateStaffDepartureStatus({
+            checkOutTime: checkOut,
+            scheduleEnd: schedule.endTime,
+            workDate: dateStr,
+            settings: cfg
+          })
+        : null;
+
       let eligible = false;
       let overridden = false;
       let reason = '';
+      let amount = 0;
 
       if (emp.join_date && dateStr < emp.join_date) {
         eligible = false;
         reason = 'Belum bergabung';
-      } else if (override && typeof override.eligible === 'boolean') {
-        eligible = override.eligible;
-        overridden = true;
-        reason = override.reason || (eligible ? 'Override Manual: Dapat' : 'Override Manual: Tidak Dapat');
-      } else if (['S', 'I', 'A', 'CT', 'DS'].includes(attCode)) {
-        eligible = false;
-        reason = `Status ${attCode}`;
-      } else if (attCode === 'L' && !checkIn) {
-        eligible = false;
-        reason = 'Libur';
-      } else if (checkIn) {
-        const arrival = evaluateStaffArrivalStatus({
-          checkInTime: checkIn,
-          scheduleStart: schedule.startTime,
+      } else {
+        const res = resolveStaffDayMealEligibility({
+          workDate: dateStr,
+          dow: meta.dow,
+          isOffDay,
+          attCode,
+          checkIn,
+          checkOut,
+          arrivalEval,
+          departureEval,
+          mealOverride: override,
           settings: cfg
         });
-        eligible = arrival.getsMealAllowance;
-        reason = arrival.mealReason;
-      } else if (attCode === 'H' && attCfg.mealAutoOnManualHadir) {
-        eligible = true;
-        reason = 'Hadir Manual (H)';
-      } else {
-        eligible = false;
-        reason = isOffDay ? 'Libur' : 'Tidak ada jam masuk';
+        eligible = res.eligible;
+        overridden = res.overridden;
+        reason = res.reason;
+        amount = res.amount;
       }
 
-      const amount = eligible ? dailyAmount : 0;
+      const staffOtHours = emp.join_date && dateStr < emp.join_date
+        ? 0
+        : computeStaffDayOvertimeHours({
+            isOffDay,
+            checkIn,
+            checkOut,
+            scheduleEnd: schedule.endTime
+          });
+      const canGetOtMeal = !(emp.join_date && dateStr < emp.join_date) &&
+        !['S', 'I', 'A', 'CT', 'DS'].includes(attCode);
+      const ekstraMealAmount = canGetOtMeal ? calculateEkstraMeal(staffOtHours, cfg) : 0;
+
       if (eligible) {
         empEligibleDays++;
         empTotalAmount += amount;
         dailyTotals[di].eligibleCount++;
         dailyTotals[di].totalAmount += amount;
       }
+      if (ekstraMealAmount > 0) {
+        empTotalEkstraMealAmount += ekstraMealAmount;
+        dailyTotals[di].ekstraMealCount++;
+        dailyTotals[di].totalEkstraMealAmount += ekstraMealAmount;
+      }
+      dailyTotals[di].totalCombinedAmount += amount + ekstraMealAmount;
 
       days.push({
         work_date: dateStr,
         dayShort: meta.dayShort,
         dayNum: meta.dayNum,
+        dow: meta.dow,
         isOffDay,
         check_in: checkIn,
+        check_out: checkOut,
         scheduleStart: schedule.startTime,
+        scheduleEnd: schedule.endTime,
         attCode: attCode || (isOffDay ? 'L' : ''),
         eligible,
         amount,
+        overtimeHours: staffOtHours,
+        ekstraMealAmount,
+        combinedAmount: amount + ekstraMealAmount,
         overridden,
         reason
       });
     }
 
+    const empTotalCombined = empTotalAmount + empTotalEkstraMealAmount;
     grandTotalEligibleDays += empEligibleDays;
     grandTotalAmount += empTotalAmount;
+    grandTotalEkstraMealAmount += empTotalEkstraMealAmount;
+    grandTotalCombinedAmount += empTotalCombined;
 
     rows.push({
       employee_no: emp.employee_no,
@@ -898,17 +972,22 @@ export function processStaffMealAllowanceReport({
       company_entity: normalizeCompanyEntity(emp.company_entity || 'MITRA'),
       days,
       totalEligibleDays: empEligibleDays,
-      totalAmount: empTotalAmount
+      totalAmount: empTotalAmount,
+      totalEkstraMealAmount: empTotalEkstraMealAmount,
+      totalCombinedAmount: empTotalCombined
     });
   }
 
   return {
     window: win,
     dailyAmount,
+    saturdayAmount: Math.round(Number(attCfg.saturdayMealAllowanceAmount ?? 7500)),
     rows,
     dailyTotals,
     grandTotalEligibleDays,
-    grandTotalAmount
+    grandTotalAmount,
+    grandTotalEkstraMealAmount,
+    grandTotalCombinedAmount
   };
 }
 
@@ -1194,23 +1273,140 @@ export function resolveStaffWorkSchedule(emp = {}, workDate = '2026-11-02', sett
   };
 }
 
+export function computeStaffDayOvertimeHours({
+  isOffDay = false,
+  checkIn = '',
+  checkOut = '',
+  scheduleEnd = '17:00'
+} = {}) {
+  const outSec = timeToSeconds(checkOut);
+  if (outSec === null) return 0;
+  if (isOffDay) {
+    const inSec = timeToSeconds(checkIn);
+    if (inSec === null || outSec <= inSec) return 0;
+    return Math.round(((outSec - inSec) / 3600) * 100) / 100;
+  }
+  const endSec = timeToSeconds(scheduleEnd);
+  if (endSec === null || outSec <= endSec) return 0;
+  return Math.round(((outSec - endSec) / 3600) * 100) / 100;
+}
+
+export function resolveStaffDayMealEligibility({
+  workDate = '',
+  dow = null,
+  isOffDay = false,
+  attCode = '',
+  checkIn = '',
+  checkOut = '',
+  arrivalEval = null,
+  departureEval = null,
+  mealOverride = null,
+  settings = DEFAULT_OPS_SETTINGS
+} = {}) {
+  const attCfg = normalizeOpsSettings(settings).attendance;
+  const resolvedDow = typeof dow === 'number'
+    ? dow
+    : (workDate ? new Date(`${workDate}T00:00:00Z`).getUTCDay() : 1);
+  const weekdayAmount = Math.round(Number(attCfg.mealAllowanceAmount ?? 10000));
+  const saturdayAmount = Math.round(Number(attCfg.saturdayMealAllowanceAmount ?? 7500));
+
+  if (mealOverride && typeof mealOverride.eligible === 'boolean') {
+    const eligible = Boolean(mealOverride.eligible);
+    const amount = eligible ? (resolvedDow === 6 ? saturdayAmount : weekdayAmount) : 0;
+    return {
+      eligible,
+      overridden: true,
+      amount,
+      reason: mealOverride.reason || (eligible ? 'Override Manual: Dapat' : 'Override Manual: Tidak Dapat')
+    };
+  }
+
+  if (['S', 'I', 'A', 'CT', 'DS'].includes(attCode)) {
+    return { eligible: false, overridden: false, amount: 0, reason: `Status ${attCode}` };
+  }
+  if ((attCode === 'L' && !checkIn && !checkOut) || isOffDay) {
+    return { eligible: false, overridden: false, amount: 0, reason: 'Libur' };
+  }
+
+  // Hari Sabtu: tidak dapat uang makan kecuali pulang >= jam 15:00 -> Rp 7.500
+  if (resolvedDow === 6) {
+    const satCutoff = normalizeTimeString(`${attCfg.saturdayMealCutoffTime || '15:00'}:00`);
+    const satCutoffSec = timeToSeconds(satCutoff);
+    const outSec = timeToSeconds(checkOut);
+    if (outSec !== null && satCutoffSec !== null && outSec >= satCutoffSec) {
+      return {
+        eligible: true,
+        overridden: false,
+        amount: saturdayAmount,
+        reason: `Sabtu pulang >= ${String(attCfg.saturdayMealCutoffTime || '15:00')} (Rp ${saturdayAmount.toLocaleString('id-ID')})`
+      };
+    }
+    return {
+      eligible: false,
+      overridden: false,
+      amount: 0,
+      reason: checkOut
+        ? `Sabtu pulang < ${String(attCfg.saturdayMealCutoffTime || '15:00')} (Tidak dapat uang makan)`
+        : 'Hari Sabtu (Tidak dapat uang makan)'
+    };
+  }
+
+  // Senin - Jumat: pulang < 15:00 uang makan hangus
+  const earlyCutoff = normalizeTimeString(`${attCfg.earlyLeaveMealCutoffTime || '15:00'}:00`);
+  const earlyCutoffSec = timeToSeconds(earlyCutoff);
+  const outSec = timeToSeconds(checkOut);
+  if (outSec !== null && earlyCutoffSec !== null && outSec < earlyCutoffSec) {
+    return {
+      eligible: false,
+      overridden: false,
+      amount: 0,
+      reason: `Pulang < ${String(attCfg.earlyLeaveMealCutoffTime || '15:00')} (Uang Makan Hangus)`
+    };
+  }
+
+  if (checkIn) {
+    const evalArrival = arrivalEval || evaluateStaffArrivalStatus({ checkInTime: checkIn, settings: attCfg });
+    const eligible = Boolean(evalArrival?.getsMealAllowance);
+    return {
+      eligible,
+      overridden: false,
+      amount: eligible ? weekdayAmount : 0,
+      reason: evalArrival?.mealReason || ''
+    };
+  }
+
+  if (attCode === 'H' && attCfg.mealAutoOnManualHadir) {
+    return { eligible: true, overridden: false, amount: weekdayAmount, reason: 'Hadir Manual (H)' };
+  }
+
+  return { eligible: false, overridden: false, amount: 0, reason: 'Tidak ada jam masuk' };
+}
+
 export function evaluateStaffDepartureStatus({
   checkOutTime = '',
   scheduleEnd = '17:00',
+  workDate = '',
   settings = DEFAULT_OPS_SETTINGS
 } = {}) {
   const cfg = normalizeOpsSettings(settings).attendance;
   const normOut = normalizeTimeString(checkOutTime);
   const endSec = timeToSeconds(scheduleEnd);
   if (!normOut || endSec === null) {
-    return { hasPunch: false, isEarlyLeave: false, code: '' };
+    return { hasPunch: false, isEarlyLeave: false, isEarlyMealForfeit: false, isSaturdayMealEligible: false, code: '' };
   }
   const outSec = timeToSeconds(normOut);
   const thrSec = Math.max(0, Math.round(Number(cfg.earlyLeaveThresholdMinutes ?? 1))) * 60;
   const isEarlyLeave = thrSec === 0 ? (outSec < endSec) : (outSec <= endSec - thrSec);
+  const dow = workDate ? new Date(`${workDate}T00:00:00Z`).getUTCDay() : null;
+  const earlyMealSec = timeToSeconds(`${cfg.earlyLeaveMealCutoffTime || '15:00'}:00`);
+  const satMealSec = timeToSeconds(`${cfg.saturdayMealCutoffTime || '15:00'}:00`);
+  const isEarlyMealForfeit = dow !== 6 && earlyMealSec !== null && outSec < earlyMealSec;
+  const isSaturdayMealEligible = dow === 6 && satMealSec !== null && outSec >= satMealSec;
   return {
     hasPunch: true,
     isEarlyLeave,
+    isEarlyMealForfeit,
+    isSaturdayMealEligible,
     code: isEarlyLeave ? 'PA' : 'H',
     earlyCutoffSec: endSec - thrSec
   };

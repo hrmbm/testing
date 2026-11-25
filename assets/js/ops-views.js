@@ -86,6 +86,10 @@ import {
   normalizeCompanyEntity,
   formatCompanyEntityName
 } from './workspace-logic.js?v=20261124-hrga-workspace-22';
+import {
+  formatAppError,
+  savePortalSettingsBatch
+} from './common.js?v=20261124-hrga-workspace-22';
 
 const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
@@ -531,10 +535,10 @@ export async function renderAttendanceUploadView(host, ctx) {
             <tbody>
               ${state.uploadBatches.length ? state.uploadBatches.map(b => `
                 <tr>
-                  <td>${esc((b.created_at || '').slice(0, 16).replace('T', ' '))}</td>
+                  <td data-sort-value="${esc((b.created_at || '').slice(0, 19))}">${esc((b.created_at || '').slice(0, 16).replace('T', ' '))}</td>
                   <td><b>${esc(b.filename)}</b></td>
                   <td><span class="pill">${esc(b.source_type)}</span></td>
-                  <td>${esc(b.period_start || '-')} s/d ${esc(b.period_end || '-')}</td>
+                  <td data-sort-value="${esc(b.period_start || '')}">${esc(b.period_start || '-')} s/d ${esc(b.period_end || '-')}</td>
                   <td class="num">${b.row_count}</td>
                   <td class="num"><b>${b.inserted_count}</b></td>
                   <td class="num">${b.duplicate_count}</td>
@@ -563,7 +567,7 @@ export async function renderAttendanceUploadView(host, ctx) {
             <tbody>
               ${exceptions.length ? exceptions.map(ev => `
                 <tr>
-                  <td>${esc(ev.work_date)}</td>
+                  <td data-sort-value="${esc(ev.work_date || '')}">${esc(ev.work_date)}</td>
                   <td><code>${esc(ev.employee_no)}</code></td>
                   <td>${esc(ev.employee_name)} <small>(${esc(ev.source_type)})</small></td>
                   <td><span class="pill gold">${esc(ev.exception_reason || 'Perlu pemetaan')}</span></td>
@@ -601,13 +605,13 @@ export async function renderAttendanceUploadView(host, ctx) {
     } else {
       const { error: batErr } = await ctx.supabase.from('attendance_upload_batches').insert(result.batch);
       if (batErr) {
-        showInlineBanner(host, `Gagal menyimpan batch absensi: ${batErr.message}`, 'error');
+        showInlineBanner(host, `Gagal menyimpan batch absensi: ${formatAppError(batErr)}`, 'error');
         return;
       }
       if (result.accepted.length) {
         const { error: evErr } = await ctx.supabase.from('attendance_raw_events').insert(result.accepted);
         if (evErr) {
-          showInlineBanner(host, `Batch tersimpan, namun sebagian log gagal disimpan: ${evErr.message}`, 'error');
+          showInlineBanner(host, `Batch tersimpan, namun sebagian log gagal disimpan: ${formatAppError(evErr)}`, 'error');
           invalidateOpsStateCache();
           return;
         }
@@ -685,7 +689,7 @@ export async function renderAttendanceUploadView(host, ctx) {
           exception_reason: null
         }).eq('id', id);
         if (error) {
-          showInlineBanner(host, `Gagal memetakan pengecualian: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal memetakan pengecualian: ${formatAppError(error)}`, 'error');
           return;
         }
         invalidateOpsStateCache();
@@ -780,7 +784,7 @@ export async function renderAttendanceCalendarView(host, ctx) {
     } else {
       const { error } = await ctx.supabase.from('attendance_calendar_days').upsert(entries, { onConflict: 'cal_date' });
       if (error) {
-        showInlineBanner(host, `Gagal menyimpan kalender: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal menyimpan kalender: ${formatAppError(error)}`, 'error');
         return false;
       }
       invalidateOpsStateCache();
@@ -861,7 +865,7 @@ export async function renderStaffHolidayView(host, ctx) {
           <tbody>
             ${state.conditionalHolidays.length ? state.conditionalHolidays.map(h => `
               <tr>
-                <td>${esc(h.work_date)}</td>
+                <td data-sort-value="${esc(h.work_date || '')}">${esc(h.work_date)}</td>
                 <td><code>${esc(h.employee_no)}</code></td>
                 <td>${esc(h.employee_name || h.employee_no)}</td>
                 <td>${esc(h.notes || '-')}</td>
@@ -894,7 +898,7 @@ export async function renderStaffHolidayView(host, ctx) {
     } else {
       const { error } = await ctx.supabase.from('staff_conditional_holidays').upsert(row, { onConflict: 'work_date,employee_no' });
       if (error) {
-        showInlineBanner(host, `Gagal menambah jadwal libur kondisional: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal menambah jadwal libur kondisional: ${formatAppError(error)}`, 'error');
         return;
       }
       invalidateOpsStateCache();
@@ -911,7 +915,7 @@ export async function renderStaffHolidayView(host, ctx) {
       } else {
         const { error } = await ctx.supabase.from('staff_conditional_holidays').delete().eq('id', id);
         if (error) {
-          showInlineBanner(host, `Gagal menghapus jadwal libur kondisional: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal menghapus jadwal libur kondisional: ${formatAppError(error)}`, 'error');
           return;
         }
         invalidateOpsStateCache();
@@ -1055,7 +1059,7 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
                   <td class="num">${(c.diambil_dates || []).length}</td>
                   <td class="num">${(c.pending_dates || []).length}</td>
                   <td class="num"><b>${c.remaining_leave}</b></td>
-                  <td>${esc(c.renewal_date || '-')}</td>
+                  <td data-sort-value="${esc(c.renewal_date || '')}">${esc(c.renewal_date || '-')}</td>
                   <td>${gate.requiresConfirmation ? `<span class="pill gold">Perlu Konfirmasi (${gate.daysUntilRenewal}h)</span>` : '<span class="pill green">Aktif</span>'}</td>
                   <td><button type="button" class="btn btn-sm btn-secondary ops-cuti-add-ct" data-id="${esc(c.id)}">+ Catat CT</button></td>
                 </tr>
@@ -1091,7 +1095,7 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
     } else if (parsed.rows.length) {
       const { error } = await ctx.supabase.from('employee_leave_balances').upsert(parsed.rows, { onConflict: 'employee_no,period_label' });
       if (error) {
-        showInlineBanner(host, `Gagal menyimpan data cuti: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal menyimpan data cuti: ${formatAppError(error)}`, 'error');
         return;
       }
       invalidateOpsStateCache();
@@ -1117,7 +1121,7 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
       else {
         const { error } = await ctx.supabase.from('employee_leave_balances').upsert(row);
         if (error) {
-          showInlineBanner(host, `Gagal menyimpan pemakaian cuti: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal menyimpan pemakaian cuti: ${formatAppError(error)}`, 'error');
           return;
         }
         invalidateOpsStateCache();
@@ -1501,7 +1505,7 @@ export async function renderStaffManagementView(host, ctx) {
       } else {
         const { error } = await ctx.supabase.from('staff_attendance_reviews').upsert(rev, { onConflict: 'employee_no,work_date' });
         if (error) {
-          showInlineBanner(host, `Gagal menyimpan penyesuaian absensi: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal menyimpan penyesuaian absensi: ${formatAppError(error)}`, 'error');
           return;
         }
         if (mealRow) {
@@ -1628,7 +1632,9 @@ export async function renderStaffReportsView(host, ctx) {
               </th>
             `).join('')}
             <th class="num">Total Hari</th>
-            <th class="num">Total Uang Makan</th>
+            <th class="num">Uang Makan</th>
+            <th class="num">Ekstra Meal</th>
+            <th class="num">Total Terima</th>
           </tr>
         </thead>
         <tbody>
@@ -1639,15 +1645,22 @@ export async function renderStaffReportsView(host, ctx) {
               <td class="nowrap"><code>${esc(r.employee_no)}</code></td>
               ${r.days.map(d => {
                 const bgCls = d.isOffDay ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : '';
-                const text = d.eligible
-                  ? `${d.amount.toLocaleString('id-ID')}${d.check_in ? `<br><small>${esc(d.check_in.slice(0, 5))}</small>` : ''}`
-                  : (d.check_in ? `0<br><small>${esc(d.check_in.slice(0, 5))}</small>` : (d.attCode || '-'));
-                return `<td class="${bgCls} ${d.eligible ? 'stf-meal-yes' : 'stf-meal-no'}" title="${esc(d.reason)}">${text}</td>`;
+                const tapHint = d.check_in || d.check_out
+                  ? `<br><small>${esc((d.check_in || '--:--').slice(0, 5))}${d.check_out ? `–${esc(d.check_out.slice(0, 5))}` : ''}</small>`
+                  : '';
+                const emHint = d.ekstraMealAmount > 0 ? `<br><small>+EM ${d.ekstraMealAmount.toLocaleString('id-ID')}</small>` : '';
+                const mainText = d.eligible
+                  ? `${d.amount.toLocaleString('id-ID')}${tapHint}${emHint}`
+                  : (d.check_in || d.check_out ? `0${tapHint}${emHint}` : `${esc(d.attCode || '-')}${emHint}`);
+                const titleTip = `${d.reason}${d.ekstraMealAmount > 0 ? ` | Ekstra Meal OT (${d.overtimeHours}j): ${fmtIdr(d.ekstraMealAmount)}` : ''}`;
+                return `<td class="${bgCls} ${d.eligible || d.ekstraMealAmount > 0 ? 'stf-meal-yes' : 'stf-meal-no'}" title="${esc(titleTip)}">${mainText}</td>`;
               }).join('')}
               <td class="num"><b>${r.totalEligibleDays}</b></td>
-              <td class="num nowrap"><b>${fmtIdr(r.totalAmount)}</b></td>
+              <td class="num nowrap">${fmtIdr(r.totalAmount)}</td>
+              <td class="num nowrap">${fmtIdr(r.totalEkstraMealAmount || 0)}</td>
+              <td class="num nowrap"><b>${fmtIdr(r.totalCombinedAmount ?? r.totalAmount)}</b></td>
             </tr>
-          `).join('') : `<tr><td colspan="${5 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
+          `).join('') : `<tr><td colspan="${7 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
         </tbody>
         ${mealRep.rows.length ? `
           <tfoot>
@@ -1656,6 +1669,8 @@ export async function renderStaffReportsView(host, ctx) {
               ${mealRep.dailyTotals.map(dt => `<th>${dt.eligibleCount}</th>`).join('')}
               <th class="num">${mealRep.grandTotalEligibleDays}</th>
               <th class="num nowrap">${fmtIdr(mealRep.grandTotalAmount)}</th>
+              <th class="num nowrap">${fmtIdr(mealRep.grandTotalEkstraMealAmount || 0)}</th>
+              <th class="num nowrap">${fmtIdr(mealRep.grandTotalCombinedAmount ?? mealRep.grandTotalAmount)}</th>
             </tr>
           </tfoot>
         ` : ''}
@@ -1694,8 +1709,8 @@ export async function renderStaffReportsView(host, ctx) {
           </button>
           <button type="button" class="drv-report-card ${activeCard === 'uang_makan' ? 'is-active' : ''}" data-staff-card="uang_makan">
             <div class="drv-report-card-eyebrow">LAPORAN 2</div>
-            <div class="drv-report-card-title">Report Uang Makan</div>
-            <div class="drv-report-card-meta">${esc(mealRep.window.label)} · ${fmtIdr(mealRep.dailyAmount)}/hari (&lt; ${attCfg.mealThresholdMinutes} menit dari jadwal)</div>
+            <div class="drv-report-card-title">Report Uang Makan &amp; Ekstra Meal</div>
+            <div class="drv-report-card-meta">${esc(mealRep.window.label)} · Sen–Jum ${fmtIdr(mealRep.dailyAmount)} (Plg &ge; ${esc(attCfg.earlyLeaveMealCutoffTime || '15:00')}) · Sab &ge; ${esc(attCfg.saturdayMealCutoffTime || '15:00')} = ${fmtIdr(mealRep.saturdayAmount)} + Ekstra Meal OT</div>
           </button>
         </div>
       </div>
@@ -1729,10 +1744,10 @@ export async function renderStaffReportsView(host, ctx) {
           </div>
 
           <div class="kpi-grid ops-kpi-4" style="margin-bottom:14px">
-            <div class="card kpi-card"><div class="kpi-label">Karyawan Staff</div><div class="kpi-val">${mealRep.rows.length}</div></div>
-            <div class="card kpi-card"><div class="kpi-label">Tarif / Hari</div><div class="kpi-val">${fmtIdr(mealRep.dailyAmount)}</div></div>
-            <div class="card kpi-card"><div class="kpi-label">Total Hari Layak</div><div class="kpi-val">${mealRep.grandTotalEligibleDays}</div></div>
-            <div class="card kpi-card"><div class="kpi-label">Total Uang Makan</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalAmount)}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Karyawan Staff (${mealRep.grandTotalEligibleDays} Hari Layak)</div><div class="kpi-val">${mealRep.rows.length}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Total Uang Makan Reguler</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalAmount)}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Total Ekstra Meal OT</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalEkstraMealAmount || 0)}</div></div>
+            <div class="card kpi-card"><div class="kpi-label">Grand Total Terima</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalCombinedAmount ?? mealRep.grandTotalAmount)}</div></div>
           </div>
 
           <div class="table-wrap">
@@ -1796,14 +1811,16 @@ export async function renderStaffReportsView(host, ctx) {
       await exportSheetXlsx(`Report_Absensi_Staff_${periodKey}.xlsx`, 'Report Absensi', aoa);
     } else {
       const aoa = [
-        ['No', 'Nama', 'NIK', ...mealRep.window.dayMeta.map(m => `${m.dayShort} ${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`), 'Total Hari', 'Total Uang Makan (Rp)'],
+        ['No', 'Nama', 'NIK', ...mealRep.window.dayMeta.map(m => `${m.dayShort} ${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`), 'Total Hari', 'Uang Makan (Rp)', 'Ekstra Meal OT (Rp)', 'Total Diterima (Rp)'],
         ...mealRep.rows.map((r, i) => [
           i + 1,
           r.employee_name,
           r.employee_no,
-          ...r.days.map(d => d.amount),
+          ...r.days.map(d => (d.amount || 0) + (d.ekstraMealAmount || 0)),
           r.totalEligibleDays,
-          r.totalAmount
+          r.totalAmount,
+          r.totalEkstraMealAmount || 0,
+          r.totalCombinedAmount ?? r.totalAmount
         ])
       ];
       await exportSheetXlsx(`Report_Uang_Makan_${mealRep.window.startDate}_${mealRep.window.endDate}.xlsx`, 'Uang Makan', aoa);
@@ -1836,9 +1853,9 @@ export async function renderStaffReportsView(host, ctx) {
         <div class="stf-pdf-sheet pkwt-print-sheet">
           <div class="drv-pdf-header">
             <div>PT. MITRA BINAMANDIRI MAKMUR</div>
-            <div>REPORT UANG MAKAN STAFF</div>
+            <div>REPORT UANG MAKAN &amp; EKSTRA MEAL STAFF</div>
             <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(mealRep.window.label)}</div>
-            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">TARIF</span>: ${fmtIdr(mealRep.dailyAmount)} / HARI</div>
+            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">TARIF</span>: ${fmtIdr(mealRep.dailyAmount)} / HARI (SABTU &ge; ${esc(attCfg.saturdayMealCutoffTime || '15:00')}: ${fmtIdr(mealRep.saturdayAmount)}) + EKSTRA MEAL OT</div>
           </div>
           ${buildMealTableHtml({ forPrint: true })}
           ${renderTwoSignatoriesHtml(stfSig, loc, mealRep.window.endDate)}
@@ -1901,7 +1918,7 @@ export async function renderDriverScheduleView(host, ctx) {
                 `).join('');
                 return `
                   <tr>
-                    <td><b>${esc(s.work_date)}</b></td>
+                    <td data-sort-value="${esc(s.work_date || '')}"><b>${esc(s.work_date)}</b></td>
                     <td><b>${esc(s.driver_name)}</b><br><small><code>${esc(s.employee_no)}</code></small></td>
                     <td><span class="pill">${esc(String(s.section || 'Support').toUpperCase())}</span></td>
                     <td>${actsHtml}</td>
@@ -2106,7 +2123,7 @@ export async function renderDriverScheduleView(host, ctx) {
       } else {
         const { error } = await ctx.supabase.from('driver_daily_schedules').insert(newRow);
         if (error) {
-          errBox.textContent = `Gagal menyimpan jadwal driver: ${error.message}`;
+          errBox.textContent = `Gagal menyimpan jadwal driver: ${formatAppError(error)}`;
           return;
         }
         invalidateOpsStateCache();
@@ -2140,7 +2157,7 @@ export async function renderDriverScheduleView(host, ctx) {
       } else {
         const { error } = await ctx.supabase.from('driver_daily_schedules').delete().eq('id', id);
         if (error) {
-          showInlineBanner(host, `Gagal menghapus jadwal driver: ${error.message}`, 'error');
+          showInlineBanner(host, `Gagal menghapus jadwal driver: ${formatAppError(error)}`, 'error');
           return;
         }
         invalidateOpsStateCache();
@@ -2190,6 +2207,7 @@ export async function renderDriverManagementView(host, ctx) {
             <select id="ops-drv-rec-half" class="input" aria-label="Pilih periode rekonsiliasi">
               <option value="P1" ${halfPeriod === 'P1' ? 'selected' : ''}>Periode 1 – 15</option>
               <option value="P2" ${halfPeriod === 'P2' ? 'selected' : ''}>Periode 16 – Akhir Bulan</option>
+              <option value="FULL" ${halfPeriod === 'FULL' ? 'selected' : ''}>1 – Akhir Bulan (Penuh)</option>
             </select>
           </div>
         </div>
@@ -2266,7 +2284,7 @@ export async function renderDriverManagementView(host, ctx) {
                 const deptSummary = r.schedules.map(s => `${s.section} (${s.start_time || '-'}-${s.end_time || 'Pulang'})`).join(' + ') || '-';
                 return `
                   <tr>
-                    <td><b>${esc(r.work_date)}</b><br><small>${esc(r.metrics.dayRule.dayLabel)}</small></td>
+                    <td data-sort-value="${esc(r.work_date || '')}"><b>${esc(r.work_date)}</b><br><small>${esc(r.metrics.dayRule.dayLabel)}</small></td>
                     <td><b>${esc(r.driver_name)}</b><br><small><code>${esc(r.employee_no)}</code></small></td>
                     <td><small>${esc(deptSummary)}</small></td>
                     <td><code>${esc(r.punchIn || '-')}</code> – <code>${esc(r.punchOut || '-')}</code></td>
@@ -2376,7 +2394,7 @@ export async function renderDriverManagementView(host, ctx) {
           if (error) throw error;
           invalidateOpsStateCache();
         } catch (err) {
-          showInlineBanner(host, `Gagal menyimpan koreksi abnormal ke Supabase: ${err?.message || err}`, 'error');
+          showInlineBanner(host, `Gagal menyimpan koreksi abnormal: ${formatAppError(err)}`, 'error');
           return;
         }
       }
@@ -2445,7 +2463,7 @@ export async function renderStationeryInputView(host, ctx) {
                 const deptLabel = resolveCanonicalSloc(mv.sloc_canonical || mv.sloc_raw || 'HR GA', state.settings);
                 return `
                   <tr>
-                    <td class="nowrap">${esc(mv.tx_date)}</td>
+                    <td class="nowrap" data-sort-value="${esc(mv.tx_date || '')}">${esc(mv.tx_date)}</td>
                     <td><span class="pill ${isIn ? 'green' : 'gold'}">${esc(typeLabel)}</span></td>
                     <td>${esc(deptLabel)}</td>
                     <td><b>${esc(mv.item_name)}</b></td>
@@ -2692,7 +2710,7 @@ export async function renderStationeryInputView(host, ctx) {
         await renderStationeryInputView(host, ctx);
         showInlineBanner(host, `${res.entries.length} item ${txType === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} (${department}) berhasil disimpan.`, 'ok');
       } catch (err) {
-        errBox.textContent = err?.message || 'Transaksi ditolak.';
+        errBox.textContent = formatAppError(err, 'Transaksi ditolak.');
       }
     });
   };
@@ -3094,7 +3112,7 @@ export async function renderStationeryReportsView(host, ctx) {
     if (ctx.isDemoMode) {
       saveDemoOpsState(state);
     } else if (ctx.supabase) {
-      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_PLAN_MANUAL_KEY, value: nextMap }).catch(() => {});
+      await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_PLAN_MANUAL_KEY, value: nextMap }]);
     }
   };
 
@@ -3344,8 +3362,14 @@ export async function renderStationeryMaterialsView(host, ctx) {
     if (ctx.isDemoMode) {
       saveDemoOpsState(state);
     } else if (ctx.supabase) {
-      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments }).catch(() => {});
-      await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: state.settings }).catch(() => {});
+      const { error } = await savePortalSettingsBatch(ctx.supabase, [
+        { key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments },
+        { key: OPS_SETTINGS_KEY, value: state.settings }
+      ]);
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan pengaturan departemen: ${formatAppError(error)}`, 'error');
+        return;
+      }
       invalidateOpsStateCache();
     }
   };
@@ -3528,7 +3552,7 @@ export async function renderStationeryMaterialsView(host, ctx) {
       await renderStationeryMaterialsView(host, ctx);
       showInlineBanner(host, 'Seluruh transaksi ATK dan saldo stok berhasil dikosongkan ke 0 (Daftar Material tetap aman).', 'ok');
     } catch (err) {
-      showInlineBanner(host, err?.message || 'Gagal mereset stok ATK.', 'error');
+      showInlineBanner(host, formatAppError(err, 'Gagal mereset stok ATK.'), 'error');
     }
   });
 
@@ -3578,10 +3602,10 @@ export async function renderStationeryMaterialsView(host, ctx) {
     } else if (ctx.supabase) {
       const { error } = await ctx.supabase.from('stationery_items').insert(toSqlStationeryItemRow(newItem));
       if (error) {
-        showInlineBanner(host, `Gagal menyimpan material: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal menyimpan material: ${formatAppError(error)}`, 'error');
         return;
       }
-      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+      await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
       invalidateOpsStateCache();
     }
     await renderStationeryMaterialsView(host, ctx);
@@ -3622,9 +3646,13 @@ export async function renderStationeryMaterialsView(host, ctx) {
       } else if (ctx.supabase) {
         const updatedItem = state.stationeryItems.find(it => it.id === id);
         if (updatedItem) {
-          await ctx.supabase.from('stationery_items').upsert(toSqlStationeryItemRow(updatedItem), { onConflict: 'id' });
+          const { error: itemErr } = await ctx.supabase.from('stationery_items').upsert(toSqlStationeryItemRow(updatedItem), { onConflict: 'id' });
+          if (itemErr) {
+            showInlineBanner(host, `Gagal menyimpan material: ${formatAppError(itemErr)}`, 'error');
+            return;
+          }
         }
-        await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+        await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
         invalidateOpsStateCache();
       }
       await renderStationeryMaterialsView(host, ctx);
@@ -3787,7 +3815,7 @@ export async function renderVehicleReportsView(host, ctx) {
             <tbody>
               ${schedules.length ? schedules.map(s => `
                 <tr>
-                  <td class="nowrap"><b>${esc(s.work_date)}</b></td>
+                  <td class="nowrap" data-sort-value="${esc(s.work_date || '')}"><b>${esc(s.work_date)}</b></td>
                   <td><span class="pill">${esc(String(s.section || 'Support').toUpperCase())}</span></td>
                   <td><b>${esc(s.driver_name)}</b> <small><code>${esc(s.employee_no)}</code></small></td>
                   <td>${esc(s.vehicle_no || s.notes || '-')}</td>
@@ -3968,7 +3996,13 @@ export async function renderOpsSettingsView(host, ctx) {
               </select>
             </label>
             <label class="ops-field"><span>Batas Hangus Uang Makan (&ge; N mnt)</span><input id="set-att-meal-min" type="number" class="input" value="${s.attendance.mealThresholdMinutes}"></label>
-            <label class="ops-field"><span>Tarif Uang Makan / Hari (Rp)</span><input id="set-att-meal-amt" type="number" class="input" value="${s.attendance.mealAllowanceAmount}"></label>
+            <label class="ops-field"><span>Tarif Uang Makan Sen–Jum (Rp)</span><input id="set-att-meal-amt" type="number" class="input" value="${s.attendance.mealAllowanceAmount}"></label>
+            <label class="ops-field"><span>Jam Min Pulang Sen–Jum Dapat Makan</span><input id="set-att-early-meal-cut" type="time" class="input" value="${esc(s.attendance.earlyLeaveMealCutoffTime || '15:00')}"></label>
+            <label class="ops-field"><span>Jam Min Pulang Sabtu Dapat Makan</span><input id="set-att-sat-meal-cut" type="time" class="input" value="${esc(s.attendance.saturdayMealCutoffTime || '15:00')}"></label>
+            <label class="ops-field"><span>Tarif Uang Makan Sabtu &ge; 15:00 (Rp)</span><input id="set-att-sat-meal-amt" type="number" class="input" value="${s.attendance.saturdayMealAllowanceAmount ?? 7500}"></label>
+            <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-1 (Rp)</span><input id="set-att-em-1" type="number" class="input" value="${s.attendance.ekstraMealFirst2hAmount ?? 6000}"></label>
+            <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-2 (Rp)</span><input id="set-att-em-2" type="number" class="input" value="${s.attendance.ekstraMealSecond2hAmount ?? 8000}"></label>
+            <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-3+ (Rp)</span><input id="set-att-em-3" type="number" class="input" value="${s.attendance.ekstraMealNext2hAmount ?? 10000}"></label>
             <label class="ops-field"><span>Hari Mulai Periode Uang Makan</span>
               <select id="set-att-meal-start" class="input">
                 <option value="5" ${Number(s.attendance.mealPeriodStartDay) === 5 ? 'selected' : ''}>Jumat (Jumat s/d Kamis)</option>
@@ -4028,7 +4062,7 @@ export async function renderOpsSettingsView(host, ctx) {
                   <tbody>
                     ${state.staffMealOverrides.map(m => `
                       <tr>
-                        <td>${esc(m.work_date)}</td>
+                        <td data-sort-value="${esc(m.work_date || '')}">${esc(m.work_date)}</td>
                         <td><code>${esc(m.employee_no)}</code></td>
                         <td>${esc(m.employee_name)}</td>
                         <td>${m.eligible ? '<span class="pill green">Dapat Uang Makan</span>' : '<span class="pill danger">Tidak Dapat</span>'}</td>
@@ -4189,6 +4223,9 @@ export async function renderOpsSettingsView(host, ctx) {
       <!-- TAB 5: STATIONERY & DEPARTEMEN -->
       <div class="card ops-card ${activeTab === 'stationery' ? '' : 'hidden'}" data-panel="stationery">
         <h3>Pengaturan Stationery / ATK, Departemen &amp; Purchase Plan</h3>
+        <div class="ops-flash-banner ops-flash-info" style="margin-bottom:12px">
+          <b>Logika Minimum Stock (Otomatis):</b> Minimum Stock pada Purchase Plan dihitung otomatis dengan rumus <code>2 &times; Kebutuhan Rata-Rata Periode</code> (bukan input manual).
+        </div>
         <div class="ops-form-grid">
           <label class="ops-field"><span>Horizon Rencana Pembelian</span>
             <select id="set-stk-horizon" class="input">
@@ -4339,9 +4376,9 @@ export async function renderOpsSettingsView(host, ctx) {
     state.settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
     if (ctx.isDemoMode) saveDemoOpsState(state);
     else {
-      const { error } = await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: state.settings });
+      const { error } = await savePortalSettingsBatch(ctx.supabase, [{ key: OPS_SETTINGS_KEY, value: state.settings }]);
       if (error) {
-        showInlineBanner(host, `Gagal mereset pengaturan: ${error.message}`, 'error');
+        showInlineBanner(host, `Gagal mereset pengaturan: ${formatAppError(error)}`, 'error');
         return;
       }
       invalidateOpsStateCache();
@@ -4440,6 +4477,12 @@ export async function renderOpsSettingsView(host, ctx) {
           lateAndEarlyPriority: host.querySelector('#set-att-late-pa-prio').value,
           mealThresholdMinutes: host.querySelector('#set-att-meal-min').value,
           mealAllowanceAmount: host.querySelector('#set-att-meal-amt').value,
+          earlyLeaveMealCutoffTime: host.querySelector('#set-att-early-meal-cut')?.value || '15:00',
+          saturdayMealCutoffTime: host.querySelector('#set-att-sat-meal-cut')?.value || '15:00',
+          saturdayMealAllowanceAmount: host.querySelector('#set-att-sat-meal-amt')?.value ?? 7500,
+          ekstraMealFirst2hAmount: host.querySelector('#set-att-em-1')?.value ?? 6000,
+          ekstraMealSecond2hAmount: host.querySelector('#set-att-em-2')?.value ?? 8000,
+          ekstraMealNext2hAmount: host.querySelector('#set-att-em-3')?.value ?? 10000,
           mealPeriodStartDay: host.querySelector('#set-att-meal-start').value,
           mealPeriodLengthDays: host.querySelector('#set-att-meal-len').value,
           mealAutoOnManualHadir: Boolean(host.querySelector('#set-att-meal-manual-h')?.checked),
@@ -4546,15 +4589,17 @@ export async function renderOpsSettingsView(host, ctx) {
       if (ctx.isDemoMode) {
         saveDemoOpsState(state);
       } else {
-        const { error } = await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: next });
+        const { error } = await savePortalSettingsBatch(ctx.supabase, [
+          { key: OPS_SETTINGS_KEY, value: next },
+          { key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments }
+        ]);
         if (error) throw error;
-        await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments }).catch(() => {});
         invalidateOpsStateCache();
       }
       await renderOpsSettingsView(host, ctx);
       showInlineBanner(host, 'Seluruh konfigurasi Jadwal Kerja, Driver, Tarif & Penandatangan berhasil disimpan.', 'ok');
     } catch (err) {
-      showInlineBanner(host, err?.message || 'Periksa input pengaturan sebelum menyimpan.', 'error');
+      showInlineBanner(host, formatAppError(err, 'Periksa input pengaturan sebelum menyimpan.'), 'error');
     }
   });
 }
@@ -4610,7 +4655,7 @@ export async function importStationeryMasterAction(ctx, { rawRows = [], replaceE
       const { error } = await sb.from('stationery_items').upsert(batch, { onConflict: 'id' });
       if (error) throw error;
     }
-    await sb.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+    await savePortalSettingsBatch(sb, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
     invalidateOpsStateCache();
   }
 
@@ -4702,7 +4747,7 @@ export async function importStationeryMovementsAction(ctx, {
       if (insErr) throw insErr;
     }
 
-    await sb.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+    await savePortalSettingsBatch(sb, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
     invalidateOpsStateCache();
   }
 

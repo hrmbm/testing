@@ -966,7 +966,8 @@ function reportStageCell(cell) {
       ? 'gray'
       : 'gold';
   const dateText = cell.date ? `<span class="subdate">${esc(fmtReportDate(cell.date))}</span>` : '';
-  return `<div class="stage-cell">${reportBadge(dec, tone)}${dateText}</div>`;
+  const noteText = cell.notes ? `<span class="subnote">${esc(cell.notes)}</span>` : '';
+  return `<div class="stage-cell">${reportBadge(dec, tone)}${dateText}${noteText}</div>`;
 }
 
 export function buildTrackingReportHtml({ summary = { rows: [], totals: {} }, rows = [], filterQuery = '' } = {}) {
@@ -1071,6 +1072,7 @@ export function buildTrackingReportHtml({ summary = { rows: [], totals: {} }, ro
   .subline { display: block; margin-top: 1px; font-size: 6.5px; color: #64748b; }
   .stage-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; max-width: 100%; }
   .subdate { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 6.3px; color: #64748b; white-space: nowrap; }
+  .subnote { font-size: 6px; color: #334155; line-height: 1.2; word-break: break-word; }
   .reason-sub { display: block; margin-top: 1.5px; font-size: 6.4px; font-weight: 600; color: #b45309; }
   .badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 1px 4px; border-radius: 999px; font-size: 6.5px; font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
   .b-green { background: #ecfdf5; color: #15803d; border-color: #bbf7d0; }

@@ -3,7 +3,8 @@ import {
   normalizeLeadRecommendation,
   normalizeDisplayNik,
   normalizeCompanyEntity,
-  normalizeHomeBase
+  normalizeHomeBase,
+  normalizeEmployeeRecordUppercase
 } from './workspace-logic.js?v=20261124-hrga-workspace-22';
 import {
   computeEndDate,
@@ -199,6 +200,37 @@ export function determineRequiredContractDocuments(cashWageAmount, currUmkAmount
   };
 }
 
+export function normalizeSalaryTier(salaryTier = '', salary = null, currUmkAmount = DEFAULT_CONTRACT_SETTINGS.currUmkAmount) {
+  const clean = String(salaryTier || '').trim().toLowerCase();
+  if (clean === 'below_umk' || clean === 'dibawah_umk') return 'below_umk';
+  if (clean === 'umk_or_above' || clean === 'umk') return 'umk_or_above';
+  const wage = parseNumericCurrency(salary);
+  const umk = parseNumericCurrency(currUmkAmount);
+  if (wage > 0 && umk > 0 && wage < umk) return 'below_umk';
+  return 'umk_or_above';
+}
+
+export function resolveSalaryByTier({ salaryTier = 'umk_or_above', manualSalary = 0, currUmkAmount = DEFAULT_CONTRACT_SETTINGS.currUmkAmount } = {}) {
+  const tier = normalizeSalaryTier(salaryTier, manualSalary, currUmkAmount);
+  if (tier === 'below_umk') {
+    return parseNumericCurrency(manualSalary);
+  }
+  return parseNumericCurrency(currUmkAmount);
+}
+
+export function getContractPackageInfo(salaryTier = '', salary = null, currUmkAmount = DEFAULT_CONTRACT_SETTINGS.currUmkAmount) {
+  const tier = normalizeSalaryTier(salaryTier, salary, currUmkAmount);
+  const resolvedWage = tier === 'below_umk' ? parseNumericCurrency(salary) : parseNumericCurrency(currUmkAmount);
+  const rule = determineRequiredContractDocuments(resolvedWage, currUmkAmount);
+  const meetsUmk = tier === 'umk_or_above' || rule.meetsUmk;
+  return {
+    salaryTier: meetsUmk ? 'umk_or_above' : 'below_umk',
+    meetsUmk,
+    packageLabel: meetsUmk ? 'PKWT Only' : '5 Rangkap',
+    documentCount: meetsUmk ? 1 : 5
+  };
+}
+
 export function extractDocSequence(contractNumber = '', fallback = '001') {
   const raw = String(contractNumber || '').trim();
   const match = raw.match(/(\d{1,5})/);
@@ -290,13 +322,14 @@ export function buildContractWorkspaceQueue({
       fullName: emp.full_name || app?.full_name || '—',
       employeeNik: emp.employee_no || '',
       ktpNik: emp.ktp_nik || app?.nik || '',
-      department: emp.department || '',
+      department: emp.department || matchedIntv?.official_department || '',
       position: emp.position || matchedIntv?.official_position || app?.position || '',
       homeBase: normalizeHomeBase(emp.home_base || ''),
       companyEntity: normalizeCompanyEntity(emp.company_entity || ''),
       address: emp.address || buildApplicantAddress(app),
       phone: emp.phone || app?.application_data?.telepon || '',
       salary: emp.salary ?? matchedIntv?.salary ?? null,
+      salaryTier: emp.salary_tier || matchedIntv?.salary_tier || '',
       contractStartDate: startDate,
       contractEndDate: endDate,
       durationMonths: inferDurationMonths(startDate, endDate, matchedIntv?.contract_duration_months || 12),
@@ -350,13 +383,14 @@ export function buildContractWorkspaceQueue({
       fullName: intv.candidate_name || emp?.full_name || app?.full_name || '—',
       employeeNik: intv.assigned_nik || emp?.employee_no || '',
       ktpNik: intv.candidate_nik || emp?.ktp_nik || app?.nik || '',
-      department: emp?.department || '',
+      department: intv.official_department || emp?.department || '',
       position: intv.official_position || emp?.position || intv.applied_position || app?.position || '',
       homeBase: normalizeHomeBase(emp?.home_base || ''),
       companyEntity: normalizeCompanyEntity(intv.company_entity || emp?.company_entity || 'MITRA'),
       address: emp?.address || buildApplicantAddress(app),
       phone: intv.candidate_whatsapp || emp?.phone || app?.application_data?.telepon || '',
       salary: intv.salary ?? emp?.salary ?? null,
+      salaryTier: intv.salary_tier || emp?.salary_tier || '',
       contractStartDate: startDate,
       contractEndDate: endDate,
       durationMonths,
@@ -499,6 +533,7 @@ export function buildContractUpdateRequestPayload({
   const seq = String(overrides.docSequence || payload.docSequence || config.docSequence || '001').trim();
   const contractNumber = overrides.contractNumber || formatContractCode(seq, startIso, 'PKWT');
   const salary = parseNumericCurrency(overrides.salary ?? config.cashWageAmount);
+  const salaryTier = normalizeSalaryTier(overrides.salaryTier || config.salaryTier, salary, config.currUmkAmount);
 
   return {
     id: overrides.id || `creq-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -508,20 +543,22 @@ export function buildContractUpdateRequestPayload({
     employeeId: currentEmployee?.id || record.employeeId || null,
     applicantId: record.applicantId || currentEmployee?.applicant_id || currentInterview?.applicant_id || null,
     interviewId: currentInterview?.id || record.interviewId || null,
-    fullName: String(overrides.fullName ?? config.employeeName ?? record.fullName ?? '').trim(),
-    employeeNik: String(overrides.employeeNik ?? config.employeeNik ?? currentEmployee?.employee_no ?? record.employeeNik ?? '').trim(),
+    fullName: String(overrides.fullName ?? config.employeeName ?? record.fullName ?? '').trim().toUpperCase(),
+    employeeNik: String(overrides.employeeNik ?? config.employeeNik ?? currentEmployee?.employee_no ?? record.employeeNik ?? '').trim().toUpperCase(),
     ktpNik: String(overrides.ktpNik ?? config.employeeKtp ?? currentEmployee?.ktp_nik ?? record.ktpNik ?? '').trim(),
-    department: String(overrides.department ?? config.employeeDepartment ?? currentEmployee?.department ?? record.department ?? '').trim(),
-    position: String(overrides.position ?? config.employeePosition ?? record.position ?? '').trim(),
-    address: String(overrides.address ?? config.employeeAddress ?? record.address ?? '').trim(),
+    department: String(overrides.department ?? config.employeeDepartment ?? currentEmployee?.department ?? record.department ?? '').trim().toUpperCase(),
+    position: String(overrides.position ?? config.employeePosition ?? record.position ?? '').trim().toUpperCase(),
+    address: String(overrides.address ?? config.employeeAddress ?? record.address ?? '').trim().toUpperCase(),
     phone: String(record.phone || currentEmployee?.phone || '').trim(),
-    employmentStatus: String(overrides.employmentStatus || 'KONTRAK').trim(),
+    employmentStatus: String(overrides.employmentStatus || 'KONTRAK').trim().toUpperCase(),
     contractStartDate: startIso,
     contractEndDate: endIso,
     durationMonths,
     docSequence: seq,
     contractNumber,
     salary,
+    salaryTier,
+    packageLabel: salaryTier === 'below_umk' ? '5 Rangkap' : 'PKWT Only',
     previousSnapshot: createContractSnapshot(currentEmployee, currentInterview)
   };
 }
@@ -902,6 +939,7 @@ export function buildDirectContractSyncPayloads({
   const department = String(config.employeeDepartment || record.department || currentEmployee?.department || '').trim();
   const address = String(config.employeeAddress || record.address || currentEmployee?.address || '').trim();
   const salary = parseNumericCurrency(config.cashWageAmount ?? currentEmployee?.salary ?? currentInterview?.salary);
+  const salaryTier = normalizeSalaryTier(config.salaryTier || payload.salaryTier, salary, config.currUmkAmount);
   const startDate = toIsoDate(config.signingDate) || currentEmployee?.contract_start_date || currentEmployee?.join_date || toIsoDate(new Date());
   const durationMonths = Number(config.durationMonths) || Number(currentInterview?.contract_duration_months) || 6;
   const endDate = computeEndDate(startDate, durationMonths) || currentEmployee?.contract_end_date || null;
@@ -909,7 +947,7 @@ export function buildDirectContractSyncPayloads({
   const docSequence = String(config.docSequence || payload.docSequence || '').trim();
   const contractNo = String(payload.no_pkwt || config.contractNumber || config.pkwtNumber || (docSequence ? formatContractCode(docSequence, startDate, 'PKWT') : '')).trim();
   const resolvedEmpNo = assignedNik || ktpNik || `EMP-${Date.now().toString().slice(-6)}`;
-  const contractNote = contractNo ? `Contract No. ${contractNo}` : (currentEmployee?.notes || '');
+  const contractNote = contractNo ? `CONTRACT NO. ${contractNo}` : (currentEmployee?.notes || '');
   const companyEntity = normalizeCompanyEntity(
     config.companyId === 'comp-rml'
       ? 'REHOLZ'
@@ -917,7 +955,7 @@ export function buildDirectContractSyncPayloads({
   );
   const homeBase = normalizeHomeBase(config.homeBase || record.homeBase || currentEmployee?.home_base || 'PASURUAN');
 
-  const employeePayload = {
+  const employeePayload = normalizeEmployeeRecordUppercase({
     applicant_id: record.applicantId || currentEmployee?.applicant_id || null,
     employee_no: resolvedEmpNo,
     full_name: fullName,
@@ -938,19 +976,22 @@ export function buildDirectContractSyncPayloads({
     home_base: homeBase,
     company_entity: companyEntity,
     salary,
+    salary_tier: salaryTier,
     notes: contractNote
-  };
+  });
 
   const interviewPatch = (record.interviewId || currentInterview?.id)
     ? {
         id: record.interviewId || currentInterview.id,
         official_position: position,
+        official_department: department,
         assigned_nik: resolvedEmpNo,
         contract_number: contractNo,
         contract_start_date: startDate,
         contract_end_date: endDate,
         contract_duration_months: durationMonths,
         salary,
+        salary_tier: salaryTier,
         updated_at: appliedAt
       }
     : null;
@@ -978,6 +1019,8 @@ export function buildDirectContractSyncPayloads({
     endDate,
     durationMonths,
     salary,
+    salaryTier,
+    packageLabel: salaryTier === 'below_umk' ? '5 Rangkap' : 'PKWT Only',
     appliedAt,
     appliedBy,
     status: 'applied',

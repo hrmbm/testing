@@ -76,6 +76,43 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+const UPPERCASE_PROPER_TOKENS = new Set([
+  'PT', 'CV', 'UD', 'PD', 'RT', 'RW', 'DKI', 'DIY', 'NTB', 'NTT', 'RI',
+  'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'
+]);
+
+function formatProperSegment(seg = '') {
+  if (!seg) return '';
+  const m = seg.match(/^([^a-zA-Z0-9]*)(.*?)([^a-zA-Z0-9]*)$/);
+  if (!m) return seg;
+  const [, lead, core, trail] = m;
+  if (!core) return seg;
+  const upperCore = core.toUpperCase();
+  if (UPPERCASE_PROPER_TOKENS.has(upperCore)) {
+    return `${lead}${upperCore}${trail}`;
+  }
+  const rtrw = core.match(/^(RT|RW)([./-]?\d+.*)$/i);
+  if (rtrw) {
+    return `${lead}${rtrw[1].toUpperCase()}${rtrw[2].toUpperCase()}${trail}`;
+  }
+  if (core.includes('.')) {
+    return `${lead}${core.split('.').map(part => formatProperSegment(part)).join('.')}${trail}`;
+  }
+  if (core.includes('/')) {
+    return `${lead}${core.split('/').map(part => formatProperSegment(part)).join('/')}${trail}`;
+  }
+  if (core.includes('-')) {
+    return `${lead}${core.split('-').map(part => formatProperSegment(part)).join('-')}${trail}`;
+  }
+  return `${lead}${core.charAt(0).toUpperCase()}${core.slice(1).toLowerCase()}${trail}`;
+}
+
+export function toProperCase(value = '') {
+  const clean = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (!clean) return '';
+  return clean.split(' ').map(formatProperSegment).join(' ');
+}
+
 export function computeEndDate(startIso, durationMonths) {
   const { year, month, day } = parseIso(startIso);
   const dt = new Date(Date.UTC(year, month - 1 + Math.max(1, durationMonths || 1), day - 1));
@@ -157,12 +194,13 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
     tgl_gajian_terbilang: numberToIndonesianWords(merged.paydayDay || 10),
     kota_ttd: merged.signingCity || 'Pasuruan',
     catatan_tambahan: (merged.customNote || '').trim(),
-    nama_karyawan: merged.employeeName || '',
+    nama_karyawan: toProperCase(merged.employeeName || ''),
+    nama_karyawan_ttd: String(merged.employeeName || '').trim().toUpperCase(),
     nik_karyawan: (merged.employeeNik || '').trim(),
     no_ktp: (merged.employeeKtp || '').trim(),
     departemen: (merged.employeeDepartment || '').trim(),
     jabatan: merged.employeePosition || '',
-    alamat_karyawan: merged.employeeAddress || '',
+    alamat_karyawan: toProperCase(merged.employeeAddress || ''),
     nama_perusahaan: merged.companyName || 'PT. MITRA BINAMANDIRI MAKMUR',
     nama_perusahaan_judul: merged.companyDisplayName || merged.companyName || 'PT. Mitra Binamandiri Makmur',
     alamat_kop_surat: merged.letterheadAddress || 'Ds. Randupitu, Kec. Gempol, Pasuruan – East Java, Indonesia',
@@ -181,6 +219,8 @@ export function renderAgreementHtml(templateHtml, data, companyMaster = null) {
     jabatan_hrd_pkwt: merged.hrRolePkwt || 'Manager HRD & GA',
     jabatan_hrd_pb: merged.hrRolePb || 'HRD',
     jabatan_ttd_hrd: merged.hrSignatureTitle || 'Manager HR GA',
+    tahun_kontrak: String(merged.contractYear || signing.year),
+    tahun_kontrak_lalu: String((Number(merged.contractYear) || signing.year) - 1),
     tahun_umk_lalu: String(merged.prevUmkYear || signing.year - 1),
     umk_lalu: fmtRp(merged.prevUmkAmount),
     umk_lalu_terbilang: `${numberToIndonesianWords(merged.prevUmkAmount)} Rupiah`,

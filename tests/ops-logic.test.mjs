@@ -13,7 +13,8 @@ import {
   DEFAULT_OPS_SETTINGS,
   STAFF_ATTENDANCE_CODE_ORDER,
   DEFAULT_STAFF_REPORT_TOTAL_COLUMNS,
-  normalizeOpsSettings
+  normalizeOpsSettings,
+  calculateEkstraMeal
 } from '../assets/js/ops-settings-logic.js';
 import {
   SEED_STATIONERY_ITEMS,
@@ -44,6 +45,7 @@ import {
   resolveStaffWorkSchedule,
   evaluateStaffArrivalStatus,
   evaluateStaffDepartureStatus,
+  resolveStaffDayMealEligibility,
   getIndonesianNationalHolidaysPreset,
   parseHolidayImportRows,
   resolveDefaultStaffFocusDate,
@@ -78,6 +80,8 @@ import {
   buildDepartmentUsageChartData,
   computeNextPurchasePlanWindow,
   buildPurchasePlanSuggestions,
+  STATIONERY_MASTER_IMPORT_HEADERS,
+  STATIONERY_MASTER_SAMPLE_ROW,
   parseStationeryMasterImportRows,
   importStationeryMasterDataset,
   parseStationeryMovementImportRows,
@@ -494,10 +498,20 @@ test('Driver eligibility (SIKUS excluded), period rules, overtime flooring/break
   const fauziP1 = payrollP1.summaryRows.find(r => r.employee_no === 'KT 190403');
   const sugengP1 = payrollP1.summaryRows.find(r => r.employee_no === 'KT 021010');
   assert.equal(fauziP1.bpjsDeduction, 0);
-  assert.equal(fauziP1.grossPay, 147000 + 104000 + 50000); // 301,000
-  assert.equal(fauziP1.netPay, 301000);
+  // 5h OT -> 2 blocks (2h + 2h) = 6,000 + 8,000 = 14,000 Ekstra Meal
+  assert.equal(fauziP1.ekstraMealPay, 14000);
+  assert.equal(fauziP1.grossPay, 147000 + 104000 + 14000 + 50000); // 315,000
+  assert.equal(fauziP1.netPay, 315000);
   assert.equal(sugengP1.overtimeHours, 10); // 19h - 8h = 11h OT -> >8 deduct 1h = 10h OT (Rp 234,000)
   assert.equal(sugengP1.overtimePay, 234000);
+  assert.equal(sugengP1.ekstraMealPay, 44000); // 10h OT -> 5 blocks = 6k + 8k + 3*10k
+
+  // Ekstra Meal stepped brackets for all employees
+  assert.equal(calculateEkstraMeal(1.5), 0);
+  assert.equal(calculateEkstraMeal(2), 6000);
+  assert.equal(calculateEkstraMeal(4), 14000);
+  assert.equal(calculateEkstraMeal(6), 24000);
+  assert.equal(calculateEkstraMeal(8), 34000);
 
   // Summary gross MUST equal sum of Support + Indoor + Outdoor + Radin gross
   const deptGrossSum = ['Support', 'Indoor', 'Outdoor', 'Radin'].reduce((acc, sec) => acc + payrollP1.deptTotals[sec].grossPay, 0);
@@ -517,6 +531,20 @@ test('Driver eligibility (SIKUS excluded), period rules, overtime flooring/break
     rawEvents: []
   });
   assert.equal(payrollP2.summaryRows[0].bpjsDeduction, 207507);
+
+  // Full-month period option (1 - end of month) also applies BPJS deduction
+  const fullWin = getDriverPeriodWindow('2026-11', 'FULL');
+  assert.equal(fullWin.startDate, '2026-11-01');
+  assert.equal(fullWin.endDate, '2026-11-30');
+  assert.equal(fullWin.dates.length, 30);
+  const payrollFull = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'FULL',
+    drivers: driverSubset,
+    schedules: [],
+    rawEvents: []
+  });
+  assert.equal(payrollFull.summaryRows[0].bpjsDeduction, 207507);
 
   // Check buildDriverTimeChecksheetData exports cleanly
   assert.equal(typeof buildDriverTimeChecksheetData, 'function');
@@ -655,9 +683,9 @@ test('Staff PA (Pulang Awal) detection, 9-code Report Absensi totals, and Friday
   const events = [
     // 2026-11-06 Fri: on time + normal out -> H, gets Rp 10,000
     { employee_no: 'ST 130117', work_date: '2026-11-06', check_in: '07:25:00', check_out: '17:05:00', source_type: 'mitra_transaksi' },
-    // 2026-11-07 Sat: late 07:35:59 (<6 min) + early out 11:50:00 -> T (prio T), gets Rp 10,000
+    // 2026-11-07 Sat: late 07:35:59 (<6 min) + early out 11:50:00 -> T, Saturday < 15:00 gets Rp 0
     { employee_no: 'ST 130117', work_date: '2026-11-07', check_in: '07:35:59', check_out: '11:50:00', source_type: 'mitra_transaksi' },
-    // 2026-11-09 Mon: on-time in + PA out 16:40:00 -> PA, gets Rp 10,000
+    // 2026-11-09 Mon: on-time in + PA out 16:40:00 (>= 15:00) -> PA, gets Rp 10,000
     { employee_no: 'ST 130117', work_date: '2026-11-09', check_in: '07:28:00', check_out: '16:40:00', source_type: 'mitra_transaksi' },
     // 2026-11-10 Tue: late >= 6m 07:36:00 -> T, Rp 0 (no override)
     { employee_no: 'ST 130117', work_date: '2026-11-10', check_in: '07:36:00', check_out: '17:00:00', source_type: 'mitra_transaksi' },
@@ -693,9 +721,42 @@ test('Staff PA (Pulang Awal) detection, 9-code Report Absensi totals, and Friday
     mealOverrides
   });
   assert.equal(mealReport.dailyAmount, 10000);
-  // Eligible days: Nov 6 (H on time), Nov 7 (<6m late), Nov 9 (PA on time arrival), Nov 11 (manual allow) = 4 days
-  assert.equal(mealReport.rows[0].totalEligibleDays, 4);
-  assert.equal(mealReport.rows[0].totalAmount, 40000);
+  // Eligible days: Nov 6 (H on time + >= 15:00), Nov 9 (PA on time + >= 15:00), Nov 11 (manual allow) = 3 days (Saturday < 15:00 = Rp 0)
+  assert.equal(mealReport.rows[0].totalEligibleDays, 3);
+  assert.equal(mealReport.rows[0].totalAmount, 30000);
+
+  // Mon-Fri check-out < 15:00 forfeits meal allowance even when on time
+  const weekdayForfeit = resolveStaffDayMealEligibility({
+    workDate: '2026-11-09',
+    attCode: 'PA',
+    checkIn: '07:20:00',
+    checkOut: '14:55:00',
+    arrivalEval: { getsMealAllowance: true }
+  });
+  assert.equal(weekdayForfeit.eligible, false);
+  assert.equal(weekdayForfeit.amount, 0);
+
+  // Saturday check-out >= 15:00 grants Rp 7,500
+  const satEligible = resolveStaffDayMealEligibility({
+    workDate: '2026-11-07',
+    attCode: 'H',
+    checkIn: '07:25:00',
+    checkOut: '15:00:00'
+  });
+  assert.equal(satEligible.eligible, true);
+  assert.equal(satEligible.amount, 7500);
+
+  // Staff overtime Ekstra Meal triggers when working >= 2h past scheduleEnd
+  const staffOtReport = processStaffMealAllowanceReport({
+    anchorDateIso: '2026-11-06',
+    employees: [ajis],
+    rawEvents: [
+      { employee_no: 'ST 130117', work_date: '2026-11-06', check_in: '07:25:00', check_out: '21:10:00', source_type: 'mitra_transaksi' }
+    ]
+  });
+  const friDay = staffOtReport.rows[0].days.find(d => d.work_date === '2026-11-06');
+  assert.equal(friDay.ekstraMealAmount, 14000); // 4h10m OT -> 6000 + 8000
+  assert.equal(staffOtReport.rows[0].totalCombinedAmount, 24000);
 });
 
 test('Staff selected-date pending counter counts single date instead of full period, and Driver PDF uses Kekurangan Gaji Periode Lalu', () => {
@@ -838,14 +899,27 @@ test('Stationery multi-item batch input, 5-digit Material/3-digit Dept codes, Re
 });
 
 test('ATK Master & Stock Movement spreadsheet import computes chronological IN/OUT balances cleanly and flows into reports', () => {
-  // 1. Parse and import Master ATK (Clean Replace)
+  // Exact 6-column ATK Master Item & Stock Awal schema (no manual Min Stock)
+  assert.deepEqual(STATIONERY_MASTER_IMPORT_HEADERS, [
+    'Kode Material',
+    'Nama Item',
+    'Satuan',
+    'Satuan Minimal Pembelian',
+    'Konversi Satuan',
+    'Saldo Awal'
+  ]);
+  assert.deepEqual(Object.keys(STATIONERY_MASTER_SAMPLE_ROW), STATIONERY_MASTER_IMPORT_HEADERS);
+
+  // 1. Parse and import Master ATK (Clean Replace) using 6 exact columns
   const rawMaster = [
-    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Minimal Pembelian': 'PACK', 'Stock Awal': 50, 'Min Stock': 10 },
-    { 'Kode Material': '', 'Nama Item': 'KERTAS HVS A4', 'Satuan': 'RIM', 'Satuan Minimal Pembelian': 'RIM', 'Stock Awal': 5, 'Min Stock': 2 }
+    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Minimal Pembelian': 'PACK', 'Konversi Satuan': 36, 'Saldo Awal': 50 },
+    { 'Kode Material': '', 'Nama Item': 'KERTAS HVS A4', 'Satuan': 'RIM', 'Satuan Minimal Pembelian': 'RIM', 'Konversi Satuan': 1, 'Saldo Awal': 5 }
   ];
   const parsedMaster = parseStationeryMasterImportRows(rawMaster);
   assert.equal(parsedMaster.errors.length, 0);
   assert.equal(parsedMaster.rows.length, 2);
+  assert.equal(parsedMaster.rows[0].opening_stock, 50);
+  assert.equal(parsedMaster.rows[0].conversion_qty, 36);
 
   const masterRes = importStationeryMasterDataset({
     existingItems: SEED_STATIONERY_ITEMS,

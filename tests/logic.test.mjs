@@ -1429,5 +1429,107 @@ test('SQL migrations v5, v6, and v8 match frontend tables, home_base/company_ent
   assert.ok(v8Sql.includes('DELETE FROM public.attendance_upload_batches'), 'v8 migration must clear attendance_upload_batches');
 });
 
+test('Casing rules (Proper Case PKWT body, UPPERCASE signatures/Employee Directory), Contract Year auto-sync, Salary Tier, Tracking notes, Date Sort & Friendly Errors work accurately', async () => {
+  const { toProperCase, renderAgreementHtml: renderTpl } = await import('../assets/js/hris-renderer.js');
+  const { normalizeSalaryTier, resolveSalaryByTier, getContractPackageInfo, buildContractWorkspaceQueue: buildQueue } = await import('../assets/js/contract-logic.js');
+  const { normalizeEmployeeRecordUppercase, buildUnifiedTrackingRows: buildTracking } = await import('../assets/js/workspace-logic.js');
+  const { parseSortableDateMs, formatAppError } = await import('../assets/js/common.js');
+
+  // Req 9: Proper Case for PKWT body, UPPERCASE for signatures and Employee Directory
+  assert.equal(toProperCase('bUdI sAnToSo'), 'Budi Santoso');
+  assert.equal(toProperCase('JL. GUNUNG GANGSIR RT 02/RW 05, GEMPOL'), 'Jl. Gunung Gangsir RT 02/RW 05, Gempol');
+
+  const masters = JSON.parse(fs.readFileSync('assets/contracts/company-masters.json', 'utf8'));
+  const mbmMaster = masters.find(m => m.id === 'comp-mbm');
+  const pkwtTpl = fs.readFileSync('assets/contracts/01-pkwt.html', 'utf8');
+  const renderedPkwt = renderTpl(pkwtTpl, {
+    docSequence: '012',
+    signingDate: '2027-02-15',
+    durationMonths: 12,
+    employeeName: 'budi SANTOSO',
+    employeeAddress: 'DESA RANDUPITU RT 01/RW 02, GEMPOL',
+    employeePosition: 'Operator Produksi',
+    cashWageAmount: 5187681,
+    currUmkYear: 2026,
+    prevUmkYear: 2025,
+    currUmkAmount: 5187681,
+    prevUmkAmount: 4866890,
+    hrName: 'Diana Anita Sari'
+  }, mbmMaster);
+
+  assert.ok(renderedPkwt.includes('Budi Santoso'), 'PKWT party name must be Proper Case');
+  assert.ok(renderedPkwt.includes('Desa Randupitu RT 01/RW 02, Gempol'), 'PKWT address must be Proper Case');
+  assert.ok(renderedPkwt.includes('BUDI SANTOSO'), 'PKWT signature name must be UPPERCASE');
+  assert.ok(renderedPkwt.includes('DIANA ANITA SARI'), 'PKWT HR signature name must be UPPERCASE');
+  // Req 11: Contract year auto-syncs to 2027 while UMK statutory year remains 2026
+  assert.ok(renderedPkwt.includes('Tahun 2027') || renderedPkwt.includes('tahun 2027') || renderedPkwt.includes('2027'), 'PKWT contract year must follow signingDate');
+  // Req 8: Pure black ink & signature space
+  assert.ok(pkwtTpl.includes('#000000'));
+  assert.ok(pkwtTpl.includes('height: 108px') || pkwtTpl.includes('height:108px'));
+
+  const upperEmp = normalizeEmployeeRecordUppercase({
+    employee_no: 'kt 270101',
+    full_name: 'budi santoso',
+    department: 'produksi indoor',
+    position: 'operator cnc',
+    address: 'desa randupitu rt 01/rw 02',
+    employment_status: 'kontrak'
+  });
+  assert.equal(upperEmp.employee_no, 'KT 270101');
+  assert.equal(upperEmp.full_name, 'BUDI SANTOSO');
+  assert.equal(upperEmp.department, 'PRODUKSI INDOOR');
+  assert.equal(upperEmp.position, 'OPERATOR CNC');
+  assert.equal(upperEmp.address, 'DESA RANDUPITU RT 01/RW 02');
+  assert.equal(upperEmp.employment_status, 'KONTRAK');
+
+  // Req 14 & 15: Salary tier conditional resolution & Contract Package display
+  assert.equal(normalizeSalaryTier('', null, 5187681), 'umk_or_above');
+  assert.equal(normalizeSalaryTier('below_umk', 4400000, 5187681), 'below_umk');
+  assert.equal(resolveSalaryByTier({ salaryTier: 'umk_or_above', manualSalary: 4000000, currUmkAmount: 5187681 }), 5187681);
+  assert.equal(resolveSalaryByTier({ salaryTier: 'below_umk', manualSalary: 4400000, currUmkAmount: 5187681 }), 4400000);
+  assert.equal(getContractPackageInfo('umk_or_above', 5187681, 5187681).packageLabel, 'PKWT Only');
+  assert.equal(getContractPackageInfo('below_umk', 4400000, 5187681).packageLabel, '5 Rangkap');
+
+  // Req 12: official_department carried into contract queue
+  const queueWithDept = buildQueue({
+    referenceDate: '2026-11-15',
+    employees: [],
+    interviews: [
+      { id: 'int-d1', applicant_id: 'app-d1', candidate_name: 'Rina', interview_stage: 'Final Interview', decision: 'Accepted', official_position: 'Admin', official_department: 'FINANCE', salary_tier: 'umk_or_above', work_start_date: '2026-12-01' }
+    ],
+    applicants: [{ id: 'app-d1', full_name: 'Rina', nik: '3514000000000099', position: 'Admin' }]
+  });
+  assert.equal(queueWithDept.rows[0].department, 'FINANCE');
+  assert.equal(queueWithDept.rows[0].salaryTier, 'umk_or_above');
+
+  // Req 13: Tracking rows preserve stage notes & print.js renders .stage-note
+  const tracked = buildTracking({
+    applicants: [{ id: 'app-n1', full_name: 'Sari', nik: '3514000000000088', position: 'QC', stage: 'stage4_pending', created_at: '2026-11-01T00:00:00Z' }],
+    interviews: [{ applicant_id: 'app-n1', interview_stage: 'HR 1', interview_date: '2026-11-03', decision: 'Recommended', notes: 'Pengalaman QC bagus' }],
+    employees: [],
+    stage1Leads: [],
+    invitedCandidates: []
+  });
+  assert.equal(tracked[0].hr1.notes, 'Pengalaman QC bagus');
+  const printJsText = fs.readFileSync('assets/js/print.js', 'utf8');
+  const adminJsText = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(printJsText.includes('subnote') && printJsText.includes('cell.notes'), 'print.js must render stage notes under date');
+  assert.ok(adminJsText.includes('stage-note') && adminJsText.includes('cell.notes'), 'admin.js must render stage notes under date');
+
+  // Req 3: Chronological date parser handles ISO, DD-MM-YYYY, DD/MM/YYYY, and ID/EN short months
+  const d1 = parseSortableDateMs('05-11-2004');
+  const d2 = parseSortableDateMs('2019-06-15');
+  const d3 = parseSortableDateMs('18 Agu 2024');
+  const d4 = parseSortableDateMs('10/01/2026');
+  assert.ok(d1 < d2 && d2 < d3 && d3 < d4, 'Parsed dates must sort strictly chronologically');
+  assert.equal(parseSortableDateMs('-'), null);
+
+  // Bug B: Friendly error formatting for PostgreSQL / PostgREST error codes
+  assert.match(formatAppError({ code: '42501', message: 'permission denied for table portal_settings' }), /42501/);
+  assert.match(formatAppError({ code: '23505', message: 'duplicate key value' }), /duplikat/i);
+  assert.match(formatAppError({ code: 'PGRST204', message: 'Could not find column' }), /migrasi/i);
+});
+
+
 
 

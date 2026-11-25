@@ -126,7 +126,7 @@
 
   .kop-reholz-info {
     text-align: right;
-    color: #111111;
+    color: #000000;
     line-height: 1.3;
   }
 
@@ -136,11 +136,12 @@
     letter-spacing: 0.3px;
     text-transform: uppercase;
     margin-bottom: 2px;
+    color: #000000;
   }
 
   .kop-reholz-meta {
     font-size: 8.8pt;
-    color: #111111;
+    color: #000000;
     line-height: 1.26;
   }
 
@@ -248,8 +249,9 @@
   }
 
   .pb-note-box {
-    border: 1px solid #cbd5e1;
-    background: #f8fafc;
+    border: 1px solid #000000;
+    background: #ffffff;
+    color: #000000;
     padding: 7px 11px;
     margin: 10px 0;
     font-size: 9.4pt;
@@ -258,11 +260,11 @@
 
   /* ---- SIGNATURES ---- */
   .pb-signature-section {
-    margin-top: 16px;
+    margin-top: 14px;
   }
 
   .pb-signature-date {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .pb-signature-table {
@@ -283,7 +285,7 @@
   }
 
   .pb-sig-space {
-    height: 74px;
+    height: 108px;
   }
 
   .pb-sig-emp,
@@ -306,13 +308,13 @@
     justify-content: space-between;
     padding-top: 6px;
     font-size: 9pt;
-    color: #111111;
+    color: #000000;
     flex-shrink: 0;
   }
 
   .pb-paraf {
     font-style: italic;
-    color: #6b7280;
+    color: #000000;
   }
   </style>
 </head>
@@ -379,13 +381,13 @@
       </table>
 
       <p>
-        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}} Tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), Pihak Pertama dan Pihak Kedua telah mengadakan perundingan tentang pembayaran upah lembur tahun {{tahun_umk_sekarang}}, dengan kesepakatan yang dituangkan dalam bentuk Perjanjian Bersama ( PB ) dengan ketentuan – ketentuan sebagai berikut :
+        Pada hari ini {{hari_ttd}} tanggal {{tgl_ttd_angka}} ({{tgl_ttd_terbilang}}) bulan {{bulan_ttd}} Tahun {{tahun_ttd}} ({{tahun_ttd_terbilang}}), Pihak Pertama dan Pihak Kedua telah mengadakan perundingan tentang pembayaran upah lembur tahun {{tahun_kontrak}}, dengan kesepakatan yang dituangkan dalam bentuk Perjanjian Bersama ( PB ) dengan ketentuan – ketentuan sebagai berikut :
       </p>
 
       <ol class="pb-num-list">
         <li>Bahwa Pihak Pertama adalah perusahaan yang bergerak dalam bidang {{bidang_usaha_pb}}, sedangkan Pihak Kedua adalah pekerja pada Pihak Pertama.</li>
         <li>Bahwa hubungan kerja antara Pihak Pertama dengan Pihak Kedua telah berjalan secara harmonis dalam kemitraan kerja.</li>
-        <li>Bahwa pada perkembangan selanjutnya, mengenai upah lembur Pihak Kedua tahun {{tahun_umk_sekarang}}, Pihak Pertama menyatakan dirinya tidak mampu untuk melaksanakan upah lembur sesuai ketentuan yang berlaku.</li>
+        <li>Bahwa pada perkembangan selanjutnya, mengenai upah lembur Pihak Kedua tahun {{tahun_kontrak}}, Pihak Pertama menyatakan dirinya tidak mampu untuk melaksanakan upah lembur sesuai ketentuan yang berlaku.</li>
         <li>
           Bahwa mengenai upah lembur pihak Pihak Kedua, oleh karena Pihak Pertama merasa tidak mampu untuk melaksanakan upah lembur sesuai ketentuan yang berlaku, maka agar Pihak Pertama tetap dapat mempertahankan eksistensi untuk menjalankan usahanya dan Pihak Kedua juga tetap mendapatkan pekerjaan, karenanya Pihak Pertama dan Pihak Kedua sepakat untuk pembayaran upah lembur tersebut dengan cara :
           <ol class="pb-alpha-list">
@@ -449,7 +451,7 @@
               <div class="pb-sig-role">PIHAK KEDUA</div>
               <div class="pb-sig-role">KARYAWAN</div>
               <div class="pb-sig-space"></div>
-              <div class="pb-sig-emp">{{nama_karyawan}}</div>
+              <div class="pb-sig-emp">{{nama_karyawan_ttd}}</div>
             </td>
             <td>
               <div class="pb-sig-role">PIHAK PERTAMA,</div>

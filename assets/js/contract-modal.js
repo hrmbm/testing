@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261124-hrga-workspace-22';
+import { $, esc, formatAppError } from './common.js?v=20261124-hrga-workspace-22';
 import { bindSafeModalClose } from './admin-modals.js?v=20261124-hrga-workspace-22';
 import {
   CONTRACT_DURATION_OPTIONS,
@@ -13,9 +13,11 @@ import {
   computeEndDate,
   determineRequiredContractDocuments,
   formatContractCode,
+  normalizeSalaryTier,
   parseNumericCurrency,
   renderAgreementHtml,
   resolveDefaultContractStartDate,
+  resolveSalaryByTier,
   toIsoDate
 } from './contract-logic.js?v=20261124-hrga-workspace-22';
 
@@ -284,8 +286,15 @@ export async function openPkwtConfigModal({
               <label>Official Position
                 <input class="input" type="text" name="employeePosition" maxlength="120" required>
               </label>
-              <label class="pkwt-col-span-2">Monthly Cash Wage / Salary (IDR)
-                <input class="input" type="text" inputmode="numeric" name="cashWageAmount" required placeholder="e.g., 5.200.000">
+              <label class="pkwt-col-span-2">Salary Rule / Aturan Gaji
+                <select class="select" name="salaryTier">
+                  <option value="umk_or_above">UMK / Diatas UMK (PKWT Only)</option>
+                  <option value="below_umk">Di Bawah UMK (Input Manual — 5 Rangkap)</option>
+                </select>
+                <small id="pkwt-umk-tier-hint" class="subtle" style="display:block;margin-top:4px;font-weight:400"></small>
+              </label>
+              <label id="pkwt-manual-wage-wrap" class="pkwt-col-span-2 hidden">Monthly Cash Wage Below UMK (IDR)
+                <input class="input" type="text" inputmode="numeric" name="cashWageAmount" placeholder="Masukkan nominal di bawah UMK aktif">
               </label>
               <label class="pkwt-col-span-2">Address
                 <textarea class="textarea" name="employeeAddress" rows="2" maxlength="300" required placeholder="Full residential address for agreement"></textarea>
@@ -398,8 +407,26 @@ export async function openPkwtConfigModal({
   form.elements.employeePosition.value = record.position || '';
   form.elements.employeeAddress.value = record.address || '';
 
-  const initialSalary = parseNumericCurrency(record.salary) || parseNumericCurrency(activeSettings.currUmkAmount);
-  form.elements.cashWageAmount.value = formatCurrencyDigits(initialSalary);
+  const currUmk = parseNumericCurrency(activeSettings.currUmkAmount) || DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
+  const initialTier = normalizeSalaryTier(record.salaryTier || record.salary_tier, record.salary, currUmk);
+  form.elements.salaryTier.value = initialTier;
+  form.elements.cashWageAmount.value = (initialTier === 'below_umk' && parseNumericCurrency(record.salary) > 0)
+    ? formatCurrencyDigits(parseNumericCurrency(record.salary))
+    : '';
+
+  const manualWageWrap = $('#pkwt-manual-wage-wrap', modal);
+  const umkTierHint = $('#pkwt-umk-tier-hint', modal);
+  const syncSalaryTierFields = () => {
+    const tier = form.elements.salaryTier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+    manualWageWrap?.classList.toggle('hidden', tier !== 'below_umk');
+    form.elements.cashWageAmount.required = tier === 'below_umk';
+    if (umkTierHint) {
+      umkTierHint.textContent = tier === 'below_umk'
+        ? `Nominal gaji harus kurang dari UMK aktif (Rp ${currUmk.toLocaleString('id-ID')}) — mencetak 5 Rangkap.`
+        : 'Menggunakan standar UMK aktif (nominal gaji tidak perlu diisi — mencetak PKWT Only).';
+    }
+  };
+  syncSalaryTierFields();
 
   // Optional fields MUST start unchecked unless user explicitly checks them
   form.elements.includeKtp.checked = false;
@@ -443,6 +470,11 @@ export async function openPkwtConfigModal({
     const currentMaster = activeMaster();
     const sDate = toIsoDate(form.elements.signingDate.value);
     const months = Number(form.elements.durationMonths.value) || 12;
+    const salaryTier = form.elements.salaryTier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+    const manualWage = parseNumericCurrency(form.elements.cashWageAmount.value);
+    const resolvedWage = salaryTier === 'below_umk'
+      ? (manualWage > 0 && manualWage < currUmk ? manualWage : Math.max(0, currUmk - 1))
+      : currUmk;
     return {
       companyId: companySelect.value,
       docSequence: form.elements.docSequence.value.trim(),
@@ -464,8 +496,10 @@ export async function openPkwtConfigModal({
       employeeDepartment: form.elements.employeeDepartment.value.trim(),
       includeCustomNote: form.elements.includeCustomNote.checked,
       customNote: form.elements.customNote.value.trim(),
-      cashWageAmount: parseNumericCurrency(form.elements.cashWageAmount.value),
-      currUmkAmount: parseNumericCurrency(activeSettings.currUmkAmount),
+      salaryTier,
+      manualWageAmount: manualWage,
+      cashWageAmount: resolvedWage,
+      currUmkAmount: currUmk,
       currUmkYear: Number(activeSettings.currUmkYear) || DEFAULT_CONTRACT_SETTINGS.currUmkYear,
       prevUmkAmount: parseNumericCurrency(activeSettings.prevUmkAmount),
       prevUmkYear: Number(activeSettings.prevUmkYear) || DEFAULT_CONTRACT_SETTINGS.prevUmkYear,
@@ -531,6 +565,12 @@ export async function openPkwtConfigModal({
     renderPreview();
   };
 
+  form.elements.salaryTier.onchange = () => {
+    syncSalaryTierFields();
+    clearTimeout(previewDebounceTimer);
+    renderPreview();
+  };
+
   form.elements.cashWageAmount.oninput = () => {
     const inputEl = form.elements.cashWageAmount;
     const { formatted, caretPos } = preserveCaretCurrencyValue(inputEl.value, inputEl.selectionStart);
@@ -548,7 +588,7 @@ export async function openPkwtConfigModal({
   });
 
   form.oninput = event => {
-    if (['cashWageAmount', 'signingDate', 'durationMonths'].includes(event.target?.name)) {
+    if (['cashWageAmount', 'signingDate', 'durationMonths', 'salaryTier'].includes(event.target?.name)) {
       return;
     }
     schedulePreviewRender(180);
@@ -563,8 +603,9 @@ export async function openPkwtConfigModal({
       errorBox.textContent = 'Employee Name, Official Position, and Address are required before printing.';
       return;
     }
-    if (config.cashWageAmount <= 0) {
-      errorBox.textContent = 'Please enter a valid Monthly Cash Wage / Salary.';
+    if (config.salaryTier === 'below_umk' && (config.manualWageAmount <= 0 || config.manualWageAmount >= currUmk)) {
+      errorBox.textContent = `Nominal gaji manual di bawah UMK harus diisi dan kurang dari Rp ${currUmk.toLocaleString('id-ID')}.`;
+      form.elements.cashWageAmount.focus();
       return;
     }
 
@@ -690,10 +731,16 @@ export function openPostPrintEmployeeUpdateModal({
           <label>Contract End Date
             <input class="input" type="date" name="contractEndDate" required>
           </label>
-          <label>Monthly Salary (IDR)
-            <input class="input" type="text" inputmode="numeric" name="salary" required>
+          <label>Salary Rule / Aturan Gaji
+            <select class="select" name="salaryTier">
+              <option value="umk_or_above">UMK / Diatas UMK (PKWT Only)</option>
+              <option value="below_umk">Di Bawah UMK (Input Manual — 5 Rangkap)</option>
+            </select>
           </label>
-          <label>Address
+          <label id="pkwt-post-salary-wrap" class="hidden">Manual Salary Below UMK (IDR)
+            <input class="input" type="text" inputmode="numeric" name="salary" placeholder="Nominal di bawah UMK">
+          </label>
+          <label class="pkwt-col-span-2">Address
             <input class="input" type="text" name="address" maxlength="300" required>
           </label>
         </div>
@@ -717,6 +764,7 @@ export function openPostPrintEmployeeUpdateModal({
   const errorBox = $('#pkwt-post-error', modal);
   const submitBtn = $('#pkwt-post-submit', modal);
   const approveNowBtn = $('#pkwt-post-approve-now', modal);
+  const salaryWrap = $('#pkwt-post-salary-wrap', modal);
   errorBox.textContent = '';
 
   const startDate = toIsoDate(payload.signingDate || config.signingDate || new Date());
@@ -724,6 +772,9 @@ export function openPostPrintEmployeeUpdateModal({
   const endDate = payload.endDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.endDate)
     ? payload.endDate
     : computeEndDate(startDate, durationMonths);
+  const postUmkAmount = parseNumericCurrency(config.currUmkAmount) || DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
+  const initialSalaryNum = parseNumericCurrency(config.cashWageAmount || record.salary || 0);
+  const initialPostTier = normalizeSalaryTier(config.salaryTier || record.salaryTier, initialSalaryNum, postUmkAmount);
 
   form.elements.fullName.value = config.employeeName || currentEmployee?.full_name || record.fullName || '';
   form.elements.employeeNik.value = (config.includeNik ? config.employeeNik : '') || currentEmployee?.employee_no || record.employeeNik || '';
@@ -733,8 +784,17 @@ export function openPostPrintEmployeeUpdateModal({
   form.elements.contractNumber.value = formatContractCode(payload.docSequence || config.docSequence || '001', startDate, 'PKWT');
   form.elements.contractStartDate.value = startDate;
   form.elements.contractEndDate.value = endDate;
-  form.elements.salary.value = formatCurrencyDigits(config.cashWageAmount || record.salary || 0);
+  form.elements.salaryTier.value = initialPostTier;
+  form.elements.salary.value = (initialPostTier === 'below_umk' && initialSalaryNum > 0) ? formatCurrencyDigits(initialSalaryNum) : '';
   form.elements.address.value = config.employeeAddress || currentEmployee?.address || record.address || '';
+
+  const syncPostSalaryUi = () => {
+    const tier = form.elements.salaryTier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+    salaryWrap?.classList.toggle('hidden', tier !== 'below_umk');
+    form.elements.salary.required = tier === 'below_umk';
+  };
+  syncPostSalaryUi();
+  form.elements.salaryTier.onchange = syncPostSalaryUi;
 
   form.elements.salary.oninput = () => {
     const inputEl = form.elements.salary;
@@ -749,19 +809,32 @@ export function openPostPrintEmployeeUpdateModal({
   const runSave = async (approveImmediately) => {
     errorBox.textContent = '';
     if (!form.reportValidity()) return;
+    const salaryTier = form.elements.salaryTier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+    const manualSalaryNum = parseNumericCurrency(form.elements.salary.value);
+    if (salaryTier === 'below_umk' && (manualSalaryNum <= 0 || manualSalaryNum >= postUmkAmount)) {
+      errorBox.textContent = `Nominal gaji di bawah UMK harus diisi dan kurang dari Rp ${postUmkAmount.toLocaleString('id-ID')}.`;
+      form.elements.salary.focus();
+      return;
+    }
+    const resolvedSalary = resolveSalaryByTier({
+      salaryTier,
+      manualSalary: manualSalaryNum,
+      currUmkAmount: postUmkAmount
+    });
     const overrides = {
-      fullName: form.elements.fullName.value.trim(),
+      fullName: form.elements.fullName.value.trim().toUpperCase(),
       employeeNik: form.elements.employeeNik.value.trim().toUpperCase(),
-      position: form.elements.position.value.trim(),
-      department: form.elements.department.value.trim(),
-      employmentStatus: form.elements.employmentStatus.value,
+      position: form.elements.position.value.trim().toUpperCase(),
+      department: form.elements.department.value.trim().toUpperCase(),
+      employmentStatus: form.elements.employmentStatus.value.trim().toUpperCase(),
       contractNumber: form.elements.contractNumber.value.trim(),
       contractStartDate: form.elements.contractStartDate.value,
       contractEndDate: form.elements.contractEndDate.value,
       durationMonths,
       docSequence: String(payload.docSequence || config.docSequence || '001').trim(),
-      salary: parseNumericCurrency(form.elements.salary.value),
-      address: form.elements.address.value.trim()
+      salaryTier,
+      salary: resolvedSalary,
+      address: form.elements.address.value.trim().toUpperCase()
     };
     if (!overrides.employeeNik) {
       errorBox.textContent = 'Employee NIK is required.';
@@ -777,7 +850,7 @@ export function openPostPrintEmployeeUpdateModal({
       }
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Failed to submit employee update.';
+      errorBox.textContent = formatAppError(err, 'Gagal memperbarui data karyawan.');
     } finally {
       submitBtn.disabled = false;
       approveNowBtn.disabled = false;

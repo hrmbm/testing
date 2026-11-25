@@ -1,4 +1,4 @@
-import { $, esc } from './common.js?v=20261124-hrga-workspace-22';
+import { $, esc, formatAppError } from './common.js?v=20261124-hrga-workspace-22';
 import {
   INTERVIEW_STAGE_LABELS,
   INTERVIEW_DECISIONS,
@@ -16,9 +16,16 @@ import {
   normalizeHomeBase,
   buildEmployeeUserOptionLabel,
   normalizeInterviewDecision,
+  normalizeEmployeeRecordUppercase,
   verifyPinRevealPassword,
   maskPin
 } from './workspace-logic.js?v=20261124-hrga-workspace-22';
+import {
+  DEFAULT_CONTRACT_SETTINGS,
+  normalizeSalaryTier,
+  resolveSalaryByTier,
+  parseNumericCurrency
+} from './contract-logic.js?v=20261124-hrga-workspace-22';
 
 /**
  * Prevents accidental modal dismissal when a user highlights/drags text inside
@@ -139,6 +146,7 @@ export function openInterviewModal({
   existing = null,
   candidates = [],
   employees = [],
+  currUmkAmount = DEFAULT_CONTRACT_SETTINGS.currUmkAmount,
   onSave,
   onPrintPkwt = null
 }) {
@@ -192,8 +200,15 @@ export function openInterviewModal({
               <label>Join / Start Date
                 <input class="input" type="date" name="work_start_date">
               </label>
-              <label>Salary (IDR)
-                <input class="input" type="text" inputmode="numeric" name="salary" placeholder="e.g., 4.500.000">
+              <label>Salary Rule
+                <select class="select" name="salary_tier">
+                  <option value="umk_or_above">UMK / Diatas UMK</option>
+                  <option value="below_umk">Di Bawah UMK (Input Manual)</option>
+                </select>
+                <small id="int-salary-tier-hint" class="subtle" style="display:block;margin-top:4px;font-weight:400"></small>
+              </label>
+              <label id="int-salary-manual-wrap" class="hidden employee-notes">Manual Salary Below UMK (IDR)
+                <input class="input" type="text" inputmode="numeric" name="salary" placeholder="Nominal di bawah UMK aktif">
               </label>
               <label>Contract Duration
                 <select class="select" name="contract_duration_months">
@@ -207,11 +222,11 @@ export function openInterviewModal({
               <label>Official Position Title
                 <input class="input" type="text" name="official_position" maxlength="120" placeholder="Matches applied position">
               </label>
-              <label>Employee NIK
-                <input class="input" type="text" name="assigned_nik" maxlength="40" placeholder="e.g., ST 260706">
+              <label>Official Departemen Title
+                <input class="input" type="text" name="official_department" maxlength="120" placeholder="e.g., PRODUCTION / OFFICE / DRIVER">
               </label>
-              <label class="employee-notes">Contract Number
-                <input class="input" type="text" name="contract_number" maxlength="80" placeholder="e.g., 045/HRD-PKWT/XI/2026">
+              <label class="employee-notes">Employee NIK
+                <input class="input" type="text" name="assigned_nik" maxlength="40" placeholder="e.g., ST 260706">
               </label>
             </div>
           </div>
@@ -299,23 +314,39 @@ export function openInterviewModal({
   const normalizedExistingDecision = existing?.decision ? normalizeInterviewDecision(existing.decision) : '';
   decisionSelect.value = decisions.includes(normalizedExistingDecision) ? normalizedExistingDecision : '';
 
+  const resolvedUmkAmount = parseNumericCurrency(currUmkAmount) || DEFAULT_CONTRACT_SETTINGS.currUmkAmount;
+  const initialSalaryTier = normalizeSalaryTier(existing?.salary_tier, existing?.salary, resolvedUmkAmount);
+
   form.elements.notes.value = existing?.notes || '';
   form.elements.rejection_reason_category.value = existing?.rejection_reason_category || '';
   form.elements.rejection_reason_detail.value = existing?.rejection_reason_detail || '';
   form.elements.work_start_date.value = existing?.work_start_date || new Date().toISOString().slice(0, 10);
-  form.elements.salary.value = existing?.salary ? formatCurrencyDigits(existing.salary) : '';
+  form.elements.salary_tier.value = initialSalaryTier;
+  form.elements.salary.value = (initialSalaryTier === 'below_umk' && existing?.salary) ? formatCurrencyDigits(existing.salary) : '';
   form.elements.contract_duration_months.value = existing?.contract_duration_months ? String(existing.contract_duration_months) : '12';
   form.elements.official_position.value = existing?.official_position || '';
+  form.elements.official_department.value = existing?.official_department || '';
   form.elements.assigned_nik.value = existing?.assigned_nik || '';
-  form.elements.contract_number.value = existing?.contract_number || '';
 
   const rejectGroup = $('#int-final-reject-group', modal);
   const rejectDetailWrap = $('#int-reject-detail-wrap', modal);
   const acceptGroup = $('#int-final-accept-group', modal);
+  const salaryManualWrap = $('#int-salary-manual-wrap', modal);
+  const salaryTierHint = $('#int-salary-tier-hint', modal);
 
   const syncContractRange = () => {
     const calc = calculateContractDates(form.elements.work_start_date.value, Number(form.elements.contract_duration_months.value));
     form.elements.contract_range_display.value = calc ? calc.displayRange : '';
+  };
+
+  const syncSalaryTierUi = () => {
+    const tier = form.elements.salary_tier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+    salaryManualWrap.classList.toggle('hidden', tier !== 'below_umk');
+    if (tier === 'below_umk') {
+      salaryTierHint.textContent = `Di bawah UMK (< Rp ${resolvedUmkAmount.toLocaleString('id-ID')}) — cetak 5 Rangkap.`;
+    } else {
+      salaryTierHint.textContent = 'Mengikuti standar UMK / Diatas UMK (nominal tidak ditampilkan — PKWT Only).';
+    }
   };
 
   const printPkwtBtn = $('#int-modal-print-pkwt', modal);
@@ -339,6 +370,7 @@ export function openInterviewModal({
           form.elements.official_position.value = selectedCand.applied_position;
         }
       }
+      syncSalaryTierUi();
       syncContractRange();
     }
   };
@@ -362,7 +394,18 @@ export function openInterviewModal({
       const workStart = form.elements.work_start_date.value;
       const dur = Number(form.elements.contract_duration_months.value) || 12;
       const calc = calculateContractDates(workStart, dur);
-      const salaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
+      const salaryTier = form.elements.salary_tier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+      const manualSalaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
+      if (salaryTier === 'below_umk' && (!manualSalaryNum || manualSalaryNum >= resolvedUmkAmount)) {
+        errorBox.textContent = `Gaji manual di bawah UMK harus lebih besar dari 0 dan kurang dari Rp ${resolvedUmkAmount.toLocaleString('id-ID')}.`;
+        form.elements.salary.focus();
+        return;
+      }
+      const resolvedSalary = resolveSalaryByTier({
+        salaryTier,
+        manualSalary: manualSalaryNum,
+        currUmkAmount: resolvedUmkAmount
+      });
       onPrintPkwt({
         id: existing?.id || null,
         applicant_id: cand.applicant_id || null,
@@ -371,13 +414,15 @@ export function openInterviewModal({
         candidate_whatsapp: cand.candidate_whatsapp || '',
         applied_position: cand.applied_position || '',
         official_position: form.elements.official_position.value.trim() || cand.applied_position || '',
+        official_department: form.elements.official_department.value.trim(),
         assigned_nik: form.elements.assigned_nik.value.trim().toUpperCase(),
-        contract_number: form.elements.contract_number.value.trim(),
+        contract_number: existing?.contract_number || '',
         work_start_date: workStart,
         contract_duration_months: dur,
         contract_start_date: calc?.startIso || workStart,
         contract_end_date: calc?.endIso || '',
-        salary: Number.isFinite(salaryNum) && salaryNum > 0 ? salaryNum : null
+        salary_tier: salaryTier,
+        salary: resolvedSalary
       }, cand);
     };
   }
@@ -392,6 +437,7 @@ export function openInterviewModal({
   form.elements.rejection_reason_category.onchange = syncConditionalFields;
   form.elements.work_start_date.onchange = syncContractRange;
   form.elements.contract_duration_months.onchange = syncContractRange;
+  form.elements.salary_tier.onchange = syncSalaryTierUi;
   form.elements.salary.oninput = () => {
     form.elements.salary.value = formatCurrencyDigits(form.elements.salary.value);
   };
@@ -423,12 +469,14 @@ export function openInterviewModal({
       rejection_reason_detail: '',
       work_start_date: null,
       salary: null,
+      salary_tier: 'umk_or_above',
       contract_duration_months: null,
       contract_start_date: null,
       contract_end_date: null,
       official_position: '',
+      official_department: '',
       assigned_nik: '',
-      contract_number: ''
+      contract_number: existing?.contract_number || ''
     };
 
     if (isFinal && dec === 'Rejected') {
@@ -442,23 +490,36 @@ export function openInterviewModal({
       const workStart = form.elements.work_start_date.value;
       const dur = Number(form.elements.contract_duration_months.value);
       const calc = calculateContractDates(workStart, dur);
-      const salaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
+      const salaryTier = form.elements.salary_tier.value === 'below_umk' ? 'below_umk' : 'umk_or_above';
+      const manualSalaryNum = Number(String(form.elements.salary.value || '').replace(/\D/g, ''));
       const officialPos = form.elements.official_position.value.trim();
+      const officialDept = form.elements.official_department.value.trim();
       const nik = form.elements.assigned_nik.value.trim().toUpperCase();
-      const contractNo = form.elements.contract_number.value.trim();
       if (!calc) { errorBox.textContent = 'Please complete Join Date and Contract Duration.'; return; }
       if (!officialPos) { errorBox.textContent = 'Official Position Title is required.'; return; }
       if (!nik) { errorBox.textContent = 'Employee NIK is required before saving.'; return; }
+      if (salaryTier === 'below_umk' && (!manualSalaryNum || manualSalaryNum >= resolvedUmkAmount)) {
+        errorBox.textContent = `Gaji manual di bawah UMK harus diisi dan kurang dari Rp ${resolvedUmkAmount.toLocaleString('id-ID')}.`;
+        form.elements.salary.focus();
+        return;
+      }
+      const resolvedSalary = resolveSalaryByTier({
+        salaryTier,
+        manualSalary: manualSalaryNum,
+        currUmkAmount: resolvedUmkAmount
+      });
       extra = {
         ...extra,
         work_start_date: workStart,
-        salary: Number.isFinite(salaryNum) && salaryNum > 0 ? salaryNum : null,
+        salary: resolvedSalary,
+        salary_tier: salaryTier,
         contract_duration_months: dur,
         contract_start_date: calc.startIso,
         contract_end_date: calc.endIso,
         official_position: officialPos,
+        official_department: officialDept,
         assigned_nik: nik,
-        contract_number: contractNo
+        contract_number: existing?.contract_number || ''
       };
     }
 
@@ -485,7 +546,7 @@ export function openInterviewModal({
       }, cand);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Failed to save interview record.';
+      errorBox.textContent = formatAppError(err, 'Gagal menyimpan data interview.');
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save';
@@ -890,7 +951,7 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
     try {
-      await onSave({
+      await onSave(normalizeEmployeeRecordUppercase({
         id: employee?.id || null,
         applicant_id: employee?.applicant_id || applicant?.id || null,
         full_name: fd.full_name.trim(),
@@ -912,10 +973,10 @@ export function openFullEmployeeModal({ employee = null, applicant = null, onSav
         home_base: normalizeHomeBase(fd.home_base),
         company_entity: normalizeCompanyEntity(fd.company_entity),
         notes: fd.notes.trim()
-      });
+      }));
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Failed to save employee record.';
+      errorBox.textContent = formatAppError(err, 'Gagal menyimpan data karyawan.');
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save Record';
@@ -1005,7 +1066,7 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
       previewBox.classList.remove('hidden');
       previewBox.innerHTML = `<b>${rows.length} rows ready to import</b> (matched by unique NIK):<div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <b>${esc(r.employee_no)}</b> — ${esc(r.full_name)} (${esc(r.department || '—')} · ${esc(r.home_base || 'PASURUAN')} · ${esc(r.company_entity || 'MITRA')})</div>`).join('')}${rows.length > 8 ? `<div>… and ${rows.length - 8} more rows.</div>` : ''}</div>`;
     } catch (err) {
-      errorBox.textContent = err.message || 'Failed to read spreadsheet file.';
+      errorBox.textContent = formatAppError(err, 'Gagal membaca file spreadsheet.');
     }
   };
 
@@ -1018,7 +1079,7 @@ export function openEmployeeUploadModal({ onImport, onDownloadTemplate }) {
       await onImport(parsedRows);
       modal.classList.add('hidden');
     } catch (err) {
-      errorBox.textContent = err.message || 'Failed to import employee records.';
+      errorBox.textContent = formatAppError(err, 'Gagal mengimpor data karyawan.');
     } finally {
       confirmBtn.disabled = false;
       confirmBtn.textContent = 'Import to Employee Directory';
