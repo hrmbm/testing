@@ -124,26 +124,61 @@ const ATK_COMPACT_121 = [
   [121, 'STICK NOTE 76X76', 'PCS', 4]
 ];
 
+export function deriveDefaultPurchaseUnit(itemName = '', stockUnit = 'PCS') {
+  const name = String(itemName || '').trim().toUpperCase();
+  const unit = String(stockUnit || 'PCS').trim().toUpperCase() || 'PCS';
+  if (unit === 'PACK' || unit === 'RIM' || unit === 'BOX') return unit;
+  if (/KERTAS HVS/.test(name)) return 'RIM';
+  if (/(BOLPOINT|BULPOIN|BULPOINT|PENSIL KAYU|PENSIL MEKANIK|SPIDOL|STABILLO|ISI CUTTER|ISI STAPLES|TIPEX|REFIL|STICK NOTE|AMPLOP|MAP |STOFMAP|BUKU |KWITANSI|NOTA |SHEET PROTECTOR|DOUBLETAPE|ISOLASI|ISOLASSI|LEM )/.test(name)) {
+    return 'PACK';
+  }
+  return unit;
+}
+
 export const SEED_STATIONERY_ITEMS = ATK_COMPACT_121.map(([no, item_name, unit, current_stock]) => ({
   id: `atk-${String(no).padStart(3, '0')}`,
-  item_code: `ATK-${String(no).padStart(3, '0')}`,
+  item_code: String(10000 + no),
   item_name,
   unit,
+  purchase_unit: deriveDefaultPurchaseUnit(item_name, unit),
+  min_purchase_qty: 1,
   opening_stock: current_stock,
   current_stock,
   min_stock: ['BOLPOINT HITAM', 'KERTAS HVS FOLIO 70GRAM', 'SPIDOL WHITEBOARD HITAM'].includes(item_name) ? 10 : 2,
   is_active: true
 }));
 
+export const SEED_STATIONERY_DEPARTMENTS = [
+  'HR GA',
+  'INVENTORY & GUDANG',
+  'PURCHASING',
+  'PPC INDOOR',
+  'PPC OUTDOOR',
+  'MAINTENANCE',
+  'QC INDOOR',
+  'QC OUTDOOR',
+  'PRODUKSI INDOOR',
+  'PRODUKSI OUTDOOR',
+  'R & D',
+  'F & A',
+  'MARKETING SERVICE',
+  'RADIN MITRA LESTARI',
+  'FOTOCOPY'
+].map((name, idx) => ({
+  id: `dept-${String(idx + 1).padStart(3, '0')}`,
+  dept_code: String(101 + idx),
+  name
+}));
+
 export const SEED_STATIONERY_MOVEMENTS = [
-  { id: 'mv-01', tx_date: '2026-11-02', tx_type: 'IN', item_id: 'atk-016', item_code: 'ATK-016', item_name: 'BOLPOINT HITAM', qty: 60, unit: 'PCS', sloc_raw: 'HR GA', sloc_canonical: 'HR GA', reference_no: 'PO-2611-01', notes: 'Stok bulanan November', created_by: 'ADMIN', created_at: '2026-11-02T08:00:00Z' },
-  { id: 'mv-02', tx_date: '2026-11-03', tx_type: 'OUT', item_id: 'atk-016', item_code: 'ATK-016', item_name: 'BOLPOINT HITAM', qty: 24, unit: 'PCS', sloc_raw: 'PPC INDOOR', sloc_canonical: 'PPC INDOOR', reference_no: 'REQ-01', notes: 'Permintaan PPC Indoor', created_by: 'ADMIN', created_at: '2026-11-03T09:10:00Z' },
-  { id: 'mv-03', tx_date: '2026-11-05', tx_type: 'OUT', item_id: 'atk-016', item_code: 'ATK-016', item_name: 'BOLPOINT HITAM', qty: 18, unit: 'PCS', sloc_raw: 'GUDANG', sloc_canonical: 'INVENTORY & GUDANG', reference_no: 'REQ-02', notes: 'Alias GUDANG dipetakan ke INVENTORY & GUDANG', created_by: 'ADMIN', created_at: '2026-11-05T10:15:00Z' },
-  { id: 'mv-04', tx_date: '2026-11-08', tx_type: 'OUT', item_id: 'atk-050', item_code: 'ATK-050', item_name: 'KERTAS HVS FOLIO 70GRAM', qty: 12, unit: 'RIM', sloc_raw: 'MARKETING', sloc_canonical: 'MARKETING SERVICE', reference_no: 'REQ-03', notes: 'Alias MARKETING dipetakan ke MARKETING SERVICE', created_by: 'ADMIN', created_at: '2026-11-08T11:20:00Z' },
-  { id: 'mv-05', tx_date: '2026-11-10', tx_type: 'OUT', item_id: 'atk-098', item_code: 'ATK-098', item_name: 'SPIDOL WHITEBOARD HITAM', qty: 8, unit: 'PCS', sloc_raw: 'PRODUKSI INDOOR', sloc_canonical: 'PRODUKSI INDOOR', reference_no: 'REQ-04', notes: 'Papan monitoring line', created_by: 'ADMIN', created_at: '2026-11-10T13:40:00Z' },
-  { id: 'mv-06', tx_date: '2026-11-12', tx_type: 'OUT', item_id: 'atk-050', item_code: 'ATK-050', item_name: 'KERTAS HVS FOLIO 70GRAM', qty: 5, unit: 'RIM', sloc_raw: 'RADIN', sloc_canonical: 'RADIN MITRA LESTARI', reference_no: 'REQ-05', notes: 'Operasional Radin', created_by: 'ADMIN', created_at: '2026-11-12T14:05:00Z' },
-  { id: 'mv-07', tx_date: '2026-11-14', tx_type: 'OUT', item_id: 'atk-038', item_code: 'ATK-038', item_name: 'ISI CUTTER BESAR', qty: 16, unit: 'PCS', sloc_raw: 'PRODUKSI OUTDOOR', sloc_canonical: 'PRODUKSI OUTDOOR', reference_no: 'REQ-06', notes: 'Kebutuhan packing', created_by: 'ADMIN', created_at: '2026-11-14T15:00:00Z' },
-  { id: 'mv-08', tx_date: '2026-11-16', tx_type: 'OUT', item_id: 'atk-016', item_code: 'ATK-016', item_name: 'BOLPOINT HITAM', qty: 12, unit: 'PCS', sloc_raw: 'HR GA', sloc_canonical: 'HR GA', reference_no: 'REQ-07', notes: 'Pengambilan rutin HR GA', created_by: 'ADMIN', created_at: '2026-11-16T08:45:00Z' }
+  { id: 'mv-01', tx_date: '2026-11-02', tx_type: 'IN', item_id: 'atk-016', item_code: '10016', item_name: 'BOLPOINT HITAM', qty: 60, unit: 'PCS', sloc_raw: 'HR GA', sloc_canonical: 'HR GA', reference_no: '', notes: 'Stok bulanan November', created_by: 'ADMIN', created_at: '2026-11-02T08:00:00Z' },
+  { id: 'mv-02', tx_date: '2026-11-03', tx_type: 'OUT', item_id: 'atk-016', item_code: '10016', item_name: 'BOLPOINT HITAM', qty: 24, unit: 'PCS', sloc_raw: 'PPC INDOOR', sloc_canonical: 'PPC INDOOR', reference_no: '', notes: 'Permintaan PPC Indoor', created_by: 'ADMIN', created_at: '2026-11-03T09:10:00Z' },
+  { id: 'mv-03', tx_date: '2026-11-05', tx_type: 'OUT', item_id: 'atk-016', item_code: '10016', item_name: 'BOLPOINT HITAM', qty: 18, unit: 'PCS', sloc_raw: 'INVENTORY & GUDANG', sloc_canonical: 'INVENTORY & GUDANG', reference_no: '', notes: 'Pengambilan ATK Gudang', created_by: 'ADMIN', created_at: '2026-11-05T10:15:00Z' },
+  { id: 'mv-04', tx_date: '2026-11-08', tx_type: 'OUT', item_id: 'atk-050', item_code: '10050', item_name: 'KERTAS HVS FOLIO 70GRAM', qty: 12, unit: 'RIM', sloc_raw: 'MARKETING SERVICE', sloc_canonical: 'MARKETING SERVICE', reference_no: '', notes: 'Kebutuhan cetak Marketing Service', created_by: 'ADMIN', created_at: '2026-11-08T11:20:00Z' },
+  { id: 'mv-05', tx_date: '2026-11-10', tx_type: 'OUT', item_id: 'atk-098', item_code: '10098', item_name: 'SPIDOL WHITEBOARD HITAM', qty: 8, unit: 'PCS', sloc_raw: 'PRODUKSI INDOOR', sloc_canonical: 'PRODUKSI INDOOR', reference_no: '', notes: 'Papan monitoring line', created_by: 'ADMIN', created_at: '2026-11-10T13:40:00Z' },
+  { id: 'mv-06', tx_date: '2026-11-12', tx_type: 'OUT', item_id: 'atk-050', item_code: '10050', item_name: 'KERTAS HVS FOLIO 70GRAM', qty: 5, unit: 'RIM', sloc_raw: 'RADIN MITRA LESTARI', sloc_canonical: 'RADIN MITRA LESTARI', reference_no: '', notes: 'Operasional Radin', created_by: 'ADMIN', created_at: '2026-11-12T14:05:00Z' },
+  { id: 'mv-07', tx_date: '2026-11-14', tx_type: 'OUT', item_id: 'atk-038', item_code: '10038', item_name: 'ISI CUTTER BESAR', qty: 16, unit: 'PCS', sloc_raw: 'PRODUKSI OUTDOOR', sloc_canonical: 'PRODUKSI OUTDOOR', reference_no: '', notes: 'Kebutuhan packing', created_by: 'ADMIN', created_at: '2026-11-14T15:00:00Z' },
+  { id: 'mv-08', tx_date: '2026-11-16', tx_type: 'OUT', item_id: 'atk-016', item_code: '10016', item_name: 'BOLPOINT HITAM', qty: 12, unit: 'PCS', sloc_raw: 'HR GA', sloc_canonical: 'HR GA', reference_no: '', notes: 'Pengambilan rutin HR GA', created_by: 'ADMIN', created_at: '2026-11-16T08:45:00Z' }
 ];
 
 // Sumber kanonik 174 karyawan dari DK/Data_Karyawan_2026-11-24.xlsx

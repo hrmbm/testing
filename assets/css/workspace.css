@@ -3371,6 +3371,363 @@
   }
 }
 
+/* ============================================================================
+ * Dashboard — Module Photo Boxes & Attention Indicators
+ * ============================================================================ */
+.dashboard-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.dash-module-box {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 224px;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 14px;
+  background: #14191e;
+  color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.dash-module-box.has-attention {
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: 0 12px 28px rgba(180, 83, 9, 0.14);
+}
+
+.dash-module-box:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+  border-color: rgba(13, 92, 107, 0.55);
+}
+
+.dash-module-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: transform 0.35s ease;
+  z-index: 0;
+}
+
+.dash-module-box:hover .dash-module-bg {
+  transform: scale(1.04);
+}
+
+.dash-module-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    rgba(12, 18, 26, 0.42) 0%,
+    rgba(12, 18, 26, 0.68) 52%,
+    rgba(10, 15, 22, 0.94) 100%
+  );
+}
+
+.dash-module-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  padding: 18px 20px;
+}
+
+.dash-module-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-module-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(6px);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f8fafc;
+}
+
+.dash-module-att-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.92);
+  color: #111827;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.24);
+}
+
+.dash-module-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 28px;
+}
+
+.dash-module-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+}
+
+.dash-module-stat {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(241, 245, 249, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-module-alert {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fcd34d;
+  line-height: 1.35;
+}
+
+.dash-module-cta {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+
+.dash-module-box:hover .dash-module-cta {
+  color: #bae6fd;
+}
+
+@media (max-width: 760px) {
+  .dashboard-menu-grid {
+    grid-template-columns: 1fr;
+  }
+  .dash-module-box {
+    min-height: 196px;
+  }
+}
+
+/* ============================================================================
+ * Stationery — Batch Input, Report ATK Matrices, SVG Charts & Purchase Plan
+ * ============================================================================ */
+.atk-batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.atk-batch-table th,
+.atk-batch-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.atk-batch-table thead th {
+  background: var(--canvas);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+.atk-batch-qty {
+  width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.atk-batch-unit-cell {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.atk-matrix-wrap {
+  max-height: 66vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.atk-matrix-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.atk-matrix-table th,
+.atk-matrix-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  background: #ffffff;
+  vertical-align: middle;
+}
+
+.atk-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--canvas);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.atk-matrix-table th.num,
+.atk-matrix-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.atk-matrix-table th.c,
+.atk-matrix-table td.c {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.atk-sticky-item {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 210px;
+  max-width: 260px;
+  background: #ffffff;
+  box-shadow: 2px 0 4px rgba(15, 23, 42, 0.05);
+}
+
+.atk-matrix-table thead th.atk-sticky-item {
+  z-index: 5;
+  background: var(--canvas);
+}
+
+.atk-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.atk-chart-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.atk-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.atk-chart-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.atk-chart-body {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.atk-chart-svg {
+  width: 100%;
+  min-width: 420px;
+  height: auto;
+  display: block;
+}
+
+.atk-plan-input {
+  width: 92px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.atk-plan-window-input {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  min-width: 268px;
+}
+
+.atk-mat-name-input {
+  min-width: 280px;
+  width: 100%;
+}
+
+.atk-dept-code-input {
+  width: 84px;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.atk-dept-name-input {
+  min-width: 240px;
+  width: 100%;
+}
+
+.ops-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .atk-charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .atk-sticky-item {
+    position: static;
+    box-shadow: none;
+  }
+}
+
+
 
 
 

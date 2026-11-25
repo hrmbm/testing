@@ -573,12 +573,12 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
           <th rowspan="3" style="width:26px">NO</th>
           <th rowspan="3">NAMA</th>
           <th rowspan="3" style="width:72px">NIK</th>
-          <th rowspan="3" style="width:84px">UPAH PER<br>BULAN</th>
+          <th rowspan="3" style="width:78px">UPAH PER<br>BULAN</th>
           <th colspan="4">${esc(win.headerLabel)}</th>
-          <th rowspan="3" style="width:74px">KURANG<br>GAJI</th>
-          <th rowspan="3" style="width:82px">UPAH BRUTO</th>
-          <th rowspan="3" style="width:80px">JUMLAH<br>POT. BPJS</th>
-          <th rowspan="3" style="width:82px">UPAH NETTO</th>
+          <th rowspan="3" style="width:94px">KEKURANGAN<br>GAJI PERIODE LALU</th>
+          <th rowspan="3" style="width:78px">UPAH BRUTO</th>
+          <th rowspan="3" style="width:76px">JUMLAH<br>POT. BPJS</th>
+          <th rowspan="3" style="width:78px">UPAH NETTO</th>
         </tr>
         <tr>
           <th colspan="2">TOTAL</th>
@@ -659,8 +659,8 @@ function buildDeptTableHtml(sectionName, payroll, { includeFillerRows = true } =
           <th rowspan="3">NAMA</th>
           <th rowspan="3" style="width:80px">NIK</th>
           <th colspan="4">${esc(win.headerLabel)}</th>
-          <th rowspan="3" style="width:88px">KURANG<br>GAJI</th>
-          <th rowspan="3" style="width:94px">UPAH BRUTO</th>
+          <th rowspan="3" style="width:104px">KEKURANGAN<br>GAJI PERIODE LALU</th>
+          <th rowspan="3" style="width:92px">UPAH BRUTO</th>
         </tr>
         <tr>
           <th colspan="2">TOTAL</th>
@@ -874,7 +874,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
                 <th class="num">Indoor (Rp)</th>
                 <th class="num">Outdoor (Rp)</th>
                 <th class="num">Radin (Rp)</th>
-                <th class="num">Total Kurang Gaji</th>
+                <th class="num">Total Kekurangan Gaji Periode Lalu</th>
                 <th class="num">BPJS (${isP2 ? 'Aktif' : 'Non BPJS'})</th>
               </tr>
             </thead>
@@ -994,7 +994,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
               <button type="button" class="tab-btn ${activeUpahTab === 'Indoor' ? 'active' : ''}" data-upah-tab="Indoor">Indoor</button>
               <button type="button" class="tab-btn ${activeUpahTab === 'Outdoor' ? 'active' : ''}" data-upah-tab="Outdoor">Outdoor</button>
               <button type="button" class="tab-btn ${activeUpahTab === 'Radin' ? 'active' : ''}" data-upah-tab="Radin">Radin</button>
-              <button type="button" class="tab-btn ${activeUpahTab === 'kurang_gaji' ? 'active' : ''}" data-upah-tab="kurang_gaji">Kurang Gaji &amp; BPJS</button>
+              <button type="button" class="tab-btn ${activeUpahTab === 'kurang_gaji' ? 'active' : ''}" data-upah-tab="kurang_gaji">Kekurangan Gaji Periode Lalu &amp; BPJS</button>
               <button type="button" class="tab-btn ${activeUpahTab === 'audit' ? 'active' : ''}" data-upah-tab="audit">Audit</button>
             </div>
             <div class="ops-actions">${renderUpahActionHtml()}</div>
@@ -1089,7 +1089,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
 
   host.querySelector('#drv-rep-xlsx')?.addEventListener('click', async () => {
     const aoa = [
-      ['NO', 'NAMA', 'NIK', 'UPAH PER BULAN', 'HADIR', 'LEMBUR', 'HADIR (RP)', 'LEMBUR (RP)', 'KURANG GAJI', 'UPAH BRUTO', 'POT. BPJS', 'UPAH NETTO'],
+      ['NO', 'NAMA', 'NIK', 'UPAH PER BULAN', 'HADIR', 'LEMBUR', 'HADIR (RP)', 'LEMBUR (RP)', 'KEKURANGAN GAJI PERIODE LALU', 'UPAH BRUTO', 'POT. BPJS', 'UPAH NETTO'],
       ...payroll.summaryRows.map((r, i) => [
         i + 1, r.driver_name, r.employee_no, r.monthlyWage, Number(r.presentDays.toFixed(1)), Number(r.overtimeHours.toFixed(1)),
         r.normalPay, r.overtimePay, r.priorShortfall, r.grossPay, r.bpjsDeduction, r.netPay
@@ -1137,7 +1137,7 @@ export async function renderDriverReportsView(host, ctx, helpers) {
       invalidateOpsStateCache();
     }
     await renderDriverReportsView(host, ctx, helpers);
-    showInlineBanner(host, `Penyesuaian Kurang Gaji & BPJS periode ${win.periodKey} berhasil disimpan.`, 'ok');
+    showInlineBanner(host, `Penyesuaian Kekurangan Gaji Periode Lalu & BPJS periode ${win.periodKey} berhasil disimpan.`, 'ok');
   });
 }
 

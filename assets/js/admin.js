@@ -278,9 +278,10 @@ const TITLES = {
   attendanceDriverSchedule: 'Manual Driver Schedule',
   attendanceDriverManagement: 'Driver Attendance Management',
   attendanceDriverReports: 'Driver Reports',
-  stationeryInput: 'Stationery Stock Movement',
-  stationeryStock: 'Master Stock ATK',
-  stationeryReports: 'Stationery Consumption & Purchase Plan',
+  stationeryInput: 'Stock Movement Input',
+  stationeryStock: 'Report ATK',
+  stationeryReports: 'Purchase Plan Suggestion',
+  stationeryMaterials: 'Material Management',
   vehicleManagement: 'Vehicle Management',
   vehicleDatabase: 'Vehicle Database',
   vehicleExpenses: 'Vehicle Expenses',
@@ -934,7 +935,7 @@ async function fetchAndCacheFreshSnapshot() {
 function triggerBackgroundRevalidate() {
   if (bgRevalidatePromise || inflightRefreshPromise) return;
   bgRevalidatePromise = fetchAndCacheFreshSnapshot()
-    .then(result => {
+    .then(async result => {
       if (result && !result.changed) return;
       const activeTag = document.activeElement?.tagName;
       const isEditingInContent = Boolean(
@@ -945,7 +946,16 @@ function triggerBackgroundRevalidate() {
       const searchVal = $('#table-search')?.value?.trim();
       const autoRefreshViews = new Set(['dashboard', 'invited', 'stage1', 'stage2', 'stage3', 'interview', 'tracking', 'employees', 'contracts', 'print']);
       if (!isEditingInContent && !hasOpenModal && !searchVal && autoRefreshViews.has(activeView) && !shell.classList.contains('hidden')) {
-        if (activeView === 'dashboard') renderDashboard();
+        if (activeView === 'dashboard') {
+          await renderDashboard({
+            isDemoMode,
+            supabase,
+            profile: currentAdminProfile,
+            getEmployees: () => employees,
+            getLastDelta: () => lastEmployeeDelta,
+            setLastDelta: d => { lastEmployeeDelta = d; }
+          });
+        }
         else if (activeView === 'invited') renderInvitedView();
         else if (activeView === 'stage1') renderStage1();
         else if (activeView === 'stage2') renderStage2();
@@ -985,33 +995,13 @@ async function refreshData(force = false) {
   await fetchAndCacheFreshSnapshot();
 }
 
-function renderDashboard() {
+async function renderDashboard(opsCtx = null) {
   const total = applicants.length;
   const stage1 = stage1Leads.length;
-  const stage2 = applicants.filter(a => a.stage === 'application_submitted').length;
-  const stage3 = applicants.filter(a => a.stage === 'disc_completed').length;
-  const interviewCount = new Set(interviews.map(i => i.applicant_id || i.stage1_id).filter(Boolean)).size;
   const hired = employees.length;
-  const rejected = applicants.filter(a => a.stage === 'rejected').length;
-  const submitted = stage2 + stage3 + applicants.filter(a => ['stage4_pending', 'os_sent', 'hired'].includes(a.stage)).length;
-  const discDone = applicants.filter(a => Boolean(getDiscForApplicant(a)) || a.stage === 'disc_completed').length;
-  const stages = [
-    ['Lead Register', stage1, 'stage-muted'],
-    ['Form Submitted', stage2, 'stage-blue'],
-    ['DISC Completed', stage3, 'stage-teal'],
-    ['Interview Pipeline', interviewCount, 'stage-gold'],
-    ['Employees', hired, 'stage-green'],
-    ['Not Proceeding', rejected, 'stage-muted']
-  ];
-  const positionCounts = new Map();
-  applicants.forEach(item => {
-    const position = String(item.position || 'Unspecified').trim();
-    positionCounts.set(position, (positionCounts.get(position) || 0) + 1);
-  });
-  const topPositions = [...positionCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const maxPosition = Math.max(1, ...topPositions.map(item => item[1]));
-  const recent = applicants.slice(0, 7);
-  const attentionItems = buildDashboardAttentionItems({
+  const submitted = applicants.filter(a => ['application_submitted', 'disc_completed', 'stage4_pending', 'os_sent', 'hired'].includes(a.stage)).length;
+
+  const baseAttention = buildDashboardAttentionItems({
     employees,
     interviews,
     applicants,
@@ -1020,25 +1010,130 @@ function renderDashboard() {
     contractRequests: [],
     isRootAdmin: isRootAdminAccount(currentAdminProfile)
   });
-  const totalAttentionCount = attentionItems.reduce((sum, item) => sum + item.count, 0);
-  const attentionHtml = attentionItems.length
-    ? `<div class="attention-grid">${attentionItems.map(item => `
-        <button type="button" class="attention-card is-${esc(item.severity)}" data-view="${esc(item.targetView)}">
-          <div class="attention-card-top">
-            <span class="attention-category">${esc(item.category)}</span>
-            <span class="attention-count">${item.count}</span>
-          </div>
-          <div class="attention-title">${esc(item.title)}</div>
-          <div class="attention-desc">${esc(item.description)}</div>
-          <div class="attention-cta">${esc(item.ctaLabel)} <span aria-hidden="true">↗</span></div>
-        </button>`).join('')}</div>`
-    : `<div class="attention-empty">
-        <div>
-          <b>All caught up</b>
-          <p>No contracts expiring within 2 months and no pending items requiring action.</p>
+
+  let opsSummary = {
+    staffCount: employees.filter(e => !/SOPIR/i.test(String(e.position || '')) && !/ADMIN/i.test(String(e.employee_no || ''))).length,
+    staffPendingSelectedDate: 0,
+    staffFocusDate: '',
+    driverCount: employees.filter(e => /SOPIR/i.test(String(e.position || '')) && !/SIKUS/i.test(String(e.full_name || ''))).length,
+    driverAnomalyCount: 0,
+    vehicleCount: 0,
+    vehicleScheduleCount: 0
+  };
+  try {
+    const opsMod = await loadOpsViewsModule();
+    if (opsMod?.getDashboardModuleSummary) {
+      opsSummary = await opsMod.getDashboardModuleSummary(opsCtx || {
+        isDemoMode,
+        supabase,
+        profile: currentAdminProfile,
+        getEmployees: () => employees
+      });
+    }
+  } catch {}
+
+  const opsAttentionItems = [];
+  if (opsSummary.staffPendingSelectedDate > 0) {
+    opsAttentionItems.push({
+      id: 'ops-staff-pending',
+      category: 'Attendance Suite Staff',
+      title: 'Absensi Staff Perlu Penyesuaian',
+      description: `${opsSummary.staffPendingSelectedDate} staff belum disesuaikan (${opsSummary.staffFocusDate}).`,
+      count: opsSummary.staffPendingSelectedDate,
+      severity: 'warning',
+      targetView: 'attendanceStaffManagement',
+      ctaLabel: 'Open Staff Management'
+    });
+  }
+  if (opsSummary.driverAnomalyCount > 0) {
+    opsAttentionItems.push({
+      id: 'ops-driver-anomaly',
+      category: 'Drivers Command Center',
+      title: 'Data Janggal Absensi Driver',
+      description: `${opsSummary.driverAnomalyCount} jadwal driver belum cocok dengan tap absensi.`,
+      count: opsSummary.driverAnomalyCount,
+      severity: 'urgent',
+      targetView: 'attendanceDriverManagement',
+      ctaLabel: 'Atur Case Abnormal'
+    });
+  }
+
+  const allAttentionItems = [...opsAttentionItems, ...baseAttention];
+  const totalAttentionCount = allAttentionItems.reduce((sum, item) => sum + item.count, 0);
+
+  const recruitmentAttentionCount = baseAttention
+    .filter(it => ['leads-recommended', 'candidates-awaiting-disc', 'candidates-awaiting-interview', 'invited-sync', 'pkwt-final-interview', 'pkwt-expiring'].includes(it.id))
+    .reduce((sum, it) => sum + it.count, 0);
+
+  const moduleCards = [
+    {
+      key: 'recruitment',
+      title: 'Recruitment',
+      reportLabel: 'Tracking & Report',
+      targetView: 'tracking',
+      imgSrc: 'assets/img/dashboard_recruitment_1795563728630.jpg',
+      imgAlt: 'Modern corporate talent and interview studio',
+      statLine: `${total} candidates · ${stage1} leads · ${submitted} forms`,
+      attentionCount: recruitmentAttentionCount,
+      attentionNote: recruitmentAttentionCount > 0 ? `${recruitmentAttentionCount} items need follow-up` : ''
+    },
+    {
+      key: 'staff-attendance',
+      title: 'Attendance Suite Staff',
+      reportLabel: 'Staff Reports',
+      targetView: 'attendanceStaffReports',
+      imgSrc: 'assets/img/dashboard_staff_attendance_1795563729222.jpg',
+      imgAlt: 'Operations command workspace for staff scheduling',
+      statLine: `${opsSummary.staffCount} active staff non-driver`,
+      attentionCount: opsSummary.staffPendingSelectedDate,
+      attentionNote: opsSummary.staffPendingSelectedDate > 0
+        ? `${opsSummary.staffPendingSelectedDate} pending (${opsSummary.staffFocusDate})`
+        : ''
+    },
+    {
+      key: 'drivers-command',
+      title: 'Drivers Command Center',
+      reportLabel: 'Driver Reports',
+      targetView: 'attendanceDriverReports',
+      imgSrc: 'assets/img/dashboard_drivers_command_1795563729673.jpg',
+      imgAlt: 'Commercial logistics delivery fleet at dispatch yard',
+      statLine: `${opsSummary.driverCount} active drivers · Payroll & Checksheet`,
+      attentionCount: opsSummary.driverAnomalyCount,
+      attentionNote: opsSummary.driverAnomalyCount > 0
+        ? `${opsSummary.driverAnomalyCount} attendance anomalies`
+        : ''
+    },
+    {
+      key: 'vehicle-management',
+      title: 'Vehicle Management',
+      reportLabel: 'Vehicle Reports',
+      targetView: 'vehicleReports',
+      imgSrc: 'assets/img/dashboard_vehicle_management_1795563729593.jpg',
+      imgAlt: 'Corporate fleet inspection bay and transport vehicles',
+      statLine: `${opsSummary.vehicleCount} active fleet units · ${opsSummary.vehicleScheduleCount} trips`,
+      attentionCount: 0,
+      attentionNote: ''
+    }
+  ];
+
+  const attentionHtml = allAttentionItems.length
+    ? `<section class="panel dashboard-attention-panel" aria-label="Needs Attention">
+        <div class="panel-head">
+          <h3>Needs Attention</h3>
+          <span class="status-pill ${totalAttentionCount > 0 ? 'gold' : 'green'}">${totalAttentionCount} item${totalAttentionCount === 1 ? '' : 's'}</span>
         </div>
-        <button type="button" class="btn btn-secondary" data-view="contracts">Open Contracts ↗</button>
-      </div>`;
+        <div class="attention-grid">${allAttentionItems.map(item => `
+          <button type="button" class="attention-card is-${esc(item.severity)}" data-view="${esc(item.targetView)}">
+            <div class="attention-card-top">
+              <span class="attention-category">${esc(item.category)}</span>
+              <span class="attention-count">${item.count}</span>
+            </div>
+            <div class="attention-title">${esc(item.title)}</div>
+            <div class="attention-desc">${esc(item.description)}</div>
+            <div class="attention-cta">${esc(item.ctaLabel)} <span aria-hidden="true">↗</span></div>
+          </button>`).join('')}</div>
+      </section>`
+    : '';
 
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Workspace overview">
@@ -1048,55 +1143,41 @@ function renderDashboard() {
         <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
         <h1 class="atelier-hero-title">Welcome, ${esc(adminDisplayName)}</h1>
         <div class="atelier-hero-meta">
+          <span><b>${hired}</b> active employees</span>
+          <span aria-hidden="true">·</span>
           <span><b>${total}</b> recorded candidates</span>
           <span aria-hidden="true">·</span>
-          <span><b>${submitted}</b> forms submitted</span>
-          <span aria-hidden="true">·</span>
-          <span><b>${hired}</b> active employees</span>
+          <span><b>${opsSummary.driverCount}</b> active drivers</span>
         </div>
       </div>
     </section>
-    <section class="workspace-modules" aria-label="Workspace modules">
-      <button type="button" class="workspace-module" data-view="interview" data-module="attendance">
-        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
-        <span class="workspace-module-copy"><b>Interview Pipeline</b><span>HR 1 · HR 2 · User · Final</span></span>
-        <span class="workspace-module-arrow" aria-hidden="true">↗</span>
-      </button>
-      <button type="button" class="workspace-module" data-view="contracts" data-module="vehicle">
-        <span class="workspace-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>
-        <span class="workspace-module-copy"><b>Contracts &amp; PKWT</b><span>Expiring Renewals &amp; Final Interview</span></span>
-        <span class="workspace-module-arrow" aria-hidden="true">↗</span>
-      </button>
+
+    <section class="dashboard-menu-grid" aria-label="Operational Modules">
+      ${moduleCards.map(card => `
+        <button type="button" class="dash-module-box ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
+          <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}">
+          <div class="dash-module-scrim" aria-hidden="true"></div>
+          <div class="dash-module-inner">
+            <div class="dash-module-top">
+              <span class="dash-module-eyebrow">${esc(card.reportLabel)}</span>
+              ${card.attentionCount > 0
+                ? `<span class="dash-module-att-badge">Attention: ${card.attentionCount}</span>`
+                : ''}
+            </div>
+            <div class="dash-module-bottom">
+              <h2 class="dash-module-title">${esc(card.title)}</h2>
+              <p class="dash-module-stat">${esc(card.statLine)}</p>
+              ${card.attentionCount > 0 ? `<p class="dash-module-alert">${esc(card.attentionNote)}</p>` : ''}
+              <span class="dash-module-cta">Open ${esc(card.reportLabel)} <span aria-hidden="true">↗</span></span>
+            </div>
+          </div>
+        </button>
+      `).join('')}
     </section>
-    <section class="panel dashboard-attention-panel" aria-label="Needs Attention">
-      <div class="panel-head">
-        <h3>Needs Attention</h3>
-        <span class="status-pill ${totalAttentionCount > 0 ? 'gold' : 'green'}">${totalAttentionCount} item${totalAttentionCount === 1 ? '' : 's'}</span>
-      </div>
-      ${attentionHtml}
-    </section>
-    <section class="dashboard-metrics" aria-label="Recruitment metrics">
-      <article class="stat-card"><div class="stat-top"><span>Lead Register</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></span></div><div class="stat-number">${stage1}</div><div class="stat-note">Initial incoming leads</div></article>
-      <article class="stat-card"><div class="stat-top"><span>Forms Submitted</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span></div><div class="stat-number">${submitted}</div><div class="stat-note">Stage 2 applications</div></article>
-      <article class="stat-card"><div class="stat-top"><span>DISC Completed</span><span class="stat-icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span></div><div class="stat-number">${discDone}</div><div class="stat-note">Completed DISC tests</div></article>
-      <article class="stat-card"><div class="stat-top"><span>Employees</span><span class="stat-icon-tile walnut" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span></div><div class="stat-number">${hired}</div><div class="stat-note">Employee Directory</div></article>
-    </section>
-    <div id="recruitment-routemap" class="dashboard-v2-grid">
-      <section class="panel dashboard-process-panel">
-        <div class="panel-head"><h3>Recruitment Routemap</h3><span class="dashboard-total">${total} candidates</span></div>
-        <div class="dashboard-process-list">${stages.map(([label, value, tone]) => `<div class="dashboard-process-row"><div class="dashboard-process-copy"><span>${esc(label)}</span><b>${value}</b></div><div class="dashboard-process-track"><span class="${tone}" style="width:${Math.max(0, Math.min(100, (value / Math.max(1, total, stage1)) * 100))}%"></span></div></div>`).join('')}</div>
-      </section>
-      <section class="panel dashboard-position-panel">
-        <div class="panel-head"><h3>Applicants by Position</h3></div>
-        <div class="dashboard-position-list">${topPositions.length ? topPositions.map(([name, value]) => `<div class="dashboard-position-row"><div><span>${esc(name)}</span><div class="dashboard-process-track"><span style="width:${value / maxPosition * 100}%"></span></div></div><b>${value}</b></div>`).join('') : '<div class="dashboard-empty">No position data</div>'}</div>
-      </section>
-    </div>
-    <section class="panel table-panel dashboard-recent-panel">
-      <div class="panel-head"><h3>Recent Applicants</h3><button class="btn btn-secondary" id="refresh-dashboard">Refresh ↻</button></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>APPLICANT</th><th>POSITION</th><th>AGE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${applicantRows(recent, 'print')}</tbody></table></div>
-    </section>`;
-  bindPrint();
-  $('#refresh-dashboard')?.addEventListener('click', () => loadView('dashboard', true));
+
+    ${attentionHtml}
+  `;
+
   $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));
   scheduleIdleModulePreload();
 }
@@ -6429,7 +6510,7 @@ async function loadView(view, forceRefresh = false) {
     'opsSettings', 'attendanceUpload', 'attendanceCalendar', 'attendanceStaffHoliday',
     'attendanceStaffManagement', 'attendanceStaffReports', 'attendanceDriverSchedule',
     'attendanceDriverManagement', 'attendanceDriverReports', 'stationeryInput',
-    'stationeryStock', 'stationeryReports'
+    'stationeryStock', 'stationeryReports', 'stationeryMaterials', 'vehicleReports'
   ]);
   if (dataViews.has(view) && (!lastDataFetchedAt || forceRefresh)) {
     let hasCached = false;
@@ -6455,7 +6536,7 @@ async function loadView(view, forceRefresh = false) {
 
   try {
     if (dataViews.has(view)) await refreshData(forceRefresh);
-    if (view === 'dashboard') renderDashboard();
+    if (view === 'dashboard') await renderDashboard(opsCtx);
     else if (view === 'invited') renderInvitedView();
     else if (view === 'stage1') renderStage1();
     else if (view === 'stage2') renderStage2();
@@ -6478,6 +6559,8 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'stationeryInput') await (await loadOpsViewsModule()).renderStationeryInputView(content, opsCtx);
     else if (view === 'stationeryStock') await (await loadOpsViewsModule()).renderStationeryStockView(content, opsCtx);
     else if (view === 'stationeryReports') await (await loadOpsViewsModule()).renderStationeryReportsView(content, opsCtx);
+    else if (view === 'stationeryMaterials') await (await loadOpsViewsModule()).renderStationeryMaterialsView(content, opsCtx);
+    else if (view === 'vehicleReports') await (await loadOpsViewsModule()).renderVehicleReportsView(content, opsCtx);
     else if (view === 'systemImport') renderSystemImport();
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();

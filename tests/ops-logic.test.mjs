@@ -44,7 +44,9 @@ import {
   evaluateStaffArrivalStatus,
   evaluateStaffDepartureStatus,
   getIndonesianNationalHolidaysPreset,
-  parseHolidayImportRows
+  parseHolidayImportRows,
+  resolveDefaultStaffFocusDate,
+  countPendingStaffForSelectedDate
 } from '../assets/js/attendance-logic.js';
 import { buildDeptPdfSheetHtml } from '../assets/js/driver-reports.js';
 import {
@@ -64,7 +66,17 @@ import {
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
-  buildStationeryReports
+  applyStationeryBatchTransactions,
+  normalizeMaterialCode,
+  generateNextMaterialCode,
+  generateNextDepartmentCode,
+  normalizeStationeryItems,
+  normalizeStationeryDepartments,
+  buildStationeryReports,
+  sliceTopFavoriteItems,
+  buildDepartmentUsageChartData,
+  computeNextPurchasePlanWindow,
+  buildPurchasePlanSuggestions
 } from '../assets/js/stationery-logic.js';
 
 // Helper removed (deleted obsolete Project Tambahan fixtures)
@@ -671,3 +683,143 @@ test('Staff PA (Pulang Awal) detection, 9-code Report Absensi totals, and Friday
   assert.equal(mealReport.rows[0].totalEligibleDays, 4);
   assert.equal(mealReport.rows[0].totalAmount, 40000);
 });
+
+test('Staff selected-date pending counter counts single date instead of full period, and Driver PDF uses Kekurangan Gaji Periode Lalu', () => {
+  const sampleStaff = SEED_STAFF_SAMPLES.slice(0, 10);
+  const processed = processStaffAttendancePeriod({
+    periodKey: '2026-11',
+    employees: sampleStaff,
+    rawEvents: [
+      { employee_no: sampleStaff[0].employee_no, work_date: '2026-11-02', check_in: '07:20:00', check_out: '17:05:00' }
+    ],
+    calendarDays: [{ cal_date: '2026-11-01', day_type: 'WEEKEND' }]
+  });
+
+  const focusDate = resolveDefaultStaffFocusDate({
+    windowDates: processed.window.dates,
+    dayMeta: processed.dayMeta,
+    rawEvents: [{ work_date: '2026-11-02' }]
+  });
+  assert.equal(focusDate, '2026-11-02');
+  const pendingForDay = countPendingStaffForSelectedDate({
+    summaries: processed.summaries,
+    focusDate
+  });
+  // 10 employees, 1 punched cleanly -> 9 pending on that single date (NOT 9 * 27 days)
+  assert.equal(pendingForDay, 9);
+
+  // Driver report sheet label uses Kekurangan Gaji Periode Lalu
+  const payroll = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: getEligibleDrivers(SEED_DRIVERS, DEFAULT_OPS_SETTINGS),
+    schedules: [],
+    rawEvents: [],
+    settings: DEFAULT_OPS_SETTINGS
+  });
+  const html = buildDeptPdfSheetHtml('Support', payroll, DEFAULT_OPS_SETTINGS);
+  assert.ok(html.includes('KEKURANGAN<br>GAJI PERIODE LALU'));
+});
+
+test('Stationery multi-item batch input, 5-digit Material/3-digit Dept codes, Report ATK charts, and Purchase Plan Suggestions work accurately', () => {
+  // Material 5-digit code & Dept 3-digit code helpers
+  assert.equal(normalizeMaterialCode('ATK-007'), '10007');
+  assert.equal(generateNextMaterialCode([{ item_code: '10001' }, { item_code: '10121' }]), '10122');
+  const normItems = normalizeStationeryItems(SEED_STATIONERY_ITEMS);
+  assert.equal(normItems.length, 121);
+  assert.ok(normItems.every(it => /^\d{5}$/.test(it.item_code)));
+  const pen = normItems.find(it => /BOLPOINT/i.test(it.item_name));
+  assert.equal(pen.purchase_unit, 'PACK');
+
+  const normDepts = normalizeStationeryDepartments([]);
+  assert.equal(normDepts.length, 15);
+  assert.ok(normDepts.every(d => /^\d{3}$/.test(d.dept_code)));
+  assert.equal(generateNextDepartmentCode(normDepts), '116');
+
+  // Multi-item batch commit for one date + type + department with optional empty notes
+  const itemA = normItems[0];
+  const itemB = normItems[1];
+  const stocked = applyStationeryBatchTransactions({
+    items: normItems,
+    ledger: [],
+    txDate: '2026-11-05',
+    txType: 'IN',
+    department: 'HR GA',
+    rows: [
+      { item_id: itemA.id, qty: 12, notes: '' },
+      { item_id: itemB.id, qty: 8, notes: '' }
+    ]
+  });
+  assert.equal(stocked.entries.length, 2);
+  assert.equal(stocked.entries[0].reference_no, '');
+  assert.equal(stocked.entries[1].notes, '');
+
+  const batchOut = applyStationeryBatchTransactions({
+    items: stocked.items,
+    ledger: stocked.ledger,
+    txDate: '2026-11-10',
+    txType: 'OUT',
+    department: 'HR GA',
+    rows: [
+      { item_id: itemA.id, qty: 5, notes: 'Pengambilan rutin' },
+      { item_id: itemB.id, qty: 2, notes: '' }
+    ]
+  });
+  assert.equal(batchOut.entries.length, 2);
+
+  // Report ATK: stockPeriodik, deptOutReport, favoriteItems, sliceTopFavoriteItems
+  const reports = buildStationeryReports({ items: batchOut.items, ledger: batchOut.ledger, monthKey: '2026-11' });
+  const topA = reports.favoriteItems[0];
+  assert.equal(topA.id, itemA.id);
+  assert.equal(topA.totalOut, 5);
+  assert.equal(topA.byDept['HR GA'], 5);
+  assert.equal(reports.stockPeriodik.find(r => r.id === itemA.id).inQty, 12);
+  assert.equal(reports.stockPeriodik.find(r => r.id === itemA.id).outQty, 5);
+  assert.equal(sliceTopFavoriteItems(reports.favoriteItems, 10).length, 10);
+  assert.equal(sliceTopFavoriteItems(reports.favoriteItems, 'ALL').length, 121);
+
+  // Chart series share consistent Rank item order and multiple-of-10 Y axis
+  const chartData = buildDepartmentUsageChartData({
+    favoriteItems: reports.favoriteItems,
+    topN: 10,
+    scopeMode: 'both',
+    scaleMax: 0
+  });
+  assert.equal(chartData.scaleMax, 10);
+  assert.deepEqual(chartData.ticks, [0, 2, 4, 6, 8, 10]);
+  assert.equal(chartData.globalSeries.key, 'GLOBAL');
+  assert.equal(chartData.globalSeries.bars[0].item_id, itemA.id);
+  assert.equal(chartData.departmentSeries[0].bars[0].item_id, itemA.id); // Same Rank #1 order in HR GA chart
+
+  // Purchase Plan Window: Weekly (Sun-Sat), Bi-Weekly (Sun-Sat +13d), Monthly (1st-last of next month)
+  const wWin = computeNextPurchasePlanWindow('1w', '2026-11-24'); // Tue Nov 24 -> next Sun Nov 29..Sat Dec 05
+  assert.equal(wWin.startDate, '2026-11-29');
+  assert.equal(wWin.endDate, '2026-12-05');
+  const bwWin = computeNextPurchasePlanWindow('2w', '2026-11-24');
+  assert.equal(bwWin.startDate, '2026-11-29');
+  assert.equal(bwWin.endDate, '2026-12-12');
+  const mWin = computeNextPurchasePlanWindow('1m', '2026-11-24');
+  assert.equal(mWin.startDate, '2026-12-01');
+  assert.equal(mWin.endDate, '2026-12-31');
+
+  // Purchase Plan Suggestion defaults & manual overrides
+  const plan = buildPurchasePlanSuggestions({
+    items: batchOut.items,
+    ledger: batchOut.ledger,
+    purchasePeriod: '1w',
+    referenceDate: '2026-11-24',
+    manualOverrides: {
+      [itemA.id]: { minPurchase: 3, decisionQty: '5' }
+    }
+  });
+  const planRowA = plan.rows.find(r => r.id === itemA.id);
+  assert.equal(planRowA.rank, 1);
+  assert.equal(planRowA.periodRequirement, Math.ceil(planRowA.periodRequirement));
+  assert.equal(planRowA.minStock, planRowA.periodRequirement * 2);
+  assert.equal(planRowA.minPurchase, 3);
+  assert.equal(planRowA.decisionQty, '5');
+  const planRowB = plan.rows.find(r => r.id === itemB.id);
+  assert.equal(planRowB.minPurchase, 1);
+  assert.equal(planRowB.decisionQty, '');
+});
+

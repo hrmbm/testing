@@ -75,8 +75,7 @@ export const DEFAULT_CANONICAL_SLOCS = [
   'F & A',
   'MARKETING SERVICE',
   'RADIN MITRA LESTARI',
-  'FOTOCOPY',
-  'SECURITY'
+  'FOTOCOPY'
 ];
 
 export const DEFAULT_SLOC_ALIASES = {

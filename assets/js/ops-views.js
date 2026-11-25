@@ -12,6 +12,7 @@ import {
 import {
   SEED_EMPLOYEES,
   SEED_STATIONERY_ITEMS,
+  SEED_STATIONERY_DEPARTMENTS,
   SEED_STATIONERY_MOVEMENTS,
   SEED_DRIVERS,
   SEED_STAFF_SAMPLES,
@@ -43,7 +44,9 @@ import {
   parseHolidayImportRows,
   resolveStaffWorkSchedule,
   evaluateStaffArrivalStatus,
-  addMinutesToScheduleCutoff
+  addMinutesToScheduleCutoff,
+  resolveDefaultStaffFocusDate,
+  countPendingStaffForSelectedDate
 } from './attendance-logic.js?v=20261124-hrga-workspace-20';
 import {
   isEligibleDriver,
@@ -61,7 +64,17 @@ import {
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
-  buildStationeryReports
+  applyStationeryBatchTransactions,
+  buildStationeryReports,
+  normalizeMaterialCode,
+  generateNextMaterialCode,
+  generateNextDepartmentCode,
+  normalizeStationeryItems,
+  normalizeStationeryDepartments,
+  sliceTopFavoriteItems,
+  buildDepartmentUsageChartData,
+  buildPurchasePlanSuggestions,
+  deriveDefaultPurchaseUnit
 } from './stationery-logic.js?v=20261124-hrga-workspace-20';
 import {
   parseEmployeeWorksheetAoa,
@@ -73,6 +86,8 @@ import {
 const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
 const DRIVER_ADJUSTMENTS_KEY = 'hrga_driver_adjustments_v1';
+const STATIONERY_PLAN_MANUAL_KEY = 'hrga_atk_purchase_plan_manual_v1';
+const STATIONERY_DEPTS_KEY = 'hrga_atk_departments_v1';
 const OPS_STATE_TTL_MS = 120000;
 
 let opsStateCache = null;
@@ -178,9 +193,42 @@ async function exportSheetXlsx(filename, sheetName, aoa) {
 // ============================================================================
 // State Adapter (Demo LocalStorage + Live Supabase)
 // ============================================================================
+function readStoredPlanManual() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STATIONERY_PLAN_MANUAL_KEY) || '{}');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredPlanManual(map) {
+  try {
+    localStorage.setItem(STATIONERY_PLAN_MANUAL_KEY, JSON.stringify(map || {}));
+  } catch {}
+}
+
+function readStoredDepartments() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STATIONERY_DEPTS_KEY) || 'null');
+    return Array.isArray(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredDepartments(depts) {
+  try {
+    localStorage.setItem(STATIONERY_DEPTS_KEY, JSON.stringify(depts || []));
+  } catch {}
+}
+
 function buildInitialDemoOpsState() {
+  const settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
+  const stationeryDepartments = normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, settings.stationery.canonicalSlocs);
+  settings.stationery.canonicalSlocs = stationeryDepartments.map(d => d.name);
   return {
-    settings: normalizeOpsSettings(DEFAULT_OPS_SETTINGS),
+    settings,
     calendarDays: structuredClone(SEED_CALENDAR_DAYS),
     uploadBatches: structuredClone(SEED_ATTENDANCE_BATCHES),
     rawEvents: structuredClone(SEED_ATTENDANCE_EVENTS),
@@ -191,8 +239,10 @@ function buildInitialDemoOpsState() {
     driverSchedules: structuredClone(SEED_DRIVER_SCHEDULES),
     driverReconciliations: structuredClone(SEED_DRIVER_RECONCILIATIONS),
     driverAdjustments: structuredClone(SEED_DRIVER_ADJUSTMENTS),
-    stationeryItems: structuredClone(SEED_STATIONERY_ITEMS),
-    stationeryMovements: structuredClone(SEED_STATIONERY_MOVEMENTS)
+    stationeryItems: normalizeStationeryItems(structuredClone(SEED_STATIONERY_ITEMS)),
+    stationeryDepartments,
+    stationeryMovements: structuredClone(SEED_STATIONERY_MOVEMENTS),
+    stationeryPlanManual: readStoredPlanManual()
   };
 }
 
@@ -201,8 +251,14 @@ export function readDemoOpsState() {
     const raw = JSON.parse(localStorage.getItem(DEMO_OPS_STORAGE_KEY) || 'null');
     if (raw && typeof raw === 'object') {
       const seed = buildInitialDemoOpsState();
+      const settings = normalizeOpsSettings(raw.settings || seed.settings);
+      const rawDepts = Array.isArray(raw.stationeryDepartments) && raw.stationeryDepartments.length
+        ? raw.stationeryDepartments
+        : (readStoredDepartments() || seed.stationeryDepartments);
+      const stationeryDepartments = normalizeStationeryDepartments(rawDepts, settings.stationery.canonicalSlocs);
+      settings.stationery.canonicalSlocs = stationeryDepartments.map(d => d.name);
       return {
-        settings: normalizeOpsSettings(raw.settings || seed.settings),
+        settings,
         calendarDays: Array.isArray(raw.calendarDays) ? raw.calendarDays : seed.calendarDays,
         uploadBatches: Array.isArray(raw.uploadBatches) ? raw.uploadBatches : seed.uploadBatches,
         rawEvents: Array.isArray(raw.rawEvents) ? raw.rawEvents : seed.rawEvents,
@@ -213,8 +269,14 @@ export function readDemoOpsState() {
         driverSchedules: Array.isArray(raw.driverSchedules) ? raw.driverSchedules : seed.driverSchedules,
         driverReconciliations: Array.isArray(raw.driverReconciliations) ? raw.driverReconciliations : seed.driverReconciliations,
         driverAdjustments: raw.driverAdjustments && typeof raw.driverAdjustments === 'object' ? raw.driverAdjustments : seed.driverAdjustments,
-        stationeryItems: Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : seed.stationeryItems,
-        stationeryMovements: Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : seed.stationeryMovements
+        stationeryItems: normalizeStationeryItems(
+          Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : seed.stationeryItems
+        ),
+        stationeryDepartments,
+        stationeryMovements: Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : seed.stationeryMovements,
+        stationeryPlanManual: raw.stationeryPlanManual && typeof raw.stationeryPlanManual === 'object'
+          ? raw.stationeryPlanManual
+          : readStoredPlanManual()
       };
     }
   } catch {}
@@ -250,7 +312,7 @@ async function loadOpsState(ctx, force = false) {
     const state = buildInitialDemoOpsState();
     try {
       const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
-        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY]),
+        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY]),
         sb.from('attendance_calendar_days').select('*').order('cal_date', { ascending: true }),
         sb.from('attendance_upload_batches').select('*').order('created_at', { ascending: false }).limit(30),
         sb.from('attendance_raw_events').select('*').order('work_date', { ascending: false }).limit(2500),
@@ -261,12 +323,23 @@ async function loadOpsState(ctx, force = false) {
         sb.from('stationery_items').select('*').order('item_name', { ascending: true }),
         sb.from('stationery_movements').select('*').order('created_at', { ascending: false }).limit(600)
       ]);
+      let deptRows = null;
       if (Array.isArray(setRes.data)) {
         const opsRow = setRes.data.find(r => r.key === OPS_SETTINGS_KEY);
         const adjRow = setRes.data.find(r => r.key === DRIVER_ADJUSTMENTS_KEY);
+        const deptRow = setRes.data.find(r => r.key === STATIONERY_DEPTS_KEY);
+        const planRow = setRes.data.find(r => r.key === STATIONERY_PLAN_MANUAL_KEY);
         if (opsRow?.value) state.settings = normalizeOpsSettings(opsRow.value);
         if (adjRow?.value && typeof adjRow.value === 'object') state.driverAdjustments = adjRow.value;
+        if (Array.isArray(deptRow?.value)) deptRows = deptRow.value;
+        if (planRow?.value && typeof planRow.value === 'object') state.stationeryPlanManual = planRow.value;
       }
+      state.stationeryDepartments = normalizeStationeryDepartments(
+        deptRows || readStoredDepartments() || SEED_STATIONERY_DEPARTMENTS,
+        state.settings.stationery.canonicalSlocs
+      );
+      state.settings.stationery.canonicalSlocs = state.stationeryDepartments.map(d => d.name);
+
       if (Array.isArray(calRes.data)) state.calendarDays = calRes.data;
       if (Array.isArray(batRes.data)) state.uploadBatches = batRes.data;
       if (Array.isArray(evRes.data)) state.rawEvents = evRes.data;
@@ -274,7 +347,7 @@ async function loadOpsState(ctx, force = false) {
       if (Array.isArray(holRes.data)) state.conditionalHolidays = holRes.data;
       if (Array.isArray(cutiRes.data)) state.cutiBalances = cutiRes.data;
       if (Array.isArray(drvRes.data)) state.driverSchedules = drvRes.data;
-      if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) state.stationeryItems = stkItemRes.data;
+      if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) state.stationeryItems = normalizeStationeryItems(stkItemRes.data);
       if (Array.isArray(stkMvRes.data)) state.stationeryMovements = stkMvRes.data;
 
       // Optional v7 tables (graceful if v7 hasn't run yet)
@@ -318,7 +391,6 @@ export async function renderAttendanceUploadView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Attendance Upload Center</h2>
-            <p class="ops-sub">Multi-source import (<b>Laporan Transaksi</b>, <b>Data Presensi</b>, <b>Radin Excel</b>) dengan normalisasi waktu <code>${esc(state.settings.attendance.timezone)}</code>, deduplikasi sidik jari otomatis, dan antrean pengecualian.</p>
           </div>
           <div class="ops-actions">
             ${ctx.isDemoMode ? '<button type="button" class="btn btn-secondary" id="ops-att-demo-sample">Simulasi Upload Ulang (Dedup Check)</button>' : ''}
@@ -575,7 +647,6 @@ export async function renderAttendanceCalendarView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Calendar Settings &amp; Hari Besar Nasional</h2>
-            <p class="ops-sub">Import Hari Besar Nasional (preset tahunan atau upload Excel/CSV) dan ubah manual kapan saja dengan alasan khusus. Hari Minggu ditandai kuning dan Hari Besar ditandai merah pada Time Checksheet Driver.</p>
           </div>
           <div class="ops-actions">
             <input type="month" id="ops-cal-month" class="input" value="${esc(currentMonth)}" aria-label="Pilih bulan kalender">
@@ -682,7 +753,6 @@ export async function renderStaffHolidayView(host, ctx) {
       <div class="ops-head">
         <div>
           <h2>Conditional Holiday Schedule (Staff)</h2>
-          <p class="ops-sub">Daftarkan staf/departemen yang dijadwalkan masuk pada hari libur/Minggu untuk menerima kredit lembur hari libur (<code>+${state.settings.attendance.holidayCreditWeight}</code> hari).</p>
         </div>
       </div>
       <div class="ops-form-grid">
@@ -775,7 +845,6 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
         <div class="ops-head">
           <div>
             <h3>Rekonsiliasi Snapshot Direktori Karyawan (Delta Check)</h3>
-            <p class="ops-sub">Unggah file <code>Data_Karyawan_*.xlsx</code> untuk membandingkan perubahan per NIK tanpa menimpa data secara membabi-buta.</p>
           </div>
           <div class="ops-actions">
             ${ctx.isDemoMode ? '<button type="button" class="btn btn-secondary" id="ops-delta-demo">Simulasi Snapshot Baru</button>' : ''}
@@ -858,7 +927,6 @@ export async function renderEmployeeExtensionsView(host, tab, ctx) {
       <div class="ops-head">
         <div>
           <h3>Manajemen Cuti Karyawan &amp; Import Cuti.xlsx</h3>
-          <p class="ops-sub">Kalkulasi bersih tanpa <code>#REF!</code>, pemisahan cuti Disetujui (<code>CT 1–6</code>) vs Pending, serta gerbang konfirmasi &le; ${state.settings.cuti.confirmationDaysThreshold} hari menjelang pembaruan hak cuti.</p>
         </div>
         <div class="ops-actions">
           <input id="ops-cuti-file" type="file" accept=".xls,.xlsx" class="input" style="max-width:250px">
@@ -997,7 +1065,6 @@ export async function renderStaffManagementView(host, ctx) {
   const periodKey = host.dataset.staffPeriod || '2026-11';
   const entityFilter = host.dataset.staffEntity || 'ALL';
   const statusFilter = host.dataset.staffStatus || 'ALL';
-  const focusDate = host.dataset.staffFocusDate || 'ALL';
   const query = (host.dataset.staffQuery || '').trim().toLowerCase();
 
   const employees = getStaffEmployeesList(ctx, state.settings, entityFilter, false);
@@ -1012,6 +1079,15 @@ export async function renderStaffManagementView(host, ctx) {
     mealOverrides: state.staffMealOverrides || [],
     settings: state.settings
   });
+
+  if (!host.dataset.staffFocusDate) {
+    host.dataset.staffFocusDate = resolveDefaultStaffFocusDate({
+      windowDates: computed.window.dates,
+      dayMeta: computed.window.dayMeta,
+      rawEvents: state.rawEvents
+    });
+  }
+  const focusDate = host.dataset.staffFocusDate || 'ALL';
 
   const attCfg = state.settings.attendance;
   const codebook = attCfg.codebook || DEFAULT_STAFF_CODEBOOK;
@@ -1049,9 +1125,13 @@ export async function renderStaffManagementView(host, ctx) {
     );
   }
 
-  const totalPending = computed.summaries.reduce((s, r) => s + r.counts.PENDING, 0);
-  const totalAutoFlag = computed.summaries.reduce((s, r) => s + r.counts.T + r.counts.PA, 0);
-  const totalConfirmed = computed.summaries.reduce((s, r) => s + r.days.filter(d => d.is_confirmed).length, 0);
+  const totalPending = countPendingStaffForSelectedDate({ summaries: computed.summaries, focusDate });
+  const totalAutoFlag = focusDate === 'ALL'
+    ? computed.summaries.reduce((s, r) => s + r.counts.T + r.counts.PA, 0)
+    : computed.summaries.filter(r => r.days.some(d => d.work_date === focusDate && (d.code === 'T' || d.code === 'PA'))).length;
+  const totalConfirmed = focusDate === 'ALL'
+    ? computed.summaries.reduce((s, r) => s + r.days.filter(d => d.is_confirmed).length, 0)
+    : computed.summaries.filter(r => r.days.some(d => d.work_date === focusDate && d.is_confirmed)).length;
 
   const staffPage = Number(host.dataset.staffPage || 1) || 1;
   const staffSizeRaw = host.dataset.staffPageSize || '50';
@@ -1092,7 +1172,6 @@ export async function renderStaffManagementView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Staff Attendance Management</h2>
-            <p class="ops-sub">Pusat penyesuaian kode kehadiran &amp; uang makan Staff (Non-Driver). Periode <b>${esc(computed.window.startDate)}</b> s/d <b>${esc(computed.window.endDate)}</b> · Terlambat (<code>T</code>) &ge; ${attCfg.lateThresholdMinutes} mnt · Pulang Awal (<code>PA</code>) &ge; ${attCfg.earlyLeaveThresholdMinutes} mnt · Uang Makan Rp ${Number(attCfg.mealAllowanceAmount || 0).toLocaleString('id-ID')}/hari.</p>
           </div>
           <div class="ops-actions">
             <input id="ops-staff-period" type="month" class="input" value="${esc(periodKey)}" aria-label="Pilih periode payroll staff">
@@ -1128,7 +1207,7 @@ export async function renderStaffManagementView(host, ctx) {
       <div class="kpi-grid ops-kpi-4">
         <div class="card kpi-card"><div class="kpi-label">Staff Non-Driver</div><div class="kpi-val">${computed.summaries.length}</div></div>
         <div class="card kpi-card"><div class="kpi-label">Terlambat (T) / PA</div><div class="kpi-val">${totalAutoFlag}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Perlu Penyesuaian</div><div class="kpi-val ${totalPending ? 'text-danger' : ''}">${totalPending}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Perlu Penyesuaian${focusDate !== 'ALL' ? ` (${esc(focusDate)})` : ''}</div><div class="kpi-val ${totalPending ? 'text-danger' : ''}">${totalPending}</div></div>
         <div class="card kpi-card"><div class="kpi-label">Disesuaikan Manual</div><div class="kpi-val">${totalConfirmed}</div></div>
       </div>
 
@@ -1223,7 +1302,7 @@ export async function renderStaffManagementView(host, ctx) {
 
   host.querySelector('#ops-staff-period')?.addEventListener('change', e => {
     host.dataset.staffPeriod = e.target.value || '2026-11';
-    host.dataset.staffFocusDate = 'ALL';
+    delete host.dataset.staffFocusDate;
     host.dataset.staffPage = '1';
     renderStaffManagementView(host, ctx);
   });
@@ -1504,7 +1583,6 @@ export async function renderStaffReportsView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Staff Reports</h2>
-            <p class="ops-sub">Laporan Absensi periode payroll (<b>Tgl ${attCfg.cutoffStartDay} s/d ${attCfg.cutoffEndDay}</b>) dan Laporan Uang Makan mingguan (<b>Jumat s/d Kamis · ${fmtIdr(mealRep.dailyAmount)}/hari</b>).</p>
           </div>
           <div class="ops-actions">
             <select id="ops-srep-entity" class="input" aria-label="Filter perusahaan laporan staff">
@@ -1552,7 +1630,6 @@ export async function renderStaffReportsView(host, ctx) {
           <div class="drv-upah-toolbar">
             <div>
               <h3>2. Report Uang Makan Staff — ${esc(mealRep.window.label)}</h3>
-              <p class="ops-sub">Berhak Rp ${Number(mealRep.dailyAmount).toLocaleString('id-ID')}/hari jika tap masuk &lt; ${attCfg.mealThresholdMinutes} menit dari jam masuk jadwal atau mendapat penyesuaian manual.</p>
             </div>
             <div class="ops-actions">
               <button type="button" class="btn btn-sm btn-secondary" id="ops-meal-prev">&lt; Minggu Sebelumnya</button>
@@ -1707,7 +1784,6 @@ export async function renderDriverScheduleView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Manual Driver Schedule</h2>
-            <p class="ops-sub">Hanya menampilkan karyawan jabatan <b>${esc(drvCfg.requiredPositionKeyword)}</b> (dikecualikan: <code>${esc(drvCfg.excludedDriverNames.join(', '))}</code>). Satu hari dapat memiliki lebih dari satu kegiatan maupun lebih dari satu blok departemen (<b>Support, Indoor, Outdoor, Radin</b>) yang langsung terhubung ke Time Checksheet.</p>
           </div>
         </div>
         ${validation.conflicts.length || validation.nikWarnings.length ? `
@@ -1947,7 +2023,6 @@ export async function renderDriverManagementView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Cocokan Dengan Absensi &amp; Penanganan Case Abnormal Driver</h2>
-            <p class="ops-sub">Mencocokkan Jadwal Manual Driver (<b>S/I/O/R</b>) dengan data tap absensi untuk menghitung Hadir, Lembur (floor 0.5j, &gt;8j potong 1j), dan kasus lembur <b>lewat hari</b> sebelum masuk ke Report.</p>
           </div>
           <div class="ops-actions">
             <input type="month" id="ops-drv-rec-month" class="input" value="${esc(monthKey)}" aria-label="Pilih bulan rekonsiliasi driver">
@@ -1964,7 +2039,6 @@ export async function renderDriverManagementView(host, ctx) {
           <div class="ops-head" style="margin-bottom:8px">
             <div>
               <h3 class="text-danger">Data Janggal Terdeteksi (${rec.anomalies.length}) — Segera Cek Sebelum Cetak Report</h3>
-              <p class="ops-sub">Contoh: ada Clock-In tetapi Clock-Out kosong karena lembur hingga lewat hari berikutnya.</p>
             </div>
           </div>
           <div class="drv-anomaly-list">
@@ -1989,7 +2063,6 @@ export async function renderDriverManagementView(host, ctx) {
           <div class="ops-head">
             <div>
               <h3>Kalkulator &amp; Koreksi Case Abnormal — ${esc(editingRow.driver_name)} (${esc(editingRow.work_date)})</h3>
-              <p class="ops-sub">Isi jam masuk &amp; tanggal/jam pulang aktual (mendukung lembur hingga lewat hari berikutnya).</p>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" id="ops-abn-cancel">Tutup Editor</button>
           </div>
@@ -2167,67 +2240,122 @@ export async function renderDriverReportsView(host, ctx) {
 }
 
 // ============================================================================
-// 6. STATIONERY & ATK (INPUT, STOCK MANAGEMENT, CONSUMPTION & PURCHASE PLAN)
+// 6. STATIONERY & ATK (BATCH INPUT, REPORT ATK 4-IN-1, PURCHASE PLAN SUGGESTION, MATERIAL MANAGEMENT)
 // ============================================================================
 export async function renderStationeryInputView(host, ctx) {
   const state = await loadOpsState(ctx);
-  const slocs = state.settings.stationery.canonicalSlocs;
-  const aliases = state.settings.stationery.slocAliases;
+  const departments = state.stationeryDepartments?.length
+    ? state.stationeryDepartments
+    : normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, state.settings.stationery.canonicalSlocs);
+  const items = normalizeStationeryItems(state.stationeryItems || []);
+  const itemById = new Map(items.map(it => [it.id, it]));
+  const todayIso = state.stationeryMovements?.[0]?.tx_date || '2026-11-24';
+
+  const buildItemOptionsHtml = (selectedId = '') => items.map(it =>
+    `<option value="${esc(it.id)}" data-unit="${esc(it.unit)}" ${it.id === selectedId ? 'selected' : ''}>${esc(it.item_code)} — ${esc(it.item_name)} (Stok: ${it.current_stock} ${esc(it.unit)})</option>`
+  ).join('');
+
+  const buildBatchRowHtml = (idx = 0) => {
+    const firstItem = items[idx % items.length] || items[0];
+    return `
+      <tr class="atk-batch-row">
+        <td>
+          <select class="input atk-batch-item" aria-label="Pilih item ATK">
+            ${buildItemOptionsHtml(firstItem?.id || '')}
+          </select>
+        </td>
+        <td>
+          <input type="number" min="1" step="1" class="input atk-batch-qty" value="1" aria-label="Qty barang">
+        </td>
+        <td class="atk-batch-unit-cell"><span class="pill atk-batch-unit">${esc(firstItem?.unit || 'PCS')}</span></td>
+        <td>
+          <input type="text" class="input atk-batch-notes" placeholder="Opsional" aria-label="Keterangan item">
+        </td>
+        <td>
+          <button type="button" class="btn btn-sm btn-secondary atk-batch-del">Hapus</button>
+        </td>
+      </tr>
+    `;
+  };
 
   host.innerHTML = `
     <div class="ops-stack">
       <div class="card ops-card">
         <div class="ops-head">
           <div>
-            <h2>Stationery / ATK — Input Barang Masuk &amp; Keluar</h2>
-            <p class="ops-sub">Setiap transaksi tervalidasi saldo akhir <b>&ge; 0</b> (stok minus diblokir) dan SLOC langsung dipetakan ke nama kanonik (<code>GUDANG &rarr; INVENTORY &amp; GUDANG</code>, dll).</p>
+            <h2>Stock Movement Input</h2>
+          </div>
+          <div class="ops-actions">
+            <button type="button" class="btn btn-secondary" id="ops-atk-add-row">+ Tambah Item</button>
+            <button type="button" class="btn btn-primary" id="ops-atk-submit">Simpan Transaksi</button>
           </div>
         </div>
-        <div class="ops-form-grid">
-          <label class="ops-field"><span>Tanggal</span><input id="ops-atk-date" type="date" class="input" value="2026-11-23"></label>
-          <label class="ops-field"><span>Jenis Transaksi</span>
+
+        <div class="ops-form-grid" style="margin-top:8px">
+          <label class="ops-field"><span>Tanggal</span><input id="ops-atk-date" type="date" class="input" value="${esc(todayIso)}"></label>
+          <label class="ops-field"><span>Type</span>
             <select id="ops-atk-type" class="input">
-              <option value="OUT">OUT — Barang Keluar (Pemakaian SLOC)</option>
-              <option value="IN">IN — Barang Masuk (Pembelian / Stok)</option>
-              <option value="ADJUSTMENT">ADJUSTMENT — Stock Opname</option>
+              <option value="OUT">Barang Keluar</option>
+              <option value="IN">Barang Masuk</option>
             </select>
           </label>
-          <label class="ops-field"><span>Item ATK (${state.stationeryItems.length} Master Item)</span>
-            <select id="ops-atk-item" class="input">
-              ${state.stationeryItems.map(it => `<option value="${esc(it.id)}">${esc(it.item_name)} (Stok: ${it.current_stock} ${esc(it.unit)})</option>`).join('')}
+          <label class="ops-field"><span>Departemen</span>
+            <select id="ops-atk-dept" class="input">
+              ${departments.map(d => `<option value="${esc(d.name)}">${esc(d.dept_code)} — ${esc(d.name)}</option>`).join('')}
             </select>
           </label>
-          <label class="ops-field"><span>Qty (Adjustment boleh minus jika opname)</span><input id="ops-atk-qty" type="number" class="input" value="1"></label>
-          <label class="ops-field"><span>Departemen / SLOC</span>
-            <select id="ops-atk-sloc" class="input">
-              ${slocs.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
-              ${Object.keys(aliases).map(a => `<option value="${esc(a)}">${esc(a)} (Alias &rarr; ${esc(aliases[a])})</option>`).join('')}
-            </select>
-          </label>
-          <label class="ops-field"><span>No. Referensi</span><input id="ops-atk-ref" type="text" class="input" placeholder="PO / BON"></label>
-          <label class="ops-field"><span>Keterangan / Alasan</span><input id="ops-atk-notes" type="text" class="input" placeholder="Wajib diisi untuk Adjustment"></label>
-          <div class="ops-field ops-field-end"><button type="button" class="btn btn-primary" id="ops-atk-submit">Catat Transaksi</button></div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px">
+          <table class="atk-batch-table">
+            <thead>
+              <tr>
+                <th style="min-width:290px">Item</th>
+                <th style="width:110px">Qty</th>
+                <th style="width:100px">Satuan</th>
+                <th style="min-width:200px">Keterangan (Opsional)</th>
+                <th style="width:84px">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="ops-atk-batch-body">
+              ${buildBatchRowHtml(0)}
+            </tbody>
+          </table>
         </div>
       </div>
 
       <div class="card ops-card">
-        <h3>Riwayat Buku Besar Mutasi ATK (Terbaru)</h3>
-        <div class="table-wrap">
+        <h3>Riwayat Stock Movement (${state.stationeryMovements.length})</h3>
+        <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Tanggal</th><th>Tipe</th><th>Item</th><th class="num">Qty</th><th>Satuan</th><th>SLOC Kanonik (Raw)</th><th class="num">Saldo Akhir</th><th>Catatan</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>Type</th>
+                <th>Departemen</th>
+                <th>Item</th>
+                <th class="num">Qty</th>
+                <th>Satuan</th>
+                <th>Keterangan</th>
+              </tr>
+            </thead>
             <tbody>
-              ${state.stationeryMovements.slice(0, 40).map(mv => `
-                <tr>
-                  <td>${esc(mv.tx_date)}</td>
-                  <td><span class="pill ${mv.tx_type === 'IN' ? 'green' : (mv.tx_type === 'OUT' ? 'gold' : '')}">${esc(mv.tx_type)}</span></td>
-                  <td><b>${esc(mv.item_name)}</b></td>
-                  <td class="num">${mv.qty}</td>
-                  <td>${esc(mv.unit)}</td>
-                  <td>${esc(mv.sloc_canonical)} ${mv.sloc_raw !== mv.sloc_canonical ? `<small>(${esc(mv.sloc_raw)})</small>` : ''}</td>
-                  <td class="num">${mv.balance_after ?? '-'}</td>
-                  <td><small>${esc(mv.notes || mv.reference_no || '-')}</small></td>
-                </tr>
-              `).join('')}
+              ${state.stationeryMovements.length ? state.stationeryMovements.slice(0, 60).map(mv => {
+                const isIn = mv.tx_type === 'IN';
+                const typeLabel = isIn ? 'Barang Masuk' : 'Barang Keluar';
+                const deptLabel = resolveCanonicalSloc(mv.sloc_canonical || mv.sloc_raw || 'HR GA', state.settings);
+                return `
+                  <tr>
+                    <td class="nowrap">${esc(mv.tx_date)}</td>
+                    <td><span class="pill ${isIn ? 'green' : 'gold'}">${esc(typeLabel)}</span></td>
+                    <td>${esc(deptLabel)}</td>
+                    <td><b>${esc(mv.item_name)}</b></td>
+                    <td class="num"><b>${Math.abs(Number(mv.qty || 0))}</b></td>
+                    <td>${esc(mv.unit)}</td>
+                    <td>${esc(mv.notes || '-')}</td>
+                  </tr>
+                `;
+              }).join('') : '<tr><td colspan="7" class="empty">Belum ada transaksi stok.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -2235,205 +2363,559 @@ export async function renderStationeryInputView(host, ctx) {
     </div>
   `;
 
+  const batchBody = host.querySelector('#ops-atk-batch-body');
+  const bindBatchRow = rowEl => {
+    const sel = rowEl.querySelector('.atk-batch-item');
+    const unitBadge = rowEl.querySelector('.atk-batch-unit');
+    sel?.addEventListener('change', () => {
+      const it = itemById.get(sel.value);
+      if (unitBadge) unitBadge.textContent = it?.unit || 'PCS';
+    });
+    rowEl.querySelector('.atk-batch-del')?.addEventListener('click', () => {
+      if (batchBody.querySelectorAll('.atk-batch-row').length > 1) {
+        rowEl.remove();
+      }
+    });
+  };
+  batchBody?.querySelectorAll('.atk-batch-row').forEach(bindBatchRow);
+
+  host.querySelector('#ops-atk-add-row')?.addEventListener('click', () => {
+    const idx = batchBody?.querySelectorAll('.atk-batch-row').length || 0;
+    const tmp = document.createElement('tbody');
+    tmp.innerHTML = buildBatchRowHtml(idx);
+    const newRow = tmp.firstElementChild;
+    if (newRow && batchBody) {
+      batchBody.appendChild(newRow);
+      bindBatchRow(newRow);
+    }
+  });
+
   host.querySelector('#ops-atk-submit')?.addEventListener('click', async () => {
-    const tx = {
-      tx_date: host.querySelector('#ops-atk-date')?.value,
-      tx_type: host.querySelector('#ops-atk-type')?.value || 'OUT',
-      item_id: host.querySelector('#ops-atk-item')?.value,
-      qty: Number(host.querySelector('#ops-atk-qty')?.value),
-      sloc_raw: host.querySelector('#ops-atk-sloc')?.value || 'HR GA',
-      reference_no: host.querySelector('#ops-atk-ref')?.value?.trim() || '',
-      notes: host.querySelector('#ops-atk-notes')?.value?.trim() || '',
-      created_by: ctx.profile?.username || 'ADMIN'
-    };
+    const txDate = host.querySelector('#ops-atk-date')?.value || todayIso;
+    const txType = host.querySelector('#ops-atk-type')?.value || 'OUT';
+    const department = host.querySelector('#ops-atk-dept')?.value || 'HR GA';
+    const rows = [...(batchBody?.querySelectorAll('.atk-batch-row') || [])].map(tr => ({
+      item_id: tr.querySelector('.atk-batch-item')?.value || '',
+      qty: Number(tr.querySelector('.atk-batch-qty')?.value || 0),
+      notes: tr.querySelector('.atk-batch-notes')?.value?.trim() || ''
+    }));
+
     try {
-      const res = applyStationeryTransaction({
-        items: state.stationeryItems,
+      const res = applyStationeryBatchTransactions({
+        items,
         ledger: state.stationeryMovements,
-        tx,
+        txDate,
+        txType,
+        department,
+        rows,
+        createdBy: ctx.profile?.username || 'ADMIN',
         settings: state.settings
       });
+
       if (ctx.isDemoMode) {
         state.stationeryItems = res.items;
         state.stationeryMovements = res.ledger;
         saveDemoOpsState(state);
       } else {
-        const { error } = await ctx.supabase.rpc('record_stationery_transaction', {
-          p_item_id: res.entry.item_id,
-          p_tx_type: res.entry.tx_type,
-          p_qty: res.entry.qty,
-          p_tx_date: res.entry.tx_date,
-          p_sloc_raw: res.entry.sloc_raw,
-          p_sloc_canonical: res.entry.sloc_canonical,
-          p_reference_no: res.entry.reference_no,
-          p_notes: res.entry.notes,
-          p_created_by: res.entry.created_by
-        });
-        if (error) throw error;
+        for (const entry of res.entries) {
+          const { error } = await ctx.supabase.rpc('record_stationery_transaction', {
+            p_item_id: entry.item_id,
+            p_tx_type: entry.tx_type,
+            p_qty: entry.qty,
+            p_tx_date: entry.tx_date,
+            p_sloc_raw: entry.sloc_canonical,
+            p_sloc_canonical: entry.sloc_canonical,
+            p_reference_no: '',
+            p_notes: entry.notes,
+            p_created_by: entry.created_by
+          });
+          if (error) throw error;
+        }
         invalidateOpsStateCache();
       }
       await renderStationeryInputView(host, ctx);
-      showInlineBanner(host, `Transaksi ${res.entry.tx_type} ${res.entry.item_name} (${res.entry.qty}) tersimpan. Saldo baru: ${res.entry.balance_after}.`, 'ok');
+      showInlineBanner(host, `${res.entries.length} item ${txType === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} (${department}) berhasil disimpan.`, 'ok');
     } catch (err) {
       showInlineBanner(host, err?.message || 'Transaksi ditolak.', 'error');
     }
   });
 }
 
-export async function renderStationeryStockView(host, ctx) {
-  const state = await loadOpsState(ctx);
-  host.innerHTML = `
-    <div class="card ops-card">
-      <div class="ops-head">
-        <div>
-          <h2>Master Item &amp; Saldo Stok ATK (${state.stationeryItems.length} Item)</h2>
-          <p class="ops-sub">Seluruh satuan diperbaiki eksak (<code>PACK/PCS/RIM</code>) sehingga tidak pernah terjadi ketidakcocokan VLOOKUP perkiraan.</p>
-        </div>
-        <div class="ops-actions">
-          <input id="ops-stk-search" type="search" class="input" value="${esc(host.dataset.atkSearch || '')}" placeholder="Cari nama atau kode ATK..." aria-label="Cari item ATK">
-          <button type="button" class="btn btn-secondary" id="ops-stk-export">Export Stok XLSX</button>
-        </div>
-      </div>
-      <div class="table-wrap" style="margin-top:12px">
-        <table>
-          <thead><tr><th>Kode</th><th>Nama Item</th><th>Satuan</th><th class="num">Stok Awal</th><th class="num">Stok Saat Ini</th><th class="num">Min Stok</th><th>Status</th></tr></thead>
-          <tbody id="ops-stk-tbody"></tbody>
-        </table>
-      </div>
-      <div id="ops-stk-pager"></div>
-    </div>
+function renderAtkBarChartSvg(series, scaleMax, ticks) {
+  const bars = series.bars || [];
+  if (!bars.length) return '<p class="ops-empty-hint">Tidak ada item untuk ditampilkan.</p>';
+  const leftPad = 230;
+  const rightPad = 56;
+  const topPad = 24;
+  const bottomPad = 28;
+  const rowH = 26;
+  const plotW = 360;
+  const width = leftPad + plotW + rightPad;
+  const height = topPad + bars.length * rowH + bottomPad;
+
+  const gridLines = ticks.map(t => {
+    const x = leftPad + (scaleMax > 0 ? (t / scaleMax) * plotW : 0);
+    return `
+      <line x1="${x.toFixed(1)}" y1="${topPad - 4}" x2="${x.toFixed(1)}" y2="${height - bottomPad}" stroke="#e2e8f0" stroke-width="1"/>
+      <text x="${x.toFixed(1)}" y="${height - 10}" font-size="10" text-anchor="middle" fill="#64748b">${t}</text>
+    `;
+  }).join('');
+
+  const barColor = series.key === 'GLOBAL' ? '#0d5c6b' : '#0f766e';
+  const rowsSvg = bars.map((b, idx) => {
+    const y = topPad + idx * rowH;
+    const clampedQty = Math.min(scaleMax, Math.max(0, b.qty));
+    const w = scaleMax > 0 ? Math.round((clampedQty / scaleMax) * plotW) : 0;
+    const labelText = `${b.rank}. ${b.item_name}`;
+    const shortLabel = labelText.length > 30 ? `${labelText.slice(0, 29)}…` : labelText;
+    return `
+      <text x="6" y="${y + 15}" font-size="10.5" fill="#1e293b">${esc(shortLabel)}</text>
+      <rect x="${leftPad}" y="${y + 4}" width="${Math.max(b.qty > 0 ? 3 : 0, w)}" height="15" rx="3" fill="${barColor}"></rect>
+      <text x="${leftPad + w + 6}" y="${y + 15}" font-size="10.5" font-weight="600" fill="#0f172a">${b.qty}</text>
+    `;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="atk-chart-svg" role="img" aria-label="${esc(series.title)}">
+      ${gridLines}
+      <line x1="${leftPad}" y1="${topPad - 4}" x2="${leftPad}" y2="${height - bottomPad}" stroke="#94a3b8" stroke-width="1.2"/>
+      ${rowsSvg}
+    </svg>
   `;
-
-  const paintStockTable = () => {
-    const query = (host.dataset.atkSearch || '').toLowerCase();
-    const filtered = state.stationeryItems.filter(it =>
-      !query || it.item_name.toLowerCase().includes(query) || it.item_code.toLowerCase().includes(query)
-    );
-    const stkPage = Number(host.dataset.atkPage || 1) || 1;
-    const stkSizeRaw = host.dataset.atkPageSize || '50';
-    const stkSize = stkSizeRaw === 'all' ? 'all' : (Number(stkSizeRaw) || 50);
-    const paged = paginateRows(filtered, stkPage, stkSize);
-    host.dataset.atkPage = String(paged.page);
-
-    const tbody = host.querySelector('#ops-stk-tbody');
-    if (tbody) {
-      tbody.innerHTML = paged.items.length
-        ? paged.items.map(it => `
-            <tr>
-              <td><code>${esc(it.item_code)}</code></td>
-              <td><b>${esc(it.item_name)}</b></td>
-              <td>${esc(it.unit)}</td>
-              <td class="num">${it.opening_stock}</td>
-              <td class="num"><b>${it.current_stock}</b></td>
-              <td class="num">${it.min_stock}</td>
-              <td>${it.current_stock <= 0 ? '<span class="pill danger">Kosong</span>' : (it.current_stock <= it.min_stock ? '<span class="pill gold">Menipis</span>' : '<span class="pill green">Aman</span>')}</td>
-            </tr>
-          `).join('')
-        : '<tr><td colspan="7" class="empty">Tidak ada item ATK yang cocok.</td></tr>';
-    }
-    const pagerEl = host.querySelector('#ops-stk-pager');
-    if (pagerEl) {
-      pagerEl.innerHTML = buildOpsPaginationHtml(paged);
-      bindOpsPagination(pagerEl, paged, (nextPage, nextSize) => {
-        host.dataset.atkPage = String(nextPage);
-        host.dataset.atkPageSize = String(nextSize);
-        paintStockTable();
-      });
-    }
-  };
-
-  paintStockTable();
-
-  let stkSearchTimer = null;
-  host.querySelector('#ops-stk-search')?.addEventListener('input', e => {
-    host.dataset.atkSearch = e.target.value;
-    host.dataset.atkPage = '1';
-    clearTimeout(stkSearchTimer);
-    stkSearchTimer = setTimeout(() => {
-      paintStockTable();
-    }, 140);
-  });
-
-  host.querySelector('#ops-stk-export')?.addEventListener('click', async () => {
-    const aoa = [
-      ['Kode', 'Nama Item', 'Satuan', 'Stok Awal', 'Stok Saat Ini', 'Min Stok'],
-      ...state.stationeryItems.map(it => [it.item_code, it.item_name, it.unit, it.opening_stock, it.current_stock, it.min_stock])
-    ];
-    await exportSheetXlsx('Master_Stok_ATK.xlsx', 'Stok ATK', aoa);
-  });
 }
 
-export async function renderStationeryReportsView(host, ctx) {
+export async function renderStationeryStockView(host, ctx) {
   const state = await loadOpsState(ctx);
+  const activeTab = host.dataset.atkReportTab || 'periodik';
+  const periodMonth = host.dataset.atkRepMonth || 'ALL';
+  const topNVal = host.dataset.atkTopN || '10';
+  const scaleVal = Number(host.dataset.atkScaleMax || 0);
+  const scopeVal = host.dataset.atkChartScope || 'both';
+  const chartDept = host.dataset.atkChartDept || 'ALL';
+  const searchQ = (host.dataset.atkSearch || '').trim().toLowerCase();
+
+  const availableMonths = [...new Set(
+    (state.stationeryMovements || [])
+      .map(m => String(m.tx_date || '').slice(0, 7))
+      .filter(Boolean)
+  )].sort().reverse();
+  if (!availableMonths.includes('2026-11')) availableMonths.unshift('2026-11');
+
   const report = buildStationeryReports({
-    items: state.stationeryItems,
+    items: normalizeStationeryItems(state.stationeryItems),
     ledger: state.stationeryMovements,
-    monthKey: host.dataset.stkMonth || '',
+    monthKey: periodMonth === 'ALL' ? '' : periodMonth,
     settings: state.settings
   });
-  const topDepts = report.departmentConsumption.filter(d => d.outQty > 0).slice(0, 8);
-  const maxDeptOut = Math.max(1, ...topDepts.map(d => d.outQty));
+  const depts = report.departments;
+
+  const topOptions = [10, 15, 20, 25, 30, 35, 40, 45, 50];
+  const scaleOptions = [0, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 500];
+
+  const periodFilterHtml = `
+    <select id="ops-atk-rep-month" class="input" aria-label="Pilih periode laporan ATK">
+      <option value="ALL" ${periodMonth === 'ALL' ? 'selected' : ''}>Periode Global (Semua)</option>
+      ${availableMonths.map(mo => `<option value="${esc(mo)}" ${periodMonth === mo ? 'selected' : ''}>Bulan ${esc(mo)}</option>`).join('')}
+    </select>
+  `;
+
+  const topNSelectHtml = `
+    <select id="ops-atk-topn" class="input" aria-label="Jumlah barang terfavorit">
+      ${topOptions.map(n => `<option value="${n}" ${topNVal === String(n) ? 'selected' : ''}>Top ${n} Barang</option>`).join('')}
+      <option value="all" ${topNVal === 'all' ? 'selected' : ''}>Semua Barang (Rank 1–Akhir)</option>
+    </select>
+  `;
+
+  let tabBodyHtml = '';
+  let periodikPaged = null;
+
+  if (activeTab === 'periodik') {
+    const filtered = report.stockPeriodik.filter(r =>
+      !searchQ || r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ)
+    );
+    const pg = Number(host.dataset.atkPage || 1) || 1;
+    const szRaw = host.dataset.atkPageSize || '50';
+    const sz = szRaw === 'all' ? 'all' : (Number(szRaw) || 50);
+    periodikPaged = paginateRows(filtered, pg, sz);
+    tabBodyHtml = `
+      <div class="card ops-card">
+        <div class="ops-head">
+          <h3>1. Report Stock Periodik (${periodMonth === 'ALL' ? 'Periode Global' : esc(periodMonth)})</h3>
+          <div class="ops-actions">
+            ${periodFilterHtml}
+            <input id="ops-atk-search" type="search" class="input" value="${esc(host.dataset.atkSearch || '')}" placeholder="Cari nama item..." aria-label="Cari item">
+            <button type="button" class="btn btn-primary" id="ops-atk-rep-xlsx">Download Excel</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:52px">No</th>
+                <th>Nama Item</th>
+                <th class="num">Stock Awal</th>
+                <th>Satuan</th>
+                <th class="num">Barang Masuk (Qty)</th>
+                <th class="num">Barang Keluar (Qty)</th>
+                <th class="num">Saldo Akhir</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${periodikPaged.items.length ? periodikPaged.items.map(r => `
+                <tr>
+                  <td>${r.no}</td>
+                  <td><b>${esc(r.item_name)}</b></td>
+                  <td class="num">${r.openingStock}</td>
+                  <td>${esc(r.unit)}</td>
+                  <td class="num">${r.inQty}</td>
+                  <td class="num">${r.outQty}</td>
+                  <td class="num"><b>${r.closingStock}</b></td>
+                </tr>
+              `).join('') : '<tr><td colspan="7" class="empty">Tidak ada data item ATK.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        <div id="ops-stk-pager">${buildOpsPaginationHtml(periodikPaged)}</div>
+      </div>
+    `;
+  } else if (activeTab === 'dept_out') {
+    const filtered = report.deptOutReport.rows.filter(r =>
+      !searchQ || r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ)
+    );
+    tabBodyHtml = `
+      <div class="card ops-card">
+        <div class="ops-head">
+          <h3>2. Report Barang Keluar Per Departemen (${periodMonth === 'ALL' ? 'Periode Global' : esc(periodMonth)})</h3>
+          <div class="ops-actions">
+            ${periodFilterHtml}
+            <input id="ops-atk-search" type="search" class="input" value="${esc(host.dataset.atkSearch || '')}" placeholder="Cari nama item..." aria-label="Cari item">
+            <button type="button" class="btn btn-primary" id="ops-atk-rep-xlsx">Download Excel</button>
+          </div>
+        </div>
+        <div class="table-wrap atk-matrix-wrap" style="margin-top:12px">
+          <table class="atk-matrix-table">
+            <thead>
+              <tr>
+                <th>No</th>
+                <th class="atk-sticky-item l">Nama Item</th>
+                ${depts.map(d => `<th>${esc(d)}</th>`).join('')}
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filtered.map(r => `
+                <tr>
+                  <td>${r.no}</td>
+                  <td class="atk-sticky-item l"><b>${esc(r.item_name)}</b></td>
+                  ${depts.map(d => `<td class="num">${r.byDept[d] || 0}</td>`).join('')}
+                  <td class="num"><b>${r.total}</b></td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th colspan="2" class="l">TOTAL</th>
+                ${depts.map(d => `<th class="num">${report.deptOutReport.totalsByDept[d] || 0}</th>`).join('')}
+                <th class="num">${report.deptOutReport.grandTotal}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    `;
+  } else if (activeTab === 'favorites') {
+    const favRows = sliceTopFavoriteItems(report.favoriteItems, topNVal);
+    tabBodyHtml = `
+      <div class="card ops-card">
+        <div class="ops-head">
+          <h3>3. Barang Terfavorit (${periodMonth === 'ALL' ? 'Periode Global' : esc(periodMonth)})</h3>
+          <div class="ops-actions">
+            ${periodFilterHtml}
+            ${topNSelectHtml}
+            <button type="button" class="btn btn-primary" id="ops-atk-rep-xlsx">Download Excel</button>
+          </div>
+        </div>
+        <div class="table-wrap atk-matrix-wrap" style="margin-top:12px">
+          <table class="atk-matrix-table">
+            <thead>
+              <tr>
+                <th style="width:56px">Rank</th>
+                <th class="atk-sticky-item l">Item</th>
+                <th class="num">Total Qty Keluar</th>
+                <th>Satuan</th>
+                ${depts.map(d => `<th>${esc(d)}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${favRows.map(r => `
+                <tr>
+                  <td><b>#${r.rank}</b></td>
+                  <td class="atk-sticky-item l"><b>${esc(r.item_name)}</b></td>
+                  <td class="num"><b>${r.totalOut}</b></td>
+                  <td>${esc(r.unit)}</td>
+                  ${depts.map(d => `<td class="num">${r.byDept[d] || 0}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } else {
+    const chartData = buildDepartmentUsageChartData({
+      favoriteItems: report.favoriteItems,
+      departments: depts,
+      topN: topNVal,
+      scaleMax: scaleVal,
+      scopeMode: scopeVal,
+      selectedDept: chartDept
+    });
+    const seriesCards = [];
+    if (chartData.globalSeries) seriesCards.push(chartData.globalSeries);
+    chartData.departmentSeries.forEach(ds => seriesCards.push(ds));
+
+    tabBodyHtml = `
+      <div class="card ops-card">
+        <div class="ops-head">
+          <h3>4. Grafik Penggunaan per Departemen (Skala 0 – ${chartData.scaleMax})</h3>
+          <div class="ops-actions">
+            ${periodFilterHtml}
+            ${topNSelectHtml}
+            <select id="ops-atk-scale" class="input" aria-label="Skala maksimum grafik">
+              ${scaleOptions.map(sc => `<option value="${sc}" ${scaleVal === sc ? 'selected' : ''}>${sc === 0 ? `Skala Auto (0 – ${chartData.scaleMax})` : `Skala 0 – ${sc}`}</option>`).join('')}
+            </select>
+            <select id="ops-atk-scope" class="input" aria-label="Scope grafik">
+              <option value="both" ${scopeVal === 'both' ? 'selected' : ''}>Gabungan (Global + Per Departemen)</option>
+              <option value="global" ${scopeVal === 'global' ? 'selected' : ''}>Departemen Global</option>
+              <option value="per_dept" ${scopeVal === 'per_dept' ? 'selected' : ''}>Per Departemen</option>
+            </select>
+            ${scopeVal !== 'global' ? `
+              <select id="ops-atk-chart-dept" class="input" aria-label="Filter departemen grafik">
+                <option value="ALL" ${chartDept === 'ALL' ? 'selected' : ''}>Semua Departemen (${depts.length})</option>
+                ${depts.map(d => `<option value="${esc(d)}" ${chartDept === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+              </select>
+            ` : ''}
+          </div>
+        </div>
+        <div class="atk-charts-grid">
+          ${seriesCards.map(sr => `
+            <div class="atk-chart-card">
+              <div class="atk-chart-head">
+                <b>${esc(sr.title)}</b>
+                <span class="pill">${sr.totalQty} Total Keluar</span>
+              </div>
+              <div class="atk-chart-body">
+                ${renderAtkBarChartSvg(sr, chartData.scaleMax, chartData.ticks)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
 
   host.innerHTML = `
     <div class="ops-stack">
       <div class="card ops-card">
         <div class="ops-head">
           <div>
-            <h2>Stationery Consumption, Moving Speed &amp; Purchase Plan</h2>
-            <p class="ops-sub">Horizon beli: <b>${report.horizonDays} hari</b> · Safety factor: <b>${state.settings.stationery.safetyStockMultiplier}x</b> · Fast moving &ge; ${state.settings.stationery.fastMovingMinOutQty} qty &amp; &ge; ${state.settings.stationery.fastMovingMinFreq}x keluar.</p>
+            <h2>Report ATK</h2>
+          </div>
+        </div>
+        <div class="tab-bar" role="tablist" style="margin-top:10px">
+          <button type="button" class="tab-btn ${activeTab === 'periodik' ? 'active' : ''}" data-atk-tab="periodik">1. Report Stock Periodik</button>
+          <button type="button" class="tab-btn ${activeTab === 'dept_out' ? 'active' : ''}" data-atk-tab="dept_out">2. Barang Keluar Per Departemen</button>
+          <button type="button" class="tab-btn ${activeTab === 'favorites' ? 'active' : ''}" data-atk-tab="favorites">3. Barang Terfavorit</button>
+          <button type="button" class="tab-btn ${activeTab === 'chart' ? 'active' : ''}" data-atk-tab="chart">4. Grafik Penggunaan per Departemen</button>
+        </div>
+      </div>
+      ${tabBodyHtml}
+    </div>
+  `;
+
+  host.querySelectorAll('[data-atk-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      host.dataset.atkReportTab = btn.dataset.atkTab;
+      host.dataset.atkPage = '1';
+      renderStationeryStockView(host, ctx);
+    });
+  });
+
+  host.querySelector('#ops-atk-rep-month')?.addEventListener('change', e => {
+    host.dataset.atkRepMonth = e.target.value || 'ALL';
+    host.dataset.atkPage = '1';
+    renderStationeryStockView(host, ctx);
+  });
+
+  host.querySelector('#ops-atk-topn')?.addEventListener('change', e => {
+    host.dataset.atkTopN = e.target.value || '10';
+    renderStationeryStockView(host, ctx);
+  });
+
+  host.querySelector('#ops-atk-scale')?.addEventListener('change', e => {
+    host.dataset.atkScaleMax = e.target.value || '0';
+    renderStationeryStockView(host, ctx);
+  });
+
+  host.querySelector('#ops-atk-scope')?.addEventListener('change', e => {
+    host.dataset.atkChartScope = e.target.value || 'both';
+    renderStationeryStockView(host, ctx);
+  });
+
+  host.querySelector('#ops-atk-chart-dept')?.addEventListener('change', e => {
+    host.dataset.atkChartDept = e.target.value || 'ALL';
+    renderStationeryStockView(host, ctx);
+  });
+
+  let atkTimer = null;
+  host.querySelector('#ops-atk-search')?.addEventListener('input', e => {
+    host.dataset.atkSearch = e.target.value || '';
+    host.dataset.atkPage = '1';
+    clearTimeout(atkTimer);
+    atkTimer = setTimeout(() => renderStationeryStockView(host, ctx), 160);
+  });
+
+  if (periodikPaged) {
+    bindOpsPagination(host.querySelector('#ops-stk-pager'), periodikPaged, (nextPage, nextSize) => {
+      host.dataset.atkPage = String(nextPage);
+      host.dataset.atkPageSize = String(nextSize);
+      renderStationeryStockView(host, ctx);
+    });
+  }
+
+  host.querySelector('#ops-atk-rep-xlsx')?.addEventListener('click', async () => {
+    const labelMonth = periodMonth === 'ALL' ? 'Global' : periodMonth;
+    if (activeTab === 'periodik') {
+      const aoa = [
+        ['No', 'Nama Item', 'Stock Awal', 'Satuan', 'Barang Masuk (Qty)', 'Barang Keluar (Qty)', 'Saldo Akhir'],
+        ...report.stockPeriodik.map(r => [r.no, r.item_name, r.openingStock, r.unit, r.inQty, r.outQty, r.closingStock])
+      ];
+      await exportSheetXlsx(`Report_Stock_Periodik_${labelMonth}.xlsx`, 'Stock Periodik', aoa);
+    } else if (activeTab === 'dept_out') {
+      const aoa = [
+        ['No', 'Nama Item', ...depts, 'Total'],
+        ...report.deptOutReport.rows.map(r => [r.no, r.item_name, ...depts.map(d => r.byDept[d] || 0), r.total]),
+        ['', 'TOTAL', ...depts.map(d => report.deptOutReport.totalsByDept[d] || 0), report.deptOutReport.grandTotal]
+      ];
+      await exportSheetXlsx(`Report_Keluar_Per_Departemen_${labelMonth}.xlsx`, 'Keluar Per Dept', aoa);
+    } else if (activeTab === 'favorites') {
+      const favRows = sliceTopFavoriteItems(report.favoriteItems, topNVal);
+      const aoa = [
+        ['Rank', 'Item', 'Total Qty Keluar', 'Satuan', ...depts],
+        ...favRows.map(r => [r.rank, r.item_name, r.totalOut, r.unit, ...depts.map(d => r.byDept[d] || 0)])
+      ];
+      await exportSheetXlsx(`Barang_Terfavorit_${labelMonth}.xlsx`, 'Barang Terfavorit', aoa);
+    }
+  });
+}
+
+export async function renderStationeryReportsView(host, ctx) {
+  const state = await loadOpsState(ctx);
+  const purchasePeriod = host.dataset.atkPlanPeriod || '1w';
+  const topNVal = host.dataset.atkPlanTopN || 'all';
+  const searchQ = (host.dataset.atkPlanSearch || '').trim().toLowerCase();
+
+  const plan = buildPurchasePlanSuggestions({
+    items: state.stationeryItems,
+    ledger: state.stationeryMovements,
+    purchasePeriod,
+    referenceDate: new Date(),
+    manualOverrides: state.stationeryPlanManual || {},
+    settings: state.settings
+  });
+
+  const sliced = sliceTopFavoriteItems(plan.rows, topNVal);
+  const visibleRows = searchQ
+    ? sliced.filter(r => r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ))
+    : sliced;
+
+  const persistPlanManual = async nextMap => {
+    state.stationeryPlanManual = nextMap;
+    saveStoredPlanManual(nextMap);
+    if (ctx.isDemoMode) {
+      saveDemoOpsState(state);
+    } else if (ctx.supabase) {
+      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_PLAN_MANUAL_KEY, value: nextMap }).catch(() => {});
+    }
+  };
+
+  host.innerHTML = `
+    <div class="ops-stack">
+      <div class="card ops-card">
+        <div class="ops-head">
+          <div>
+            <h2>Purchase Plan Suggestion</h2>
           </div>
           <div class="ops-actions">
-            <button type="button" class="btn btn-secondary" id="ops-srep-atk-print">Cetak Purchase Plan</button>
-            <button type="button" class="btn btn-primary" id="ops-srep-atk-xlsx">Export Analisa ATK XLSX</button>
+            <button type="button" class="btn btn-secondary" id="ops-srep-atk-print">Print Plan</button>
+            <button type="button" class="btn btn-primary" id="ops-srep-atk-xlsx">Export Excel</button>
           </div>
         </div>
-      </div>
-
-      <div class="kpi-grid ops-kpi-4">
-        <div class="card kpi-card"><div class="kpi-label">Total Item Aktif</div><div class="kpi-val">${report.totals.totalItems}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Total Keluar (Periode)</div><div class="kpi-val">${report.totals.totalOut}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Item Fast Moving</div><div class="kpi-val">${report.totals.fastCount}</div></div>
-        <div class="card kpi-card"><div class="kpi-label">Item Saran Beli</div><div class="kpi-val text-danger">${report.totals.purchaseItemCount}</div></div>
-      </div>
-
-      <div class="card ops-card">
-        <h3>Konsumsi per Departemen / SLOC (Grafik Pemakaian)</h3>
-        <div class="ops-svg-chart">
-          ${topDepts.length ? `
-            <svg viewBox="0 0 640 ${topDepts.length * 32 + 12}" class="ops-bar-svg" role="img" aria-label="Grafik pemakaian ATK per SLOC">
-              ${topDepts.map((d, idx) => {
-                const y = idx * 32 + 8;
-                const w = Math.max(8, Math.round((d.outQty / maxDeptOut) * 340));
-                return `
-                  <text x="4" y="${y + 16}" font-size="11.5" fill="#1e293b">${esc(d.sloc)}</text>
-                  <rect x="210" y="${y + 3}" width="${w}" height="18" rx="3" fill="#0d5c6b"></rect>
-                  <text x="${218 + w}" y="${y + 16}" font-size="11.5" font-weight="600" fill="#0f172a">${d.outQty} (${d.freq}x)</text>
-                `;
-              }).join('')}
-            </svg>
-          ` : '<p class="ops-empty-hint">Belum ada pemakaian barang keluar pada periode filter.</p>'}
+        <div class="ops-form-grid" style="margin-top:10px">
+          <label class="ops-field">
+            <span>Purchase Period</span>
+            <select id="ops-plan-period" class="input">
+              <option value="1w" ${purchasePeriod === '1w' ? 'selected' : ''}>Weekly</option>
+              <option value="2w" ${purchasePeriod === '2w' ? 'selected' : ''}>Bi-Weekly (2 Weeks)</option>
+              <option value="1m" ${purchasePeriod === '1m' ? 'selected' : ''}>Monthly</option>
+            </select>
+          </label>
+          <label class="ops-field atk-plan-window-field">
+            <span>Next Planning Window (Auto)</span>
+            <input type="text" class="input atk-plan-window-input" id="ops-plan-window" value="${esc(plan.window.dateRangeLabel)}" readonly>
+          </label>
+          <label class="ops-field">
+            <span>Show Top Items (Global Favorite Rank)</span>
+            <select id="ops-plan-topn" class="input">
+              <option value="all" ${topNVal === 'all' ? 'selected' : ''}>All Items (Rank 1–${plan.rows.length})</option>
+              <option value="15" ${topNVal === '15' ? 'selected' : ''}>Top 15</option>
+              <option value="25" ${topNVal === '25' ? 'selected' : ''}>Top 25</option>
+              <option value="50" ${topNVal === '50' ? 'selected' : ''}>Top 50</option>
+            </select>
+          </label>
+          <label class="ops-field">
+            <span>Search Item</span>
+            <input type="search" id="ops-plan-search" class="input" value="${esc(host.dataset.atkPlanSearch || '')}" placeholder="Filter item name...">
+          </label>
         </div>
       </div>
 
       <div class="card ops-card">
-        <h3>Rencana Pengadaan ATK (Purchase Plan — Saran Beli)</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Kode</th><th>Nama Item</th><th>Satuan</th><th>Class</th><th class="num">Keluar</th><th class="num">Saldo</th><th class="num">Target Stok</th><th class="num">Saran Beli</th><th class="num">Skor</th></tr></thead>
+            <thead>
+              <tr>
+                <th style="width:56px">Rank</th>
+                <th>Item</th>
+                <th class="num">Current Stock</th>
+                <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
+                <th class="num">Min Stock</th>
+                <th>Unit</th>
+                <th class="num" style="width:110px">Min Purchase</th>
+                <th>Purchase Unit</th>
+                <th class="num" style="width:130px">Purchase Qty Decision</th>
+                <th>Purchase Unit</th>
+              </tr>
+            </thead>
             <tbody>
-              ${report.purchasePlan.slice(0, 35).map(r => `
-                <tr>
-                  <td><code>${esc(r.item_code)}</code></td>
+              ${visibleRows.length ? visibleRows.map(r => `
+                <tr data-plan-id="${esc(r.id)}">
+                  <td><b>#${r.rank}</b></td>
                   <td><b>${esc(r.item_name)}</b></td>
+                  <td class="num">${r.currentStock}</td>
+                  <td class="num"><b>${r.periodRequirement}</b></td>
+                  <td class="num">${r.minStock}</td>
                   <td>${esc(r.unit)}</td>
-                  <td><span class="pill ${r.movingClass === 'FAST' ? 'danger' : (r.movingClass === 'MEDIUM' ? 'gold' : '')}">${esc(r.movingClass)}</span></td>
-                  <td class="num">${r.outQty}</td>
-                  <td class="num">${r.closingStock}</td>
-                  <td class="num">${r.targetStock}</td>
-                  <td class="num"><b>${r.suggestedPurchase}</b></td>
-                  <td class="num">${r.score}</td>
+                  <td class="num">
+                    <input type="number" min="1" step="1" class="input atk-plan-input ops-plan-min-inp" data-item-id="${esc(r.id)}" value="${r.minPurchase}" aria-label="Min purchase for ${esc(r.item_name)}">
+                  </td>
+                  <td>${esc(r.purchaseUnit)}</td>
+                  <td class="num">
+                    <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
+                  </td>
+                  <td>${esc(r.purchaseUnit)}</td>
                 </tr>
-              `).join('') || '<tr><td colspan="9" class="empty">Stok seluruh item masih mencukupi target minimum.</td></tr>'}
+              `).join('') : '<tr><td colspan="10" class="empty">No items match the current filter.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -2441,16 +2923,559 @@ export async function renderStationeryReportsView(host, ctx) {
     </div>
   `;
 
+  host.querySelector('#ops-plan-period')?.addEventListener('change', e => {
+    host.dataset.atkPlanPeriod = e.target.value || '1w';
+    renderStationeryReportsView(host, ctx);
+  });
+
+  host.querySelector('#ops-plan-topn')?.addEventListener('change', e => {
+    host.dataset.atkPlanTopN = e.target.value || 'all';
+    renderStationeryReportsView(host, ctx);
+  });
+
+  let planSearchTimer = null;
+  host.querySelector('#ops-plan-search')?.addEventListener('input', e => {
+    host.dataset.atkPlanSearch = e.target.value || '';
+    clearTimeout(planSearchTimer);
+    planSearchTimer = setTimeout(() => renderStationeryReportsView(host, ctx), 160);
+  });
+
+  const handleManualChange = async (itemId, field, value) => {
+    const current = { ...(state.stationeryPlanManual || {}) };
+    const prevRow = { ...(current[itemId] || {}) };
+    if (field === 'minPurchase') {
+      prevRow.minPurchase = Math.max(1, Number(value) || 1);
+    } else {
+      prevRow.decisionQty = value === '' ? '' : String(Math.max(0, Number(value) || 0));
+    }
+    current[itemId] = prevRow;
+    await persistPlanManual(current);
+  };
+
+  host.querySelectorAll('.ops-plan-min-inp').forEach(inp => {
+    inp.addEventListener('change', () => handleManualChange(inp.dataset.itemId, 'minPurchase', inp.value));
+  });
+  host.querySelectorAll('.ops-plan-dec-inp').forEach(inp => {
+    inp.addEventListener('input', () => handleManualChange(inp.dataset.itemId, 'decisionQty', inp.value));
+  });
+
   host.querySelector('#ops-srep-atk-xlsx')?.addEventListener('click', async () => {
+    const manual = state.stationeryPlanManual || {};
     const aoa = [
-      ['Kode', 'Nama Item', 'Satuan', 'Class', 'In', 'Out', 'Saldo Akhir', 'Target Stok', 'Saran Beli', 'Skor'],
-      ...report.itemReports.map(r => [r.item_code, r.item_name, r.unit, r.movingClass, r.inQty, r.outQty, r.closingStock, r.targetStock, r.suggestedPurchase, r.score])
+      ['Purchase Period', plan.window.periodLabel, 'Planning Window', plan.window.dateRangeLabel],
+      ['Rank', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit'],
+      ...visibleRows.map(r => {
+        const ov = manual[r.id] || {};
+        return [
+          r.rank,
+          r.item_name,
+          r.currentStock,
+          r.periodRequirement,
+          r.minStock,
+          r.unit,
+          ov.minPurchase ?? r.minPurchase,
+          r.purchaseUnit,
+          ov.decisionQty ?? r.decisionQty,
+          r.purchaseUnit
+        ];
+      })
     ];
-    await exportSheetXlsx('Analisa_Purchase_Plan_ATK.xlsx', 'Purchase Plan', aoa);
+    await exportSheetXlsx(`Purchase_Plan_Suggestion_${plan.window.startDate}.xlsx`, 'Purchase Plan', aoa);
   });
 
   host.querySelector('#ops-srep-atk-print')?.addEventListener('click', () => {
-    openPrintHtml('Purchase Plan ATK', `<h2>PURCHASE PLAN &amp; SARAN BELI ATK</h2>${host.querySelectorAll('.table-wrap')[0].innerHTML}`);
+    const manual = state.stationeryPlanManual || {};
+    const rowsHtml = visibleRows.map(r => {
+      const ov = manual[r.id] || {};
+      const mp = ov.minPurchase ?? r.minPurchase;
+      const dq = ov.decisionQty ?? r.decisionQty;
+      return `
+        <tr>
+          <td class="c">${r.rank}</td>
+          <td>${esc(r.item_name)}</td>
+          <td class="num">${r.currentStock}</td>
+          <td class="num">${r.periodRequirement}</td>
+          <td class="num">${r.minStock}</td>
+          <td class="c">${esc(r.unit)}</td>
+          <td class="num">${esc(mp)}</td>
+          <td class="c">${esc(r.purchaseUnit)}</td>
+          <td class="num">${dq !== '' ? esc(dq) : ''}</td>
+          <td class="c">${esc(r.purchaseUnit)}</td>
+        </tr>
+      `;
+    }).join('');
+    openPrintHtml(
+      `Purchase Plan Suggestion (${plan.window.periodLabel})`,
+      `
+        <div class="drv-pdf-header">
+          <div>PURCHASE PLAN SUGGESTION</div>
+          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIOD</span>: ${esc(plan.window.periodLabel)} (${esc(plan.window.dateRangeLabel)})</div>
+        </div>
+        <table class="drv-pdf-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Item</th>
+              <th>Current Stock</th>
+              <th>${esc(plan.window.requirementColumnLabel)}</th>
+              <th>Min Stock</th>
+              <th>Unit</th>
+              <th>Min Purchase</th>
+              <th>Purchase Unit</th>
+              <th>Purchase Qty Decision</th>
+              <th>Purchase Unit</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      `,
+      true
+    );
+  });
+}
+
+export async function renderStationeryMaterialsView(host, ctx) {
+  const state = await loadOpsState(ctx);
+  const activeTab = host.dataset.matTab || 'materials';
+  const items = normalizeStationeryItems(state.stationeryItems);
+  const departments = state.stationeryDepartments?.length
+    ? state.stationeryDepartments
+    : normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, state.settings.stationery.canonicalSlocs);
+  const searchQ = (host.dataset.matSearch || '').trim().toLowerCase();
+
+  const nextMatCode = generateNextMaterialCode(items);
+  const nextDeptCode = generateNextDepartmentCode(departments);
+  const unitOptions = ['PCS', 'PACK', 'RIM', 'BOX', 'SET', 'BOTOL', 'ROLL', 'BUAH'];
+
+  const filteredItems = searchQ
+    ? items.filter(it => it.item_name.toLowerCase().includes(searchQ) || it.item_code.includes(searchQ))
+    : items;
+
+  const persistMaterialsState = async () => {
+    state.settings.stationery.canonicalSlocs = state.stationeryDepartments.map(d => d.name);
+    saveStoredDepartments(state.stationeryDepartments);
+    if (ctx.isDemoMode) {
+      saveDemoOpsState(state);
+    } else if (ctx.supabase) {
+      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments }).catch(() => {});
+      await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: state.settings }).catch(() => {});
+      invalidateOpsStateCache();
+    }
+  };
+
+  host.innerHTML = `
+    <div class="ops-stack">
+      <div class="card ops-card">
+        <div class="ops-head">
+          <div>
+            <h2>Material Management</h2>
+          </div>
+        </div>
+        <div class="tab-bar" role="tablist" style="margin-top:10px">
+          <button type="button" class="tab-btn ${activeTab === 'materials' ? 'active' : ''}" data-mat-tab="materials">1. Daftar Material (${items.length})</button>
+          <button type="button" class="tab-btn ${activeTab === 'departments' ? 'active' : ''}" data-mat-tab="departments">2. Daftar Departemen (${departments.length})</button>
+        </div>
+      </div>
+
+      ${activeTab === 'materials' ? `
+        <div class="card ops-card">
+          <h3>Tambah Material Baru</h3>
+          <div class="ops-form-grid" style="margin-top:10px">
+            <label class="ops-field">
+              <span>Kode Material (5 Angka)</span>
+              <input id="mat-add-code" type="text" maxlength="5" class="input" value="${esc(nextMatCode)}" placeholder="10122">
+            </label>
+            <label class="ops-field">
+              <span>Nama Item</span>
+              <input id="mat-add-name" type="text" class="input" placeholder="Nama material ATK">
+            </label>
+            <label class="ops-field">
+              <span>Satuan</span>
+              <select id="mat-add-unit" class="input">
+                ${unitOptions.map(u => `<option value="${u}">${u}</option>`).join('')}
+              </select>
+            </label>
+            <label class="ops-field">
+              <span>Satuan Minimal Pembelian</span>
+              <select id="mat-add-punit" class="input">
+                ${unitOptions.map(u => `<option value="${u}" ${u === 'PACK' ? 'selected' : ''}>${u}</option>`).join('')}
+              </select>
+            </label>
+            <div class="ops-field ops-field-end">
+              <button type="button" class="btn btn-primary" id="mat-add-save">Tambah Material</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card ops-card">
+          <div class="ops-head">
+            <h3>1. Daftar Material</h3>
+            <div class="ops-actions">
+              <input id="mat-search" type="search" class="input" value="${esc(host.dataset.matSearch || '')}" placeholder="Cari kode atau nama material..." aria-label="Cari material">
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:120px">Kode Material</th>
+                  <th>Nama Item</th>
+                  <th style="width:120px">Satuan</th>
+                  <th style="width:160px">Satuan Minimal Pembelian</th>
+                  <th style="width:90px">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredItems.map(it => `
+                  <tr data-mat-id="${esc(it.id)}">
+                    <td><code>${esc(it.item_code)}</code></td>
+                    <td><input type="text" class="input mat-row-name atk-mat-name-input" value="${esc(it.item_name)}" aria-label="Nama item ${esc(it.item_code)}"></td>
+                    <td>
+                      <select class="input mat-row-unit" aria-label="Satuan ${esc(it.item_code)}">
+                        ${unitOptions.map(u => `<option value="${u}" ${it.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+                        ${!unitOptions.includes(it.unit) ? `<option value="${esc(it.unit)}" selected>${esc(it.unit)}</option>` : ''}
+                      </select>
+                    </td>
+                    <td>
+                      <select class="input mat-row-punit" aria-label="Satuan minimal pembelian ${esc(it.item_code)}">
+                        ${unitOptions.map(u => `<option value="${u}" ${it.purchase_unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+                        ${!unitOptions.includes(it.purchase_unit) ? `<option value="${esc(it.purchase_unit)}" selected>${esc(it.purchase_unit)}</option>` : ''}
+                      </select>
+                    </td>
+                    <td><button type="button" class="btn btn-sm btn-secondary mat-row-save" data-id="${esc(it.id)}">Simpan</button></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : `
+        <div class="card ops-card">
+          <h3>Tambah Departemen Baru</h3>
+          <div class="ops-form-grid" style="margin-top:10px">
+            <label class="ops-field">
+              <span>Kode Departemen (3 Angka)</span>
+              <input id="dept-add-code" type="text" maxlength="3" class="input" value="${esc(nextDeptCode)}" placeholder="116">
+            </label>
+            <label class="ops-field">
+              <span>Nama Departemen</span>
+              <input id="dept-add-name" type="text" class="input" placeholder="NAMA DEPARTEMEN">
+            </label>
+            <div class="ops-field ops-field-end">
+              <button type="button" class="btn btn-primary" id="dept-add-save">Tambah Departemen</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card ops-card">
+          <h3>2. Daftar Departemen</h3>
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:140px">Kode Departemen</th>
+                  <th>Nama Departemen</th>
+                  <th style="width:160px">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${departments.map(d => `
+                  <tr data-dept-id="${esc(d.id)}">
+                    <td><input type="text" maxlength="3" class="input dept-row-code atk-dept-code-input" value="${esc(d.dept_code)}" aria-label="Kode departemen ${esc(d.name)}"></td>
+                    <td><input type="text" class="input dept-row-name atk-dept-name-input" value="${esc(d.name)}" aria-label="Nama departemen ${esc(d.dept_code)}"></td>
+                    <td>
+                      <div class="ops-inline-actions">
+                        <button type="button" class="btn btn-sm btn-secondary dept-row-save" data-id="${esc(d.id)}">Simpan</button>
+                        <button type="button" class="btn btn-sm btn-secondary dept-row-del" data-id="${esc(d.id)}">Hapus</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+
+  host.querySelectorAll('[data-mat-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      host.dataset.matTab = btn.dataset.matTab;
+      renderStationeryMaterialsView(host, ctx);
+    });
+  });
+
+  let matSearchTimer = null;
+  host.querySelector('#mat-search')?.addEventListener('input', e => {
+    host.dataset.matSearch = e.target.value || '';
+    clearTimeout(matSearchTimer);
+    matSearchTimer = setTimeout(() => renderStationeryMaterialsView(host, ctx), 160);
+  });
+
+  host.querySelector('#mat-add-save')?.addEventListener('click', async () => {
+    const rawCode = host.querySelector('#mat-add-code')?.value?.trim() || nextMatCode;
+    const rawName = host.querySelector('#mat-add-name')?.value?.trim().toUpperCase() || '';
+    const unit = host.querySelector('#mat-add-unit')?.value || 'PCS';
+    const pUnit = host.querySelector('#mat-add-punit')?.value || deriveDefaultPurchaseUnit(rawName, unit);
+    if (!/^\d{5}$/.test(rawCode)) {
+      showInlineBanner(host, 'Kode Material harus tepat 5 angka.', 'error');
+      return;
+    }
+    if (!rawName) {
+      showInlineBanner(host, 'Nama Item wajib diisi.', 'error');
+      return;
+    }
+    if (items.some(it => it.item_code === rawCode)) {
+      showInlineBanner(host, `Kode Material ${rawCode} sudah digunakan.`, 'error');
+      return;
+    }
+    const newItem = {
+      id: `atk-${Date.now()}`,
+      item_code: rawCode,
+      item_name: rawName,
+      unit,
+      purchase_unit: pUnit,
+      min_purchase_qty: 1,
+      opening_stock: 0,
+      current_stock: 0,
+      min_stock: 2,
+      is_active: true
+    };
+    state.stationeryItems = [...items, newItem];
+    if (ctx.isDemoMode) {
+      saveDemoOpsState(state);
+    } else if (ctx.supabase) {
+      const { error } = await ctx.supabase.from('stationery_items').insert({
+        id: newItem.id,
+        item_code: newItem.item_code,
+        item_name: newItem.item_name,
+        unit: newItem.unit,
+        opening_stock: 0,
+        current_stock: 0,
+        min_stock: 2,
+        is_active: true
+      });
+      if (error) {
+        showInlineBanner(host, `Gagal menyimpan material: ${error.message}`, 'error');
+        return;
+      }
+      invalidateOpsStateCache();
+    }
+    await renderStationeryMaterialsView(host, ctx);
+    showInlineBanner(host, `Material "${rawCode} — ${rawName}" berhasil ditambahkan.`, 'ok');
+  });
+
+  host.querySelectorAll('.mat-row-save').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const tr = btn.closest('tr');
+      const nextName = tr?.querySelector('.mat-row-name')?.value?.trim().toUpperCase() || '';
+      const nextUnit = tr?.querySelector('.mat-row-unit')?.value || 'PCS';
+      const nextPUnit = tr?.querySelector('.mat-row-punit')?.value || 'PCS';
+      if (!nextName) {
+        showInlineBanner(host, 'Nama Item tidak boleh kosong.', 'error');
+        return;
+      }
+      state.stationeryItems = items.map(it => it.id === id ? {
+        ...it,
+        item_name: nextName,
+        unit: nextUnit,
+        purchase_unit: nextPUnit
+      } : it);
+      if (ctx.isDemoMode) {
+        saveDemoOpsState(state);
+      } else if (ctx.supabase) {
+        await ctx.supabase.from('stationery_items').update({ item_name: nextName, unit: nextUnit }).eq('id', id);
+        invalidateOpsStateCache();
+      }
+      await renderStationeryMaterialsView(host, ctx);
+      showInlineBanner(host, `Perubahan material "${nextName}" disimpan.`, 'ok');
+    });
+  });
+
+  host.querySelector('#dept-add-save')?.addEventListener('click', async () => {
+    const code = host.querySelector('#dept-add-code')?.value?.trim() || nextDeptCode;
+    const name = host.querySelector('#dept-add-name')?.value?.trim().toUpperCase() || '';
+    if (!/^\d{3}$/.test(code)) {
+      showInlineBanner(host, 'Kode Departemen harus tepat 3 angka.', 'error');
+      return;
+    }
+    if (!name) {
+      showInlineBanner(host, 'Nama Departemen wajib diisi.', 'error');
+      return;
+    }
+    if (departments.some(d => d.dept_code === code || d.name === name)) {
+      showInlineBanner(host, 'Kode atau Nama Departemen sudah terdaftar.', 'error');
+      return;
+    }
+    state.stationeryDepartments = [...departments, { id: `dept-${code}`, dept_code: code, name }];
+    await persistMaterialsState();
+    await renderStationeryMaterialsView(host, ctx);
+    showInlineBanner(host, `Departemen "${code} — ${name}" berhasil ditambahkan.`, 'ok');
+  });
+
+  host.querySelectorAll('.dept-row-save').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const tr = btn.closest('tr');
+      const code = tr?.querySelector('.dept-row-code')?.value?.trim() || '';
+      const name = tr?.querySelector('.dept-row-name')?.value?.trim().toUpperCase() || '';
+      if (!/^\d{3}$/.test(code) || !name) {
+        showInlineBanner(host, 'Kode Departemen (3 angka) dan Nama wajib valid.', 'error');
+        return;
+      }
+      state.stationeryDepartments = departments.map(d => d.id === id ? { ...d, dept_code: code, name } : d);
+      await persistMaterialsState();
+      await renderStationeryMaterialsView(host, ctx);
+      showInlineBanner(host, `Departemen "${code} — ${name}" diperbarui.`, 'ok');
+    });
+  });
+
+  host.querySelectorAll('.dept-row-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (departments.length <= 1) {
+        showInlineBanner(host, 'Minimal harus tersisa 1 departemen.', 'warn');
+        return;
+      }
+      state.stationeryDepartments = departments.filter(d => d.id !== id);
+      await persistMaterialsState();
+      await renderStationeryMaterialsView(host, ctx);
+      showInlineBanner(host, 'Departemen berhasil dihapus.', 'ok');
+    });
+  });
+}
+
+// ============================================================================
+// 6B. DASHBOARD SUMMARY HELPER & VEHICLE REPORTS
+// ============================================================================
+export async function getDashboardModuleSummary(ctx) {
+  const state = await loadOpsState(ctx);
+  const allEmployees = getAllKnownEmployees(ctx);
+  const staffEmployees = getStaffEmployeesList(ctx, state.settings, 'ALL', false);
+  const computedStaff = processStaffAttendancePeriod({
+    periodKey: '2026-11',
+    employees: staffEmployees,
+    rawEvents: state.rawEvents,
+    calendarDays: state.calendarDays,
+    holidaySchedules: state.conditionalHolidays,
+    leaveBalances: state.cutiBalances,
+    existingReviews: state.staffReviews,
+    mealOverrides: state.staffMealOverrides || [],
+    settings: state.settings
+  });
+  const staffFocusDate = resolveDefaultStaffFocusDate({
+    windowDates: computedStaff.window.dates,
+    dayMeta: computedStaff.window.dayMeta,
+    rawEvents: state.rawEvents
+  });
+  const staffPendingSelectedDate = countPendingStaffForSelectedDate({
+    summaries: computedStaff.summaries,
+    focusDate: staffFocusDate
+  });
+
+  const eligibleDrivers = getEligibleDrivers(allEmployees, state.settings);
+  const recDrivers = reconcileDriverSchedulesAndAttendance({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: eligibleDrivers,
+    schedules: state.driverSchedules,
+    rawEvents: state.rawEvents,
+    reconciliations: state.driverReconciliations || [],
+    calendarDays: state.calendarDays,
+    settings: state.settings
+  });
+
+  const vehicleUnits = new Set(
+    (state.driverSchedules || [])
+      .map(s => String(s.vehicle_no || '').trim())
+      .filter(Boolean)
+  );
+
+  return {
+    staffCount: staffEmployees.length,
+    staffPendingSelectedDate,
+    staffFocusDate,
+    driverCount: eligibleDrivers.length,
+    driverAnomalyCount: recDrivers.anomalies.length,
+    vehicleCount: vehicleUnits.size,
+    vehicleScheduleCount: (state.driverSchedules || []).length
+  };
+}
+
+export async function renderVehicleReportsView(host, ctx) {
+  const state = await loadOpsState(ctx);
+  const schedules = state.driverSchedules || [];
+  const deptCounts = new Map();
+  schedules.forEach(s => {
+    const sec = String(s.section || 'Support').toUpperCase();
+    deptCounts.set(sec, (deptCounts.get(sec) || 0) + 1);
+  });
+
+  host.innerHTML = `
+    <div class="ops-stack">
+      <div class="card ops-card">
+        <div class="ops-head">
+          <div>
+            <h2>Vehicle Reports</h2>
+          </div>
+          <div class="ops-actions">
+            <button type="button" class="btn btn-primary" id="ops-veh-xlsx">Export Excel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid ops-kpi-4">
+        <div class="card kpi-card"><div class="kpi-label">Total Perjalanan Operasional</div><div class="kpi-val">${schedules.length}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Support Trips</div><div class="kpi-val">${deptCounts.get('SUPPORT') || 0}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Indoor / Outdoor Trips</div><div class="kpi-val">${(deptCounts.get('INDOOR') || 0) + (deptCounts.get('OUTDOOR') || 0)}</div></div>
+        <div class="card kpi-card"><div class="kpi-label">Radin Trips</div><div class="kpi-val">${deptCounts.get('RADIN') || 0}</div></div>
+      </div>
+
+      <div class="card ops-card">
+        <h3>Riwayat Penggunaan Armada &amp; Penugasan Driver</h3>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>Departemen</th>
+                <th>Driver</th>
+                <th>No. Polisi / Catatan</th>
+                <th>Kegiatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${schedules.length ? schedules.map(s => `
+                <tr>
+                  <td class="nowrap"><b>${esc(s.work_date)}</b></td>
+                  <td><span class="pill">${esc(String(s.section || 'Support').toUpperCase())}</span></td>
+                  <td><b>${esc(s.driver_name)}</b> <small><code>${esc(s.employee_no)}</code></small></td>
+                  <td>${esc(s.vehicle_no || s.notes || '-')}</td>
+                  <td>${esc(s.destination || normalizeScheduleActivities(s).map(a => a.activity).filter(Boolean).join(' + ') || '-')}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" class="empty">Belum ada data perjalanan kendaraan tercatat.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  host.querySelector('#ops-veh-xlsx')?.addEventListener('click', async () => {
+    const aoa = [
+      ['Tanggal', 'Departemen', 'Driver', 'NIK', 'No. Polisi / Catatan', 'Kegiatan'],
+      ...schedules.map(s => [
+        s.work_date,
+        String(s.section || 'Support').toUpperCase(),
+        s.driver_name,
+        s.employee_no,
+        s.vehicle_no || s.notes || '',
+        s.destination || ''
+      ])
+    ];
+    await exportSheetXlsx('Vehicle_Operations_Report.xlsx', 'Vehicle Report', aoa);
   });
 }
 
@@ -2492,7 +3517,6 @@ export async function renderOpsSettingsView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>System &amp; Settings — Operations, Formulas &amp; Workflows</h2>
-            <p class="ops-sub">Seluruh konfigurasi jadwal kerja staff PT MBM (Pasuruan, Surabaya/Jakarta, Kiln Dry MMD, pengecualian manual), aturan payroll &amp; tarif lembur driver, serta penandatangan laporan.</p>
           </div>
           <div class="ops-actions">
             <button type="button" class="btn btn-secondary" id="ops-set-reset">Reset Default</button>
@@ -2504,7 +3528,7 @@ export async function renderOpsSettingsView(host, ctx) {
           <button type="button" class="tab-btn ${activeTab === 'driver' ? 'active' : ''}" data-tab="driver">Driver &amp; Tarif Lembur</button>
           <button type="button" class="tab-btn ${activeTab === 'signatories' ? 'active' : ''}" data-tab="signatories">Penandatangan Laporan</button>
           <button type="button" class="tab-btn ${activeTab === 'cuti' ? 'active' : ''}" data-tab="cuti">Cuti Policy</button>
-          <button type="button" class="tab-btn ${activeTab === 'stationery' ? 'active' : ''}" data-tab="stationery">Stationery &amp; SLOC</button>
+          <button type="button" class="tab-btn ${activeTab === 'stationery' ? 'active' : ''}" data-tab="stationery">Stationery &amp; Departemen</button>
         </div>
       </div>
 
@@ -2512,7 +3536,6 @@ export async function renderOpsSettingsView(host, ctx) {
       <div class="ops-stack ${activeTab === 'schedules' ? '' : 'hidden'}" data-panel="schedules">
         <div class="card ops-card">
           <h3>Jadwal Kerja Standar Staff — PT. Mitra Binamandiri Makmur</h3>
-          <p class="ops-sub">Berlaku untuk seluruh karyawan selain Driver. Batas terlambat &amp; uang makan dihitung otomatis dari jam masuk jadwal.</p>
           <div class="ops-schedule-blocks" style="margin-top:12px">
             <div class="ops-subbox">
               <h4>1. Home Base Pasuruan</h4>
@@ -2542,7 +3565,6 @@ export async function renderOpsSettingsView(host, ctx) {
           <div class="ops-head">
             <div>
               <h3>3. Home Base Kiln Dry — Jadwal Khusus Per Personil (Jabatan MMD)</h3>
-              <p class="ops-sub">Hari kerja sama (Senin–Sabtu), jam kerja dapat diatur berbeda tiap personil MMD.</p>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" id="ws-kiln-add">+ Tambah Personil Kiln Dry</button>
           </div>
@@ -2572,7 +3594,6 @@ export async function renderOpsSettingsView(host, ctx) {
           <div class="ops-head">
             <div>
               <h3>4. Pengecualian Jadwal Manual Per Karyawan</h3>
-              <p class="ops-sub">Tambahkan pengecualian jam kerja untuk staf tertentu PT MBM dan simpan ke konfigurasi.</p>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" id="ws-exc-add">+ Tambah Pengecualian Manual</button>
           </div>
@@ -2642,7 +3663,6 @@ export async function renderOpsSettingsView(host, ctx) {
           </div>
           <div class="ops-subbox" style="margin-top:12px">
             <h4>Kamus Kode Kehadiran Staff (9 Kode Standar)</h4>
-            <p class="ops-sub">Kode <code>T</code> dan <code>PA</code> dideteksi otomatis sesuai jadwal kerja; kode lainnya (<code>S, I, A, CT, L, DS, H</code>) dapat disesuaikan melalui menu Staff Attendance Management.</p>
             <div class="ops-form-grid" style="margin-top:10px">
               ${STAFF_ATTENDANCE_CODE_ORDER.map(c => `
                 <label class="ops-field"><span>Kode <code>${c}</code></span><input id="set-att-cb-${c}" type="text" class="input" value="${esc(s.attendance.codebook?.[c] || DEFAULT_STAFF_CODEBOOK[c])}"></label>
@@ -2650,8 +3670,7 @@ export async function renderOpsSettingsView(host, ctx) {
             </div>
           </div>
           <div class="ops-subbox" style="margin-top:12px">
-            <h4>Simulasi &amp; Adjust Manual Uang Makan (Case Tertentu)</h4>
-            <p class="ops-sub">Contoh aturan 07:30: <code>07:30:59</code> Tepat Waktu, <code>07:31:00</code> Terlambat; <code>07:35:59</code> Dapat Uang Makan, <code>07:36:00</code> Tidak Dapat Uang Makan.</p>
+            <h4>Adjust Manual Uang Makan (Case Tertentu)</h4>
             <div class="ops-form-grid" style="margin-top:8px">
               <label class="ops-field"><span>Karyawan</span><select id="meal-ov-emp" class="input">${empOptions('')}</select></label>
               <label class="ops-field"><span>Tanggal</span><input id="meal-ov-date" type="date" class="input" value="2026-11-02"></label>
@@ -2772,7 +3791,6 @@ export async function renderOpsSettingsView(host, ctx) {
         </div>
         <div class="card ops-card">
           <h3>Penandatangan Laporan Driver SUPPORT (3 Kolom — Dibuat, Disetujui, Diketahui)</h3>
-          <p class="ops-sub">Pilih karyawan dari Employee Directory atau isi nama &amp; jabatan kolom <b>DIKETAHUI</b> khusus departemen Support.</p>
           <div class="ops-schedule-blocks-3" style="margin-top:10px">
             ${renderSigSelector('sig-sup-l', sig.support.leftLabel, sig.support.leftNik, sig.support.leftName, sig.support.leftTitle)}
             ${renderSigSelector('sig-sup-m', sig.support.midLabel, sig.support.midNik, sig.support.midName, sig.support.midTitle)}
@@ -2830,9 +3848,9 @@ export async function renderOpsSettingsView(host, ctx) {
         </div>
       </div>
 
-      <!-- TAB 5: STATIONERY & SLOC -->
+      <!-- TAB 5: STATIONERY & DEPARTEMEN -->
       <div class="card ops-card ${activeTab === 'stationery' ? '' : 'hidden'}" data-panel="stationery">
-        <h3>Pengaturan Stationery / ATK, SLOC &amp; Purchase Plan</h3>
+        <h3>Pengaturan Stationery / ATK, Departemen &amp; Purchase Plan</h3>
         <div class="ops-form-grid">
           <label class="ops-field"><span>Horizon Rencana Pembelian</span>
             <select id="set-stk-horizon" class="input">
@@ -2850,7 +3868,7 @@ export async function renderOpsSettingsView(host, ctx) {
               <option value="weighted" ${s.stationery.scoringMode === 'weighted' ? 'selected' : ''}>Weighted (0.6 Qty + 0.4 Freq)</option>
             </select>
           </label>
-          <label class="ops-field"><span>SLOC Kanonik (Pisah koma)</span><input id="set-stk-slocs" type="text" class="input" value="${esc(s.stationery.canonicalSlocs.join(', '))}"></label>
+          <label class="ops-field"><span>Daftar Departemen (Pisah koma)</span><input id="set-stk-slocs" type="text" class="input" value="${esc(s.stationery.canonicalSlocs.join(', '))}"></label>
         </div>
       </div>
     </div>
@@ -3178,11 +4196,21 @@ export async function renderOpsSettingsView(host, ctx) {
       });
 
       state.settings = next;
+      state.stationeryDepartments = normalizeStationeryDepartments(
+        next.stationery.canonicalSlocs.map((name, idx) => ({
+          id: `dept-${String(101 + idx)}`,
+          dept_code: String(101 + idx),
+          name
+        })),
+        next.stationery.canonicalSlocs
+      );
+      saveStoredDepartments(state.stationeryDepartments);
       if (ctx.isDemoMode) {
         saveDemoOpsState(state);
       } else {
         const { error } = await ctx.supabase.from('portal_settings').upsert({ key: OPS_SETTINGS_KEY, value: next });
         if (error) throw error;
+        await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments }).catch(() => {});
         invalidateOpsStateCache();
       }
       await renderOpsSettingsView(host, ctx);
@@ -3193,5 +4221,5 @@ export async function renderOpsSettingsView(host, ctx) {
   });
 }
 
-// Keep evaluateStaffArrivalStatus referenced cleanly so linter/static checks stay satisfied
-export { evaluateStaffArrivalStatus };
+// Keep evaluateStaffArrivalStatus and applyStationeryTransaction referenced cleanly
+export { evaluateStaffArrivalStatus, applyStationeryTransaction };

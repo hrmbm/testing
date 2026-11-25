@@ -1325,3 +1325,48 @@ export function parseHolidayImportRows(aoa = []) {
   return rows;
 }
 
+export function resolveDefaultStaffFocusDate({
+  windowDates = [],
+  dayMeta = [],
+  rawEvents = []
+} = {}) {
+  const validDates = new Set(windowDates || []);
+  const eventDates = (rawEvents || [])
+    .map(ev => String(ev?.work_date || '').slice(0, 10))
+    .filter(d => d && validDates.has(d))
+    .sort();
+  if (eventDates.length) {
+    return eventDates[eventDates.length - 1];
+  }
+  const workdays = (dayMeta || []).filter(m => !m.isSunday);
+  if (workdays.length) {
+    return workdays[workdays.length - 1].dateStr;
+  }
+  return (windowDates && windowDates[0]) || '2026-11-05';
+}
+
+export function countPendingStaffForSelectedDate({
+  summaries = [],
+  focusDate = 'ALL'
+} = {}) {
+  const cleanFocus = String(focusDate || 'ALL').trim();
+  let count = 0;
+  for (const row of summaries || []) {
+    const validDays = (row?.days || []).filter(d => d.code !== '-');
+    if (!validDays.length) continue;
+    let targetDay = null;
+    if (cleanFocus && cleanFocus !== 'ALL') {
+      targetDay = row.days.find(d => d.work_date === cleanFocus) || null;
+    } else {
+      targetDay =
+        validDays.find(d => d.code === 'PERLU_PEMERIKSAAN_HR' || d.code === 'T' || d.code === 'PA') ||
+        validDays[0];
+    }
+    if (targetDay && targetDay.code === 'PERLU_PEMERIKSAAN_HR' && !targetDay.is_confirmed) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+
