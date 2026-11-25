@@ -1,5 +1,5 @@
-/* HR&GA Workspace app cache worker — version 20261124-hrga-workspace-20. */
-const BUILD = '20261124-hrga-workspace-20';
+/* HR&GA Workspace app cache worker — version 20261124-hrga-workspace-22. */
+const BUILD = '20261124-hrga-workspace-22';
 const APP_ASSET_CACHE = `hrga-workspace-app-assets-${BUILD}`;
 const APP_CACHE_PREFIXES = ['hrga-workspace-app-assets-', 'hrga-workspace-app-shell-', 'portal-karir-app-assets-', 'portal-karir-app-shell-'];
 
@@ -33,12 +33,11 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  const isImmutableVersioned = url.searchParams.has('v') && /\.(?:js|css)$/i.test(url.pathname);
   const isStaticMediaOrVendor = url.pathname.startsWith('/vendor/') ||
     (url.pathname.includes('/assets/img/') && /\.(?:png|jpe?g|webp|svg|ico)$/i.test(url.pathname)) ||
     (url.pathname.includes('/assets/contracts/') && /\.(?:html|json)$/i.test(url.pathname));
 
-  if (isImmutableVersioned || isStaticMediaOrVendor) {
+  if (isStaticMediaOrVendor) {
     event.respondWith((async () => {
       const cache = await caches.open(APP_ASSET_CACHE);
       const cached = await cache.match(request);
@@ -53,6 +52,7 @@ self.addEventListener('fetch', event => {
   }
 
   if (!url.pathname.includes('/assets/') || !/\.(?:js|css)$/i.test(url.pathname)) return;
+  // Network-first for all JS/CSS assets so UI and logic changes never get stuck behind SW cache.
   event.respondWith((async () => {
     const cache = await caches.open(APP_ASSET_CACHE);
     try {

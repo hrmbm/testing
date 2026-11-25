@@ -63,6 +63,7 @@ export function normalizeStationeryItems(rawItems = []) {
       item_name: itemName,
       unit,
       purchase_unit: normText(it?.purchase_unit || '') || deriveDefaultPurchaseUnit(itemName, unit),
+      conversion_qty: Math.max(1, Number(it?.conversion_qty ?? it?.unit_conversion ?? 1) || 1),
       min_purchase_qty: Math.max(1, Number(it?.min_purchase_qty) || 1),
       opening_stock: Number(it?.opening_stock ?? it?.current_stock ?? 0),
       current_stock: Number(it?.current_stock ?? 0),
@@ -364,6 +365,7 @@ export function buildStationeryReports({
       item_name: st.item.item_name,
       unit: st.item.unit,
       purchase_unit: st.item.purchase_unit || deriveDefaultPurchaseUnit(st.item.item_name, st.item.unit),
+      conversion_qty: Math.max(1, Number(st.item.conversion_qty) || 1),
       min_purchase_qty: Math.max(1, Number(st.item.min_purchase_qty) || 1),
       openingStock: periodOpeningStock,
       inQty: st.inQty,
@@ -427,6 +429,7 @@ export function buildStationeryReports({
       outFreq: r.outFreq,
       unit: r.unit,
       purchase_unit: r.purchase_unit,
+      conversion_qty: r.conversion_qty,
       min_purchase_qty: r.min_purchase_qty,
       currentStock: r.currentStock,
       byDept: r.byDept
@@ -621,11 +624,16 @@ export function buildPurchasePlanSuggestions({
     const avgDaily = (fav.totalOut || 0) / observedDays;
     const periodRequirement = avgDaily > 0 ? Math.ceil(avgDaily * planWindow.periodDays) : 0;
     const minStock = periodRequirement * 2;
+    const conversionQty = Math.max(1, Number(fav.conversion_qty) || 1);
     const minPurchase = ov.minPurchase !== undefined && ov.minPurchase !== ''
       ? Math.max(1, Number(ov.minPurchase) || 1)
       : Math.max(1, Number(fav.min_purchase_qty) || 1);
     const decisionQty = ov.decisionQty !== undefined && ov.decisionQty !== null
       ? String(ov.decisionQty)
+      : '';
+    const decisionNum = Number(decisionQty);
+    const convertedDecisionQty = decisionQty !== '' && Number.isFinite(decisionNum)
+      ? Math.round(decisionNum * conversionQty * 100) / 100
       : '';
 
     return {
@@ -638,9 +646,11 @@ export function buildPurchasePlanSuggestions({
       periodRequirement,
       minStock,
       unit: fav.unit,
+      conversionQty,
       minPurchase,
       purchaseUnit: fav.purchase_unit,
-      decisionQty
+      decisionQty,
+      convertedDecisionQty
     };
   });
 
@@ -650,3 +660,370 @@ export function buildPurchasePlanSuggestions({
     rows
   };
 }
+
+// ============================================================================
+// ATK / Stationery Data Import (Master Item & Stock Movement)
+// ============================================================================
+export const STATIONERY_MASTER_IMPORT_HEADERS = [
+  'Kode Material',
+  'Nama Item',
+  'Satuan',
+  'Satuan Minimal Pembelian',
+  'Konversi Satuan',
+  'Stock Awal',
+  'Min Stock'
+];
+
+export const STATIONERY_MASTER_SAMPLE_ROW = {
+  'Kode Material': '10016',
+  'Nama Item': 'BOLPOINT HITAM',
+  'Satuan': 'PCS',
+  'Satuan Minimal Pembelian': 'PACK',
+  'Konversi Satuan': 36,
+  'Stock Awal': 0,
+  'Min Stock': 10
+};
+
+export const STATIONERY_MOVEMENT_IMPORT_HEADERS = [
+  'Tanggal',
+  'Type',
+  'Departemen',
+  'Item',
+  'Qty',
+  'Satuan',
+  'Keterangan'
+];
+
+export const STATIONERY_MOVEMENT_SAMPLE_ROWS = [
+  { Tanggal: '2026-11-01', Type: 'Barang Masuk', Departemen: 'HR GA', Item: 'BOLPOINT HITAM', Qty: 100, Satuan: 'PCS', Keterangan: 'Stok awal masuk November' },
+  { Tanggal: '2026-11-02', Type: 'Barang Keluar', Departemen: 'HR GA', Item: 'BOLPOINT HITAM', Qty: 15, Satuan: 'PCS', Keterangan: 'Kebutuhan HR GA' },
+  { Tanggal: '2026-11-03', Type: 'Barang Keluar', Departemen: 'PPC INDOOR', Item: 'BOLPOINT HITAM', Qty: 20, Satuan: 'PCS', Keterangan: 'Operasional PPC Indoor' },
+  { Tanggal: '2026-11-04', Type: 'Barang Masuk', Departemen: 'PURCHASING', Item: 'KERTAS HVS FOLIO 70GRAM', Qty: 30, Satuan: 'RIM', Keterangan: 'PO ATK Bulanan' },
+  { Tanggal: '2026-11-05', Type: 'Barang Keluar', Departemen: 'MARKETING SERVICE', Item: 'KERTAS HVS FOLIO 70GRAM', Qty: 12, Satuan: 'RIM', Keterangan: 'Cetak dokumen marketing' },
+  { Tanggal: '2026-11-06', Type: 'Barang Keluar', Departemen: 'PRODUKSI INDOOR', Item: 'ISI CUTTER BESAR', Qty: 10, Satuan: 'PCS', Keterangan: 'Packing indoor' }
+];
+
+function getCellCI(row, candidates = []) {
+  if (!row || typeof row !== 'object') return '';
+  const map = new Map();
+  for (const [k, v] of Object.entries(row)) {
+    const cleanKey = String(k || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanKey && !map.has(cleanKey)) map.set(cleanKey, v);
+  }
+  for (const c of candidates) {
+    const cleanC = String(c || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (map.has(cleanC)) {
+      const val = map.get(cleanC);
+      if (val !== undefined && val !== null && String(val).trim() !== '') return val;
+    }
+  }
+  return '';
+}
+
+function parseImportDateValue(raw) {
+  if (raw === undefined || raw === null || raw === '') return '';
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 20000 && raw < 90000) {
+    const utcMs = Math.round((raw - 25569) * 86400 * 1000);
+    return new Date(utcMs).toISOString().slice(0, 10);
+  }
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const slashMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (slashMatch) {
+    let a = Number(slashMatch[1]);
+    let b = Number(slashMatch[2]);
+    let y = Number(slashMatch[3]);
+    if (y < 100) y += 2000;
+    // Assume DD/MM/YYYY unless month > 12 fallback
+    let day = a;
+    let month = b;
+    if (month > 12 && day <= 12) {
+      month = a;
+      day = b;
+    }
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(y).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  const parsed = new Date(s);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return '';
+}
+
+function parseImportTxType(raw) {
+  const txt = normText(raw);
+  if (!txt) return '';
+  if (txt === 'IN' || txt.includes('MASUK')) return 'IN';
+  if (txt === 'OUT' || txt.includes('KELUAR')) return 'OUT';
+  if (txt === 'ADJUSTMENT' || txt === 'ADJUST' || txt.includes('PENYESUAIAN')) return 'ADJUSTMENT';
+  return '';
+}
+
+export function parseStationeryMasterImportRows(rawRows = []) {
+  const rows = [];
+  const errors = [];
+  (rawRows || []).forEach((raw, idx) => {
+    const rowNo = idx + 2;
+    const itemName = normText(getCellCI(raw, ['Nama Item', 'Item', 'Item Name', 'Nama Barang', 'Material']));
+    if (!itemName) {
+      errors.push(`Baris ${rowNo}: Nama Item kosong.`);
+      return;
+    }
+    const rawCode = String(getCellCI(raw, ['Kode Material', 'Item Code', 'Kode', 'Code']) || '').trim();
+    const unit = normText(getCellCI(raw, ['Satuan', 'Unit', 'Satuan Stock']) || 'PCS') || 'PCS';
+    const purchaseUnit = normText(getCellCI(raw, ['Satuan Minimal Pembelian', 'Purchase Unit', 'Satuan Pembelian', 'Satuan Beli']) || '') || deriveDefaultPurchaseUnit(itemName, unit);
+    const convRaw = getCellCI(raw, ['Konversi Satuan', 'Conversion Qty', 'Isi per Satuan', 'Isi Satuan', 'Konversi']);
+    const conversionQty = Math.max(1, Number(String(convRaw !== '' ? convRaw : 1).replace(/,/g, '.')) || 1);
+    const openingRaw = getCellCI(raw, ['Stock Awal', 'Saldo Awal', 'Opening Stock', 'Current Stock', 'Stok Awal', 'Stok']);
+    const openingStock = Math.max(0, Number(String(openingRaw || 0).replace(/,/g, '.')) || 0);
+    const minRaw = getCellCI(raw, ['Min Stock', 'Minimum Stock', 'Minimal Stock', 'Min Stok']);
+    const minStock = Math.max(0, Number(String(minRaw !== '' ? minRaw : 2).replace(/,/g, '.')) || 2);
+    const minPurchaseRaw = getCellCI(raw, ['Min Purchase', 'Minimal Pembelian', 'Min Pembelian']);
+    const minPurchaseQty = Math.max(1, Number(String(minPurchaseRaw !== '' ? minPurchaseRaw : 1).replace(/,/g, '.')) || 1);
+
+    rows.push({
+      raw_code: rawCode,
+      item_name: itemName,
+      unit,
+      purchase_unit: purchaseUnit,
+      conversion_qty: conversionQty,
+      opening_stock: openingStock,
+      min_stock: minStock,
+      min_purchase_qty: minPurchaseQty
+    });
+  });
+  return { rows, errors };
+}
+
+export function importStationeryMasterDataset({
+  existingItems = [],
+  existingLedger = [],
+  parsedRows = [],
+  replaceExisting = false
+}) {
+  if (!parsedRows.length) {
+    throw new Error('Tidak ada baris Master Item ATK yang valid untuk diimport.');
+  }
+  const baseItems = replaceExisting ? [] : normalizeStationeryItems(existingItems);
+  const byName = new Map(baseItems.map(it => [normText(it.item_name), { ...it }]));
+  const byCode = new Map(baseItems.map(it => [it.item_code, { ...it }]));
+  const resultList = [...baseItems];
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+
+  for (const r of parsedRows) {
+    const cleanName = normText(r.item_name);
+    const desiredCode = /^\d{5}$/.test(String(r.raw_code || '').trim())
+      ? String(r.raw_code).trim()
+      : '';
+    const existing = byName.get(cleanName) || (desiredCode ? byCode.get(desiredCode) : null);
+
+    if (existing) {
+      existing.item_name = cleanName;
+      if (desiredCode && !byCode.has(desiredCode)) existing.item_code = desiredCode;
+      existing.unit = r.unit || existing.unit;
+      existing.purchase_unit = r.purchase_unit || existing.purchase_unit;
+      existing.conversion_qty = Math.max(1, Number(r.conversion_qty ?? existing.conversion_qty ?? 1));
+      existing.opening_stock = Number(r.opening_stock ?? existing.opening_stock);
+      if (replaceExisting) {
+        existing.current_stock = Number(r.opening_stock ?? 0);
+      } else {
+        existing.current_stock = Number(r.opening_stock ?? existing.current_stock);
+      }
+      existing.min_stock = Number(r.min_stock ?? existing.min_stock);
+      existing.min_purchase_qty = Math.max(1, Number(r.min_purchase_qty ?? existing.min_purchase_qty ?? 1));
+      updatedCount += 1;
+    } else {
+      const nextCode = desiredCode || generateNextMaterialCode(resultList);
+      const newItem = {
+        id: `atk-${nextCode}-${Math.random().toString(36).slice(2, 6)}`,
+        item_code: nextCode,
+        item_name: cleanName,
+        unit: r.unit || 'PCS',
+        purchase_unit: r.purchase_unit || deriveDefaultPurchaseUnit(cleanName, r.unit || 'PCS'),
+        conversion_qty: Math.max(1, Number(r.conversion_qty) || 1),
+        min_purchase_qty: Math.max(1, Number(r.min_purchase_qty) || 1),
+        opening_stock: Number(r.opening_stock || 0),
+        current_stock: Number(r.opening_stock || 0),
+        min_stock: Number(r.min_stock ?? 2),
+        is_active: true
+      };
+      resultList.push(newItem);
+      byName.set(cleanName, newItem);
+      byCode.set(newItem.item_code, newItem);
+      insertedCount += 1;
+    }
+  }
+
+  return {
+    items: normalizeStationeryItems(resultList),
+    ledger: replaceExisting ? [] : existingLedger,
+    insertedCount,
+    updatedCount
+  };
+}
+
+export function parseStationeryMovementImportRows(rawRows = [], settings = DEFAULT_OPS_SETTINGS) {
+  const rows = [];
+  const errors = [];
+  (rawRows || []).forEach((raw, idx) => {
+    const rowNo = idx + 2;
+    const txDate = parseImportDateValue(getCellCI(raw, ['Tanggal', 'Date', 'Tgl', 'Transaction Date']));
+    const txType = parseImportTxType(getCellCI(raw, ['Type', 'Tipe', 'Jenis', 'Jenis Transaksi', 'Tx Type']));
+    const deptRaw = String(getCellCI(raw, ['Departemen', 'Dept', 'Department', 'Bagian', 'Unit Kerja']) || 'HR GA').trim();
+    const deptCanonical = resolveCanonicalSloc(deptRaw, settings);
+    const itemRef = String(getCellCI(raw, ['Item', 'Nama Item', 'Item Name', 'Nama Barang', 'Material']) || '').trim();
+    const codeRef = String(getCellCI(raw, ['Kode Material', 'Kode', 'Item Code']) || '').trim();
+    const qtyVal = Number(String(getCellCI(raw, ['Qty', 'Jumlah', 'Quantity']) || '').replace(/,/g, '.'));
+    const unitVal = normText(getCellCI(raw, ['Satuan', 'Unit']) || '');
+    const notes = String(getCellCI(raw, ['Keterangan', 'Notes', 'Catatan', 'Remark']) || '').trim();
+
+    if (!txDate) {
+      errors.push(`Baris ${rowNo}: Tanggal tidak valid.`);
+      return;
+    }
+    if (!txType) {
+      errors.push(`Baris ${rowNo}: Type harus Barang Masuk atau Barang Keluar.`);
+      return;
+    }
+    if (!itemRef && !codeRef) {
+      errors.push(`Baris ${rowNo}: Item wajib diisi.`);
+      return;
+    }
+    if (!Number.isFinite(qtyVal) || qtyVal <= 0) {
+      errors.push(`Baris ${rowNo}: Qty harus > 0.`);
+      return;
+    }
+
+    rows.push({
+      tx_date: txDate,
+      tx_type: txType,
+      department: deptCanonical,
+      item_name: normText(itemRef),
+      item_code: codeRef,
+      qty: qtyVal,
+      unit: unitVal,
+      notes
+    });
+  });
+
+  // Sort chronologically; on equal date process IN before OUT
+  rows.sort((a, b) => {
+    const d = a.tx_date.localeCompare(b.tx_date);
+    if (d !== 0) return d;
+    const rank = t => (t === 'IN' ? 0 : 1);
+    return rank(a.tx_type) - rank(b.tx_type);
+  });
+
+  return { rows, errors };
+}
+
+export function importStationeryMovementsDataset({
+  items = [],
+  existingLedger = [],
+  parsedRows = [],
+  replaceLedger = false,
+  autoSeedOpeningIfShort = true,
+  createdBy = 'HR Admin',
+  settings = DEFAULT_OPS_SETTINGS
+}) {
+  if (!parsedRows.length) {
+    throw new Error('Tidak ada transaksi Stock Movement valid untuk diimport.');
+  }
+
+  let curItems = normalizeStationeryItems(items).map(it => ({
+    ...it,
+    current_stock: replaceLedger ? Number(it.opening_stock ?? 0) : Number(it.current_stock ?? 0)
+  }));
+  let curLedger = replaceLedger ? [] : [...existingLedger];
+
+  const findItemIdx = (r) => {
+    const cleanCode = normalizeMaterialCode(r.item_code || '', 0);
+    const cleanName = normText(r.item_name);
+    let idx = curItems.findIndex(it =>
+      (cleanName && normText(it.item_name) === cleanName) ||
+      (r.item_code && it.item_code === cleanCode)
+    );
+    if (idx === -1 && cleanName) {
+      // Also allow partial/case-insensitive exact prefix or substring only on exact name normalized
+      idx = curItems.findIndex(it => normText(it.item_name) === cleanName);
+    }
+    return idx;
+  };
+
+  let createdItemsCount = 0;
+  let autoSeededCount = 0;
+  const importedEntries = [];
+  const createdItems = [];
+
+  for (let i = 0; i < parsedRows.length; i++) {
+    const r = parsedRows[i];
+    let idx = findItemIdx(r);
+    if (idx === -1) {
+      const nextCode = /^\d{5}$/.test(String(r.item_code || '').trim())
+        ? String(r.item_code).trim()
+        : generateNextMaterialCode(curItems);
+      const unit = r.unit || 'PCS';
+      const newItem = {
+        id: `atk-${nextCode}-${Math.random().toString(36).slice(2, 6)}`,
+        item_code: nextCode,
+        item_name: r.item_name || `ITEM ${nextCode}`,
+        unit,
+        purchase_unit: deriveDefaultPurchaseUnit(r.item_name || '', unit),
+        conversion_qty: 1,
+        min_purchase_qty: 1,
+        opening_stock: 0,
+        current_stock: 0,
+        min_stock: 2,
+        is_active: true
+      };
+      curItems.push(newItem);
+      createdItems.push(newItem);
+      createdItemsCount += 1;
+      idx = curItems.length - 1;
+    }
+
+    const targetItem = curItems[idx];
+    if (r.tx_type === 'OUT' && autoSeedOpeningIfShort && targetItem.current_stock < r.qty) {
+      const shortfall = Number((r.qty - targetItem.current_stock).toFixed(2));
+      curItems[idx] = {
+        ...targetItem,
+        opening_stock: Number((Number(targetItem.opening_stock || 0) + shortfall).toFixed(2)),
+        current_stock: Number((Number(targetItem.current_stock || 0) + shortfall).toFixed(2))
+      };
+      autoSeededCount += 1;
+    }
+
+    const res = applyStationeryTransaction({
+      items: curItems,
+      ledger: curLedger,
+      tx: {
+        id: `mv-imp-${Date.now()}-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
+        tx_date: r.tx_date,
+        tx_type: r.tx_type,
+        item_id: curItems[idx].id,
+        item_code: curItems[idx].item_code,
+        item_name: curItems[idx].item_name,
+        qty: r.qty,
+        sloc_raw: r.department,
+        notes: r.notes,
+        created_by: createdBy
+      },
+      settings
+    });
+    curItems = res.items;
+    curLedger = res.ledger;
+    importedEntries.push(res.entry);
+  }
+
+  return {
+    items: curItems,
+    ledger: curLedger,
+    importedEntries,
+    createdItems,
+    createdItemsCount,
+    autoSeededCount
+  };
+}
+

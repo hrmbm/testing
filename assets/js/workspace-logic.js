@@ -1,5 +1,5 @@
 // Pure business logic helpers for HR&GA Workspace (unit-tested via node:test)
-import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-20';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
 
 const DISC_RESULT_CACHE = new WeakMap();
 

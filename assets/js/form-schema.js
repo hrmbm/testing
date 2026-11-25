@@ -1,4 +1,4 @@
-import { APPLY_INFO_SOURCES, FORM_INFO_SOURCES, slugifyKey } from './vacancy-logic.js?v=20261124-hrga-workspace-20';
+import { APPLY_INFO_SOURCES, FORM_INFO_SOURCES, slugifyKey } from './vacancy-logic.js?v=20261124-hrga-workspace-22';
 
 export const DEFAULT_FORM_POSITIONS = [
   'Spray',

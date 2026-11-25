@@ -3688,10 +3688,20 @@
   font-variant-numeric: tabular-nums;
 }
 
+.ops-form-grid:has(.atk-plan-window-field) {
+  grid-template-columns: minmax(150px, 0.8fr) minmax(275px, 1.45fr) minmax(180px, 1fr) minmax(180px, 1fr);
+}
+
+.atk-plan-window-field {
+  min-width: 0;
+}
+
 .atk-plan-window-input {
-  font-size: 12px;
+  font-size: 11.5px;
   font-family: var(--font-mono);
-  min-width: 268px;
+  letter-spacing: -0.01em;
+  width: 100%;
+  min-width: 0;
 }
 
 .atk-mat-name-input {
@@ -3727,7 +3737,69 @@
   }
 }
 
+/* Modal extensions for Driver Schedule & Stock Movement Batch Entry */
+.employee-modal-card.ops-modal-wide {
+  width: min(960px, 100%);
+}
 
+.ops-modal-scroll {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
 
+.drv-act-list.ops-modal-scroll {
+  padding: 10px;
+  background: transparent;
+  border: none;
+}
 
+.drv-act-row.drv-act-modal-row {
+  grid-template-columns: minmax(200px, 1.5fr) 148px 148px auto auto;
+}
 
+.drv-act-desc-wrap {
+  min-width: 200px;
+}
+
+.mat-conv-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mat-conv-unit-lbl {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.ops-sub-note {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ops-muted {
+  color: var(--muted);
+}
+
+@media (max-width: 820px) {
+  .ops-form-grid:has(.atk-plan-window-field) {
+    grid-template-columns: 1fr;
+  }
+  .employee-modal-card.ops-modal-wide {
+    padding: 16px;
+  }
+  .drv-act-row.drv-act-modal-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .drv-act-desc-wrap {
+    grid-column: 1 / -1;
+  }
+}

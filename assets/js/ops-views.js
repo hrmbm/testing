@@ -8,7 +8,7 @@ import {
   STAFF_ATTENDANCE_CODE_ORDER,
   DEFAULT_STAFF_CODEBOOK,
   normalizeOpsSettings
-} from './ops-settings-logic.js?v=20261124-hrga-workspace-20';
+} from './ops-settings-logic.js?v=20261124-hrga-workspace-22';
 import {
   SEED_EMPLOYEES,
   SEED_STATIONERY_ITEMS,
@@ -25,7 +25,7 @@ import {
   SEED_DRIVER_ADJUSTMENTS,
   SEED_STAFF_REVIEWS,
   SEED_STAFF_MEAL_OVERRIDES
-} from './ops-seed-data.js?v=20261124-hrga-workspace-20';
+} from './ops-seed-data.js?v=20261124-hrga-workspace-22';
 import {
   compactNik,
   parseLaporanTransaksiRows,
@@ -47,7 +47,7 @@ import {
   addMinutesToScheduleCutoff,
   resolveDefaultStaffFocusDate,
   countPendingStaffForSelectedDate
-} from './attendance-logic.js?v=20261124-hrga-workspace-20';
+} from './attendance-logic.js?v=20261124-hrga-workspace-22';
 import {
   isEligibleDriver,
   getEligibleDrivers,
@@ -55,12 +55,12 @@ import {
   validateDriverSchedules,
   reconcileDriverSchedulesAndAttendance,
   computeDriverDayMetrics
-} from './driver-logic.js?v=20261124-hrga-workspace-20';
+} from './driver-logic.js?v=20261124-hrga-workspace-22';
 import {
   renderDriverReportsView as renderDriverReportsModule,
   openDomPrintPreview,
   renderTwoSignatoriesHtml
-} from './driver-reports.js?v=20261124-hrga-workspace-20';
+} from './driver-reports.js?v=20261124-hrga-workspace-22';
 import {
   resolveCanonicalSloc,
   applyStationeryTransaction,
@@ -74,20 +74,26 @@ import {
   sliceTopFavoriteItems,
   buildDepartmentUsageChartData,
   buildPurchasePlanSuggestions,
-  deriveDefaultPurchaseUnit
-} from './stationery-logic.js?v=20261124-hrga-workspace-20';
+  deriveDefaultPurchaseUnit,
+  parseStationeryMasterImportRows,
+  importStationeryMasterDataset,
+  parseStationeryMovementImportRows,
+  importStationeryMovementsDataset
+} from './stationery-logic.js?v=20261124-hrga-workspace-22';
 import {
   parseEmployeeWorksheetAoa,
   paginateRows,
   normalizeCompanyEntity,
   formatCompanyEntityName
-} from './workspace-logic.js?v=20261124-hrga-workspace-20';
+} from './workspace-logic.js?v=20261124-hrga-workspace-22';
 
 const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
 const DRIVER_ADJUSTMENTS_KEY = 'hrga_driver_adjustments_v1';
 const STATIONERY_PLAN_MANUAL_KEY = 'hrga_atk_purchase_plan_manual_v1';
 const STATIONERY_DEPTS_KEY = 'hrga_atk_departments_v1';
+const STATIONERY_MATERIAL_META_KEY = 'hrga_atk_material_meta_v1';
+const ATK_STOCK_CLEANUP_KEY = 'hrga_atk_stock_reset_v22';
 const OPS_STATE_TTL_MS = 120000;
 
 let opsStateCache = null;
@@ -223,6 +229,65 @@ function saveStoredDepartments(depts) {
   } catch {}
 }
 
+function readStoredMaterialMeta() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STATIONERY_MATERIAL_META_KEY) || '{}');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredMaterialMeta(meta) {
+  try {
+    localStorage.setItem(STATIONERY_MATERIAL_META_KEY, JSON.stringify(meta || {}));
+  } catch {}
+}
+
+function extractMaterialMetaMap(items = []) {
+  const out = {};
+  for (const it of items || []) {
+    const code = normalizeMaterialCode(it?.item_code, 0);
+    if (!code) continue;
+    out[code] = {
+      purchase_unit: String(it?.purchase_unit || deriveDefaultPurchaseUnit(it?.item_name || '', it?.unit || 'PCS')).trim().toUpperCase(),
+      conversion_qty: Math.max(1, Number(it?.conversion_qty ?? 1) || 1),
+      min_purchase_qty: Math.max(1, Number(it?.min_purchase_qty) || 1)
+    };
+  }
+  return out;
+}
+
+function mergeMaterialMeta(items = [], metaMap = {}) {
+  return normalizeStationeryItems(
+    (items || []).map(it => {
+      const code = normalizeMaterialCode(it?.item_code, 0);
+      const meta = (code && metaMap?.[code]) || (it?.item_code && metaMap?.[it.item_code]) || null;
+      if (!meta) return it;
+      return {
+        ...it,
+        purchase_unit: meta.purchase_unit || it.purchase_unit,
+        conversion_qty: meta.conversion_qty ?? it.conversion_qty,
+        min_purchase_qty: meta.min_purchase_qty ?? it.min_purchase_qty
+      };
+    })
+  );
+}
+
+function toSqlStationeryItemRow(it) {
+  return {
+    id: String(it.id),
+    item_code: String(it.item_code),
+    item_name: String(it.item_name),
+    unit: String(it.unit || 'PCS'),
+    opening_stock: Number(it.opening_stock ?? 0),
+    current_stock: Number(it.current_stock ?? 0),
+    min_stock: Number(it.min_stock ?? 2),
+    is_active: it.is_active !== false,
+    updated_at: new Date().toISOString()
+  };
+}
+
 function buildInitialDemoOpsState() {
   const settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
   const stationeryDepartments = normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, settings.stationery.canonicalSlocs);
@@ -257,7 +322,19 @@ export function readDemoOpsState() {
         : (readStoredDepartments() || seed.stationeryDepartments);
       const stationeryDepartments = normalizeStationeryDepartments(rawDepts, settings.stationery.canonicalSlocs);
       settings.stationery.canonicalSlocs = stationeryDepartments.map(d => d.name);
-      return {
+
+      let atkItems = normalizeStationeryItems(
+        Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : seed.stationeryItems
+      );
+      let atkMovements = Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : seed.stationeryMovements;
+
+      // One-time cleanup so leftover stock numbers & old sample movements start cleanly at 0
+      if (!localStorage.getItem(ATK_STOCK_CLEANUP_KEY)) {
+        atkItems = atkItems.map(it => ({ ...it, opening_stock: 0, current_stock: 0 }));
+        atkMovements = [];
+      }
+
+      const nextState = {
         settings,
         calendarDays: Array.isArray(raw.calendarDays) ? raw.calendarDays : seed.calendarDays,
         uploadBatches: Array.isArray(raw.uploadBatches) ? raw.uploadBatches : seed.uploadBatches,
@@ -269,17 +346,21 @@ export function readDemoOpsState() {
         driverSchedules: Array.isArray(raw.driverSchedules) ? raw.driverSchedules : seed.driverSchedules,
         driverReconciliations: Array.isArray(raw.driverReconciliations) ? raw.driverReconciliations : seed.driverReconciliations,
         driverAdjustments: raw.driverAdjustments && typeof raw.driverAdjustments === 'object' ? raw.driverAdjustments : seed.driverAdjustments,
-        stationeryItems: normalizeStationeryItems(
-          Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : seed.stationeryItems
-        ),
+        stationeryItems: atkItems,
         stationeryDepartments,
-        stationeryMovements: Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : seed.stationeryMovements,
+        stationeryMovements: atkMovements,
         stationeryPlanManual: raw.stationeryPlanManual && typeof raw.stationeryPlanManual === 'object'
           ? raw.stationeryPlanManual
           : readStoredPlanManual()
       };
+      if (!localStorage.getItem(ATK_STOCK_CLEANUP_KEY)) {
+        localStorage.setItem(ATK_STOCK_CLEANUP_KEY, '1');
+        saveDemoOpsState(nextState);
+      }
+      return nextState;
     }
   } catch {}
+  localStorage.setItem(ATK_STOCK_CLEANUP_KEY, '1');
   const initial = buildInitialDemoOpsState();
   saveDemoOpsState(initial);
   return initial;
@@ -312,7 +393,7 @@ async function loadOpsState(ctx, force = false) {
     const state = buildInitialDemoOpsState();
     try {
       const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
-        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY]),
+        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY, STATIONERY_MATERIAL_META_KEY]),
         sb.from('attendance_calendar_days').select('*').order('cal_date', { ascending: true }),
         sb.from('attendance_upload_batches').select('*').order('created_at', { ascending: false }).limit(30),
         sb.from('attendance_raw_events').select('*').order('work_date', { ascending: false }).limit(2500),
@@ -321,18 +402,23 @@ async function loadOpsState(ctx, force = false) {
         sb.from('employee_leave_balances').select('*').order('employee_name', { ascending: true }),
         sb.from('driver_daily_schedules').select('*').order('work_date', { ascending: false }),
         sb.from('stationery_items').select('*').order('item_name', { ascending: true }),
-        sb.from('stationery_movements').select('*').order('created_at', { ascending: false }).limit(600)
+        sb.from('stationery_movements').select('*').order('tx_date', { ascending: false }).order('created_at', { ascending: false }).limit(5000)
       ]);
       let deptRows = null;
+      let materialMeta = readStoredMaterialMeta();
       if (Array.isArray(setRes.data)) {
         const opsRow = setRes.data.find(r => r.key === OPS_SETTINGS_KEY);
         const adjRow = setRes.data.find(r => r.key === DRIVER_ADJUSTMENTS_KEY);
         const deptRow = setRes.data.find(r => r.key === STATIONERY_DEPTS_KEY);
         const planRow = setRes.data.find(r => r.key === STATIONERY_PLAN_MANUAL_KEY);
+        const matMetaRow = setRes.data.find(r => r.key === STATIONERY_MATERIAL_META_KEY);
         if (opsRow?.value) state.settings = normalizeOpsSettings(opsRow.value);
         if (adjRow?.value && typeof adjRow.value === 'object') state.driverAdjustments = adjRow.value;
         if (Array.isArray(deptRow?.value)) deptRows = deptRow.value;
         if (planRow?.value && typeof planRow.value === 'object') state.stationeryPlanManual = planRow.value;
+        if (matMetaRow?.value && typeof matMetaRow.value === 'object') {
+          materialMeta = { ...materialMeta, ...matMetaRow.value };
+        }
       }
       state.stationeryDepartments = normalizeStationeryDepartments(
         deptRows || readStoredDepartments() || SEED_STATIONERY_DEPARTMENTS,
@@ -347,7 +433,11 @@ async function loadOpsState(ctx, force = false) {
       if (Array.isArray(holRes.data)) state.conditionalHolidays = holRes.data;
       if (Array.isArray(cutiRes.data)) state.cutiBalances = cutiRes.data;
       if (Array.isArray(drvRes.data)) state.driverSchedules = drvRes.data;
-      if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) state.stationeryItems = normalizeStationeryItems(stkItemRes.data);
+      if (Array.isArray(stkItemRes.data) && stkItemRes.data.length) {
+        state.stationeryItems = mergeMaterialMeta(stkItemRes.data, materialMeta);
+      } else {
+        state.stationeryItems = mergeMaterialMeta(state.stationeryItems, materialMeta);
+      }
       if (Array.isArray(stkMvRes.data)) state.stationeryMovements = stkMvRes.data;
 
       // Optional v7 tables (graceful if v7 hasn't run yet)
@@ -1774,70 +1864,34 @@ export async function renderDriverScheduleView(host, ctx) {
   const validation = validateDriverSchedules(state.driverSchedules, allEmployees, state.settings);
   const drvCfg = state.settings.driver;
 
-  const preDate = host.dataset.dsPreDate || '2026-11-14';
-  const preDriver = host.dataset.dsPreDriver || driverList[0]?.employee_no || '';
-  const preSection = host.dataset.dsPreSection || drvCfg.sections[0] || 'Support';
+  document.getElementById('ops-ds-modal')?.remove();
 
   host.innerHTML = `
     <div class="ops-stack">
+      ${validation.conflicts.length || validation.nikWarnings.length ? `
+        <div class="ops-flash-banner ops-flash-warn" role="alert">
+          <b>Peringatan Validasi:</b> ${validation.conflicts.length} konflik jam bentrok, ${validation.nikWarnings.length} catatan NIK.
+          ${validation.conflicts.map(c => `<div>• ${esc(c.message)}</div>`).join('')}
+          ${validation.nikWarnings.map(w => `<div>• ${esc(w.message)}</div>`).join('')}
+        </div>
+      ` : ''}
+
       <div class="card ops-card">
         <div class="ops-head">
           <div>
-            <h2>Manual Driver Schedule</h2>
+            <h2>Daftar Jadwal Manual Driver (${state.driverSchedules.length})</h2>
+          </div>
+          <div class="ops-actions">
+            <button type="button" class="btn btn-primary" id="ops-ds-open-modal">+ Tambah Jadwal</button>
           </div>
         </div>
-        ${validation.conflicts.length || validation.nikWarnings.length ? `
-          <div class="ops-flash-banner ops-flash-warn" role="alert">
-            <b>Peringatan Validasi:</b> ${validation.conflicts.length} konflik jam bentrok, ${validation.nikWarnings.length} catatan NIK.
-            ${validation.conflicts.map(c => `<div>• ${esc(c.message)}</div>`).join('')}
-            ${validation.nikWarnings.map(w => `<div>• ${esc(w.message)}</div>`).join('')}
-          </div>
-        ` : ''}
-
-        <div class="ops-form-grid">
-          <label class="ops-field"><span>Tanggal</span><input id="ops-ds-date" type="date" class="input" value="${esc(preDate)}"></label>
-          <label class="ops-field"><span>Nama Driver (Jabatan SOPIR, excl. SIKUS)</span>
-            <select id="ops-ds-driver" class="input">
-              ${driverList.map(d => `<option value="${esc(d.employee_no)}" ${d.employee_no === preDriver ? 'selected' : ''}>${esc(d.full_name)} (${esc(d.employee_no)})</option>`).join('')}
-            </select>
-          </label>
-          <label class="ops-field"><span>Departemen</span>
-            <select id="ops-ds-section" class="input">
-              ${drvCfg.sections.map(sec => `<option value="${esc(sec)}" ${sec === preSection ? 'selected' : ''}>${esc(sec.toUpperCase())}</option>`).join('')}
-            </select>
-          </label>
-          <label class="ops-field"><span>No. Polisi / Catatan (Opsional)</span><input id="ops-ds-nopol" type="text" class="input" placeholder="N 8142 WA / Catatan"></label>
-        </div>
-
-        <div class="drv-activities-box">
-          <div class="drv-activities-head">
-            <b>Daftar Kegiatan &amp; Estimasi Jam</b>
-            <button type="button" class="btn btn-sm btn-secondary" id="ops-ds-add-act">+ Tambah Kegiatan</button>
-          </div>
-          <div id="ops-ds-act-list" class="drv-act-list">
-            <div class="drv-act-row">
-              <label class="ops-field"><span>Jam Mulai</span><input type="time" class="input drv-act-start" value="07:00"></label>
-              <label class="ops-field"><span>Jam Selesai</span><input type="time" class="input drv-act-end" value="09:30"></label>
-              <label class="ops-check drv-act-home-wrap"><input type="checkbox" class="drv-act-home"> <span>s/d Pulang</span></label>
-              <label class="ops-field drv-act-desc-wrap"><span>Kegiatan</span><input type="text" class="input drv-act-desc" placeholder="Contoh: Mengantar Direksi"></label>
-              <button type="button" class="btn btn-sm btn-secondary drv-act-del" title="Hapus kegiatan">Hapus</button>
-            </div>
-          </div>
-          <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
-            <button type="button" class="btn btn-primary" id="ops-ds-add">Simpan Jadwal Departemen</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="card ops-card">
-        <h3>Daftar Jadwal Manual Driver (${state.driverSchedules.length})</h3>
-        <div class="table-wrap">
+        <div class="table-wrap" style="margin-top:12px">
           <table>
             <thead>
               <tr><th>Tanggal</th><th>Driver</th><th>Departemen</th><th>Rincian Kegiatan &amp; Estimasi Jam</th><th>Aksi</th></tr>
             </thead>
             <tbody>
-              ${state.driverSchedules.map(s => {
+              ${state.driverSchedules.length ? state.driverSchedules.map(s => {
                 const acts = normalizeScheduleActivities(s);
                 const actsHtml = acts.map(a => `
                   <div class="drv-act-pill-line">
@@ -1859,7 +1913,7 @@ export async function renderDriverScheduleView(host, ctx) {
                     </td>
                   </tr>
                 `;
-              }).join('')}
+              }).join('') : '<tr><td colspan="5" class="empty">Belum ada jadwal driver tersimpan.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -1867,106 +1921,213 @@ export async function renderDriverScheduleView(host, ctx) {
     </div>
   `;
 
-  const actList = host.querySelector('#ops-ds-act-list');
-  const bindActRow = rowEl => {
-    const chk = rowEl.querySelector('.drv-act-home');
-    const endInp = rowEl.querySelector('.drv-act-end');
-    chk?.addEventListener('change', () => {
-      if (endInp) endInp.disabled = chk.checked;
-    });
-    rowEl.querySelector('.drv-act-del')?.addEventListener('click', () => {
-      if (actList.querySelectorAll('.drv-act-row').length > 1) rowEl.remove();
-    });
-  };
-  actList.querySelectorAll('.drv-act-row').forEach(bindActRow);
+  const openDriverScheduleModal = ({ preDate = '2026-11-14', preDriver = '', preSection = '' } = {}) => {
+    document.getElementById('ops-ds-modal')?.remove();
+    const chosenDriver = preDriver || driverList[0]?.employee_no || '';
+    const chosenSection = preSection || drvCfg.sections[0] || 'Support';
 
-  host.querySelector('#ops-ds-add-act')?.addEventListener('click', () => {
-    const rows = actList.querySelectorAll('.drv-act-row');
-    const lastEnd = rows[rows.length - 1]?.querySelector('.drv-act-end')?.value || '13:00';
-    const row = document.createElement('div');
-    row.className = 'drv-act-row';
-    row.innerHTML = `
-      <label class="ops-field"><span>Jam Mulai</span><input type="time" class="input drv-act-start" value="${esc(lastEnd)}"></label>
-      <label class="ops-field"><span>Jam Selesai</span><input type="time" class="input drv-act-end" value=""></label>
-      <label class="ops-check drv-act-home-wrap"><input type="checkbox" class="drv-act-home" checked> <span>s/d Pulang</span></label>
-      <label class="ops-field drv-act-desc-wrap"><span>Kegiatan</span><input type="text" class="input drv-act-desc" placeholder="Contoh: Bantu kirim barang"></label>
-      <button type="button" class="btn btn-sm btn-secondary drv-act-del" title="Hapus kegiatan">Hapus</button>
+    const buildActivityRowHtml = idx => `
+      <div class="drv-act-row drv-act-modal-row">
+        <label class="ops-field drv-act-desc-wrap"><span>Kegiatan #${idx + 1}</span><input type="text" class="input drv-act-desc" placeholder="Contoh: Mengantar Direksi"></label>
+        <label class="ops-field"><span>Jam Mulai</span><input type="time" class="input drv-act-start" value=""></label>
+        <label class="ops-field"><span>Jam Selesai</span><input type="time" class="input drv-act-end" value=""></label>
+        <label class="ops-check drv-act-home-wrap"><input type="checkbox" class="drv-act-home"> <span>s/d Selesai / Pulang</span></label>
+        <button type="button" class="btn btn-sm btn-secondary drv-act-del" title="Hapus kegiatan">Hapus</button>
+      </div>
     `;
-    row.querySelector('.drv-act-end').disabled = true;
-    actList.appendChild(row);
-    bindActRow(row);
-  });
 
-  host.querySelector('#ops-ds-add')?.addEventListener('click', async () => {
-    const work_date = host.querySelector('#ops-ds-date')?.value;
-    const employee_no = host.querySelector('#ops-ds-driver')?.value;
-    const section = host.querySelector('#ops-ds-section')?.value || 'Support';
-    const notes = host.querySelector('#ops-ds-nopol')?.value?.trim() || '';
-    if (!work_date || !employee_no) return;
+    const modal = document.createElement('div');
+    modal.id = 'ops-ds-modal';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <section class="employee-modal-card ops-modal-wide" role="dialog" aria-modal="true" aria-labelledby="ops-ds-modal-title">
+        <div class="employee-modal-head">
+          <div>
+            <small>DRIVERS · SCHEDULE INPUT</small>
+            <h2 id="ops-ds-modal-title">Tambah Jadwal Driver</h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="ops-ds-modal-close" aria-label="Tutup">×</button>
+        </div>
 
-    const activities = [...actList.querySelectorAll('.drv-act-row')].map(r => {
-      const start_time = r.querySelector('.drv-act-start')?.value || '07:00';
-      const is_until_home = Boolean(r.querySelector('.drv-act-home')?.checked);
-      const end_time = is_until_home ? '' : (r.querySelector('.drv-act-end')?.value || '');
-      const activity = r.querySelector('.drv-act-desc')?.value?.trim() || '';
-      return { start_time, end_time, is_until_home, activity };
-    }).filter(a => a.start_time);
+        <div class="ops-form-grid">
+          <label class="ops-field"><span>Tanggal</span><input id="ops-ds-date" type="date" class="input" value="${esc(preDate)}"></label>
+          <label class="ops-field"><span>Driver</span>
+            <select id="ops-ds-driver" class="input">
+              ${driverList.map(d => `<option value="${esc(d.employee_no)}" ${d.employee_no === chosenDriver ? 'selected' : ''}>${esc(d.full_name)} (${esc(d.employee_no)})</option>`).join('')}
+            </select>
+          </label>
+          <label class="ops-field"><span>Departemen</span>
+            <select id="ops-ds-section" class="input">
+              ${drvCfg.sections.map(sec => `<option value="${esc(sec)}" ${sec === chosenSection ? 'selected' : ''}>${esc(sec.toUpperCase())}</option>`).join('')}
+            </select>
+          </label>
+          <label class="ops-field"><span>No. Polisi / Catatan (Opsional)</span><input id="ops-ds-nopol" type="text" class="input" placeholder="Opsional"></label>
+        </div>
 
-    if (!activities.length) {
-      showInlineBanner(host, 'Tambahkan minimal 1 kegiatan dengan jam mulai.', 'error');
-      return;
-    }
+        <div class="drv-activities-box">
+          <div class="drv-activities-head">
+            <b>Kegiatan &amp; Estimasi Jam (5 baris awal, isi minimal 1)</b>
+            <button type="button" class="btn btn-sm btn-secondary" id="ops-ds-add-act">+ Tambah Kegiatan</button>
+          </div>
+          <div id="ops-ds-act-list" class="drv-act-list ops-modal-scroll">
+            ${[0, 1, 2, 3, 4].map(i => buildActivityRowHtml(i)).join('')}
+          </div>
+        </div>
 
-    const emp = driverList.find(d => d.employee_no === employee_no);
-    const firstStart = activities[0].start_time;
-    const lastAct = activities[activities.length - 1];
-    const lastEnd = lastAct.is_until_home ? '' : lastAct.end_time;
+        <div id="ops-ds-modal-err" class="form-error" role="alert" style="margin-top:10px"></div>
 
-    const newRow = {
-      id: `ds-${Date.now()}`,
-      work_date,
-      employee_no,
-      driver_name: emp?.full_name || employee_no,
-      section,
-      start_time: firstStart,
-      end_time: lastEnd,
-      activities,
-      destination: activities.map(a => a.activity).filter(Boolean).join(' + '),
-      vehicle_no: '',
-      notes
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px">
+          <button type="button" class="btn btn-secondary" id="ops-ds-modal-cancel">Batal</button>
+          <button type="button" class="btn btn-primary" id="ops-ds-add">Simpan Jadwal</button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+      document.removeEventListener('keydown', onEsc);
+      modal.remove();
     };
+    const onEsc = e => {
+      if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', onEsc);
+    modal.addEventListener('click', e => {
+      if (e.target === modal) closeModal();
+    });
+    modal.querySelector('#ops-ds-modal-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#ops-ds-modal-cancel')?.addEventListener('click', closeModal);
 
-    const nextCheck = validateDriverSchedules([...state.driverSchedules, newRow], allEmployees, state.settings);
-    if (!nextCheck.valid) {
-      showInlineBanner(host, nextCheck.conflicts[0]?.message || 'Jadwal bentrok pada jam yang sama.', 'error');
-      return;
-    }
+    const actList = modal.querySelector('#ops-ds-act-list');
+    const errBox = modal.querySelector('#ops-ds-modal-err');
 
-    if (ctx.isDemoMode) {
-      state.driverSchedules = [newRow, ...state.driverSchedules];
-      saveDemoOpsState(state);
-    } else {
-      const { error } = await ctx.supabase.from('driver_daily_schedules').insert(newRow);
-      if (error) {
-        showInlineBanner(host, `Gagal menyimpan jadwal driver: ${error.message}`, 'error');
+    const bindActRow = rowEl => {
+      const chk = rowEl.querySelector('.drv-act-home');
+      const endInp = rowEl.querySelector('.drv-act-end');
+      chk?.addEventListener('change', () => {
+        if (endInp) {
+          endInp.disabled = chk.checked;
+          if (chk.checked) endInp.value = '';
+        }
+      });
+      rowEl.querySelector('.drv-act-del')?.addEventListener('click', () => {
+        if (actList.querySelectorAll('.drv-act-row').length > 1) {
+          rowEl.remove();
+        } else {
+          rowEl.querySelector('.drv-act-desc').value = '';
+          rowEl.querySelector('.drv-act-start').value = '';
+          if (endInp) { endInp.value = ''; endInp.disabled = false; }
+          if (chk) chk.checked = false;
+        }
+      });
+    };
+    actList.querySelectorAll('.drv-act-row').forEach(bindActRow);
+
+    modal.querySelector('#ops-ds-add-act')?.addEventListener('click', () => {
+      const nextIdx = actList.querySelectorAll('.drv-act-row').length;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = buildActivityRowHtml(nextIdx);
+      const row = tmp.firstElementChild;
+      if (row) {
+        actList.appendChild(row);
+        bindActRow(row);
+      }
+    });
+
+    modal.querySelector('#ops-ds-add')?.addEventListener('click', async () => {
+      errBox.textContent = '';
+      const work_date = modal.querySelector('#ops-ds-date')?.value;
+      const employee_no = modal.querySelector('#ops-ds-driver')?.value;
+      const section = modal.querySelector('#ops-ds-section')?.value || 'Support';
+      const notes = modal.querySelector('#ops-ds-nopol')?.value?.trim() || '';
+      if (!work_date || !employee_no) {
+        errBox.textContent = 'Tanggal dan Driver wajib diisi.';
         return;
       }
-      invalidateOpsStateCache();
-    }
-    delete host.dataset.dsPreDate;
-    delete host.dataset.dsPreDriver;
-    delete host.dataset.dsPreSection;
-    await renderDriverScheduleView(host, ctx);
-    showInlineBanner(host, `Jadwal ${newRow.driver_name} (${newRow.section}, ${newRow.work_date}) berhasil disimpan.`, 'ok');
+
+      const rawRows = [...actList.querySelectorAll('.drv-act-row')].map((r, idx) => ({
+        idx: idx + 1,
+        activity: r.querySelector('.drv-act-desc')?.value?.trim() || '',
+        start_time: r.querySelector('.drv-act-start')?.value || '',
+        is_until_home: Boolean(r.querySelector('.drv-act-home')?.checked),
+        end_time: r.querySelector('.drv-act-end')?.value || ''
+      })).filter(r => r.activity || r.start_time || r.end_time || r.is_until_home);
+
+      if (!rawRows.length) {
+        errBox.textContent = 'Isi minimal 1 baris kegiatan dan jam mulai.';
+        return;
+      }
+      for (const r of rawRows) {
+        if (!r.start_time) {
+          errBox.textContent = `Kegiatan #${r.idx}: Jam Mulai wajib diisi.`;
+          return;
+        }
+        if (!r.is_until_home && !r.end_time) {
+          errBox.textContent = `Kegiatan #${r.idx}: isi Jam Selesai atau centang "s/d Selesai / Pulang".`;
+          return;
+        }
+      }
+
+      const activities = rawRows.map(r => ({
+        start_time: r.start_time,
+        end_time: r.is_until_home ? '' : r.end_time,
+        is_until_home: r.is_until_home,
+        activity: r.activity
+      }));
+
+      const emp = driverList.find(d => d.employee_no === employee_no);
+      const firstStart = activities[0].start_time;
+      const lastAct = activities[activities.length - 1];
+      const lastEnd = lastAct.is_until_home ? '' : lastAct.end_time;
+
+      const newRow = {
+        id: `ds-${Date.now()}`,
+        work_date,
+        employee_no,
+        driver_name: emp?.full_name || employee_no,
+        section,
+        start_time: firstStart,
+        end_time: lastEnd,
+        activities,
+        destination: activities.map(a => a.activity).filter(Boolean).join(' + '),
+        vehicle_no: '',
+        notes
+      };
+
+      const nextCheck = validateDriverSchedules([...state.driverSchedules, newRow], allEmployees, state.settings);
+      if (!nextCheck.valid) {
+        errBox.textContent = nextCheck.conflicts[0]?.message || 'Jadwal bentrok pada jam yang sama.';
+        return;
+      }
+
+      if (ctx.isDemoMode) {
+        state.driverSchedules = [newRow, ...state.driverSchedules];
+        saveDemoOpsState(state);
+      } else {
+        const { error } = await ctx.supabase.from('driver_daily_schedules').insert(newRow);
+        if (error) {
+          errBox.textContent = `Gagal menyimpan jadwal driver: ${error.message}`;
+          return;
+        }
+        invalidateOpsStateCache();
+      }
+      closeModal();
+      await renderDriverScheduleView(host, ctx);
+      showInlineBanner(host, `Jadwal ${newRow.driver_name} (${newRow.section}, ${newRow.work_date}) berhasil disimpan.`, 'ok');
+    });
+  };
+
+  host.querySelector('#ops-ds-open-modal')?.addEventListener('click', () => {
+    openDriverScheduleModal({});
   });
 
   host.querySelectorAll('.ops-ds-add-dept').forEach(btn => {
     btn.addEventListener('click', () => {
-      host.dataset.dsPreDate = btn.dataset.date || '2026-11-14';
-      host.dataset.dsPreDriver = btn.dataset.nik || '';
-      host.dataset.dsPreSection = 'Radin';
-      renderDriverScheduleView(host, ctx);
-      host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      openDriverScheduleModal({
+        preDate: btn.dataset.date || '2026-11-14',
+        preDriver: btn.dataset.nik || '',
+        preSection: 'Radin'
+      });
     });
   });
 
@@ -2249,84 +2410,22 @@ export async function renderStationeryInputView(host, ctx) {
     : normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, state.settings.stationery.canonicalSlocs);
   const items = normalizeStationeryItems(state.stationeryItems || []);
   const itemById = new Map(items.map(it => [it.id, it]));
-  const todayIso = state.stationeryMovements?.[0]?.tx_date || '2026-11-24';
+  const todayIso = state.stationeryMovements?.[0]?.tx_date || new Date().toISOString().slice(0, 10);
 
-  const buildItemOptionsHtml = (selectedId = '') => items.map(it =>
-    `<option value="${esc(it.id)}" data-unit="${esc(it.unit)}" ${it.id === selectedId ? 'selected' : ''}>${esc(it.item_code)} — ${esc(it.item_name)} (Stok: ${it.current_stock} ${esc(it.unit)})</option>`
-  ).join('');
-
-  const buildBatchRowHtml = (idx = 0) => {
-    const firstItem = items[idx % items.length] || items[0];
-    return `
-      <tr class="atk-batch-row">
-        <td>
-          <select class="input atk-batch-item" aria-label="Pilih item ATK">
-            ${buildItemOptionsHtml(firstItem?.id || '')}
-          </select>
-        </td>
-        <td>
-          <input type="number" min="1" step="1" class="input atk-batch-qty" value="1" aria-label="Qty barang">
-        </td>
-        <td class="atk-batch-unit-cell"><span class="pill atk-batch-unit">${esc(firstItem?.unit || 'PCS')}</span></td>
-        <td>
-          <input type="text" class="input atk-batch-notes" placeholder="Opsional" aria-label="Keterangan item">
-        </td>
-        <td>
-          <button type="button" class="btn btn-sm btn-secondary atk-batch-del">Hapus</button>
-        </td>
-      </tr>
-    `;
-  };
+  document.getElementById('ops-atk-modal')?.remove();
 
   host.innerHTML = `
     <div class="ops-stack">
       <div class="card ops-card">
         <div class="ops-head">
           <div>
-            <h2>Stock Movement Input</h2>
+            <h2>Riwayat Stock Movement (${state.stationeryMovements.length})</h2>
           </div>
           <div class="ops-actions">
-            <button type="button" class="btn btn-secondary" id="ops-atk-add-row">+ Tambah Item</button>
-            <button type="button" class="btn btn-primary" id="ops-atk-submit">Simpan Transaksi</button>
+            <button type="button" class="btn btn-primary" id="ops-atk-open-modal">+ Tambah Transaksi</button>
           </div>
         </div>
-
-        <div class="ops-form-grid" style="margin-top:8px">
-          <label class="ops-field"><span>Tanggal</span><input id="ops-atk-date" type="date" class="input" value="${esc(todayIso)}"></label>
-          <label class="ops-field"><span>Type</span>
-            <select id="ops-atk-type" class="input">
-              <option value="OUT">Barang Keluar</option>
-              <option value="IN">Barang Masuk</option>
-            </select>
-          </label>
-          <label class="ops-field"><span>Departemen</span>
-            <select id="ops-atk-dept" class="input">
-              ${departments.map(d => `<option value="${esc(d.name)}">${esc(d.dept_code)} — ${esc(d.name)}</option>`).join('')}
-            </select>
-          </label>
-        </div>
-
-        <div class="table-wrap" style="margin-top:14px">
-          <table class="atk-batch-table">
-            <thead>
-              <tr>
-                <th style="min-width:290px">Item</th>
-                <th style="width:110px">Qty</th>
-                <th style="width:100px">Satuan</th>
-                <th style="min-width:200px">Keterangan (Opsional)</th>
-                <th style="width:84px">Aksi</th>
-              </tr>
-            </thead>
-            <tbody id="ops-atk-batch-body">
-              ${buildBatchRowHtml(0)}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card ops-card">
-        <h3>Riwayat Stock Movement (${state.stationeryMovements.length})</h3>
-        <div class="table-wrap" style="margin-top:10px">
+        <div class="table-wrap" style="margin-top:12px">
           <table>
             <thead>
               <tr>
@@ -2340,7 +2439,7 @@ export async function renderStationeryInputView(host, ctx) {
               </tr>
             </thead>
             <tbody>
-              ${state.stationeryMovements.length ? state.stationeryMovements.slice(0, 60).map(mv => {
+              ${state.stationeryMovements.length ? state.stationeryMovements.slice(0, 100).map(mv => {
                 const isIn = mv.tx_type === 'IN';
                 const typeLabel = isIn ? 'Barang Masuk' : 'Barang Keluar';
                 const deptLabel = resolveCanonicalSloc(mv.sloc_canonical || mv.sloc_raw || 'HR GA', state.settings);
@@ -2363,82 +2462,242 @@ export async function renderStationeryInputView(host, ctx) {
     </div>
   `;
 
-  const batchBody = host.querySelector('#ops-atk-batch-body');
-  const bindBatchRow = rowEl => {
-    const sel = rowEl.querySelector('.atk-batch-item');
-    const unitBadge = rowEl.querySelector('.atk-batch-unit');
-    sel?.addEventListener('change', () => {
-      const it = itemById.get(sel.value);
-      if (unitBadge) unitBadge.textContent = it?.unit || 'PCS';
+  const openTransactionModal = () => {
+    document.getElementById('ops-atk-modal')?.remove();
+    const buildItemOptionsHtml = () => [
+      `<option value="">-- Pilih Item ATK --</option>`,
+      ...items.map(it =>
+        `<option value="${esc(it.id)}" data-unit="${esc(it.unit)}">${esc(it.item_code)} — ${esc(it.item_name)} (Stok: ${it.current_stock} ${esc(it.unit)})</option>`
+      )
+    ].join('');
+
+    const buildBlankBatchRowHtml = idx => `
+      <tr class="atk-batch-row">
+        <td class="num">${idx + 1}</td>
+        <td>
+          <select class="input atk-batch-item" aria-label="Pilih item ATK baris ${idx + 1}">
+            ${buildItemOptionsHtml()}
+          </select>
+        </td>
+        <td>
+          <input type="number" min="1" step="1" class="input atk-batch-qty" value="" placeholder="0" aria-label="Qty baris ${idx + 1}">
+        </td>
+        <td class="atk-batch-unit-cell"><span class="pill atk-batch-unit">-</span></td>
+        <td>
+          <input type="text" class="input atk-batch-notes" placeholder="Opsional" aria-label="Keterangan baris ${idx + 1}">
+        </td>
+        <td>
+          <button type="button" class="btn btn-sm btn-secondary atk-batch-del">Hapus</button>
+        </td>
+      </tr>
+    `;
+
+    const modal = document.createElement('div');
+    modal.id = 'ops-atk-modal';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <section class="employee-modal-card ops-modal-wide" role="dialog" aria-modal="true" aria-labelledby="ops-atk-modal-title">
+        <div class="employee-modal-head">
+          <div>
+            <small>STATIONERY &amp; ATK · STOCK MOVEMENT</small>
+            <h2 id="ops-atk-modal-title">Tambah Transaksi Stock Movement</h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="ops-atk-modal-close" aria-label="Tutup">×</button>
+        </div>
+
+        <div class="ops-form-grid">
+          <label class="ops-field"><span>Tanggal</span><input id="ops-atk-date" type="date" class="input" value="${esc(todayIso)}"></label>
+          <label class="ops-field"><span>Type</span>
+            <select id="ops-atk-type" class="input">
+              <option value="OUT">Barang Keluar</option>
+              <option value="IN">Barang Masuk</option>
+            </select>
+          </label>
+          <label class="ops-field"><span>Departemen</span>
+            <select id="ops-atk-dept" class="input">
+              ${departments.map(d => `<option value="${esc(d.name)}">${esc(d.dept_code)} — ${esc(d.name)}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+
+        <div class="drv-activities-head" style="margin-top:14px">
+          <b>Daftar Item Transaksi (10 baris awal, isi minimal 1)</b>
+          <button type="button" class="btn btn-sm btn-secondary" id="ops-atk-add-row">+ Tambah Baris</button>
+        </div>
+
+        <div class="table-wrap ops-modal-scroll" style="margin-top:8px">
+          <table class="atk-batch-table">
+            <thead>
+              <tr>
+                <th style="width:42px">No</th>
+                <th style="min-width:290px">Item</th>
+                <th style="width:100px">Qty</th>
+                <th style="width:90px">Satuan</th>
+                <th style="min-width:190px">Keterangan (Opsional)</th>
+                <th style="width:80px">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="ops-atk-batch-body">
+              ${Array.from({ length: 10 }, (_, idx) => buildBlankBatchRowHtml(idx)).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div id="ops-atk-modal-err" class="form-error" role="alert" style="margin-top:10px"></div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px">
+          <button type="button" class="btn btn-secondary" id="ops-atk-modal-cancel">Batal</button>
+          <button type="button" class="btn btn-primary" id="ops-atk-submit">Simpan Transaksi</button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+      document.removeEventListener('keydown', onEsc);
+      modal.remove();
+    };
+    const onEsc = e => {
+      if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', onEsc);
+    modal.addEventListener('click', e => {
+      if (e.target === modal) closeModal();
     });
-    rowEl.querySelector('.atk-batch-del')?.addEventListener('click', () => {
-      if (batchBody.querySelectorAll('.atk-batch-row').length > 1) {
-        rowEl.remove();
+    modal.querySelector('#ops-atk-modal-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#ops-atk-modal-cancel')?.addEventListener('click', closeModal);
+
+    const batchBody = modal.querySelector('#ops-atk-batch-body');
+    const errBox = modal.querySelector('#ops-atk-modal-err');
+
+    const renumberRows = () => {
+      batchBody?.querySelectorAll('.atk-batch-row').forEach((tr, i) => {
+        const noCell = tr.firstElementChild;
+        if (noCell) noCell.textContent = String(i + 1);
+      });
+    };
+
+    const bindBatchRow = rowEl => {
+      const sel = rowEl.querySelector('.atk-batch-item');
+      const unitBadge = rowEl.querySelector('.atk-batch-unit');
+      const qtyInp = rowEl.querySelector('.atk-batch-qty');
+      const notesInp = rowEl.querySelector('.atk-batch-notes');
+      sel?.addEventListener('change', () => {
+        const it = itemById.get(sel.value);
+        if (unitBadge) unitBadge.textContent = it?.unit || '-';
+        if (it && !qtyInp.value) qtyInp.value = '1';
+        if (!sel.value && qtyInp) qtyInp.value = '';
+      });
+      rowEl.querySelector('.atk-batch-del')?.addEventListener('click', () => {
+        if (batchBody.querySelectorAll('.atk-batch-row').length > 1) {
+          rowEl.remove();
+          renumberRows();
+        } else {
+          if (sel) sel.value = '';
+          if (qtyInp) qtyInp.value = '';
+          if (notesInp) notesInp.value = '';
+          if (unitBadge) unitBadge.textContent = '-';
+        }
+      });
+    };
+    batchBody?.querySelectorAll('.atk-batch-row').forEach(bindBatchRow);
+
+    modal.querySelector('#ops-atk-add-row')?.addEventListener('click', () => {
+      const idx = batchBody?.querySelectorAll('.atk-batch-row').length || 0;
+      const tmp = document.createElement('tbody');
+      tmp.innerHTML = buildBlankBatchRowHtml(idx);
+      const newRow = tmp.firstElementChild;
+      if (newRow && batchBody) {
+        batchBody.appendChild(newRow);
+        bindBatchRow(newRow);
+      }
+    });
+
+    modal.querySelector('#ops-atk-submit')?.addEventListener('click', async () => {
+      errBox.textContent = '';
+      const txDate = modal.querySelector('#ops-atk-date')?.value || todayIso;
+      const txType = modal.querySelector('#ops-atk-type')?.value || 'OUT';
+      const department = modal.querySelector('#ops-atk-dept')?.value || 'HR GA';
+
+      const selectedRows = [...(batchBody?.querySelectorAll('.atk-batch-row') || [])]
+        .map((tr, i) => ({
+          rowNo: i + 1,
+          item_id: tr.querySelector('.atk-batch-item')?.value || '',
+          qty: Number(tr.querySelector('.atk-batch-qty')?.value || 0),
+          notes: tr.querySelector('.atk-batch-notes')?.value?.trim() || ''
+        }))
+        .filter(r => r.item_id !== '');
+
+      if (!selectedRows.length) {
+        errBox.textContent = 'Pilih minimal 1 item ATK untuk disimpan.';
+        return;
+      }
+      const badQtyRow = selectedRows.find(r => !Number.isFinite(r.qty) || r.qty <= 0);
+      if (badQtyRow) {
+        errBox.textContent = `Baris #${badQtyRow.rowNo}: Qty harus lebih dari 0.`;
+        return;
+      }
+
+      try {
+        const res = applyStationeryBatchTransactions({
+          items,
+          ledger: state.stationeryMovements,
+          txDate,
+          txType,
+          department,
+          rows: selectedRows,
+          createdBy: ctx.profile?.username || 'ADMIN',
+          settings: state.settings
+        });
+
+        if (ctx.isDemoMode) {
+          state.stationeryItems = res.items;
+          state.stationeryMovements = res.ledger;
+          saveDemoOpsState(state);
+        } else {
+          const targetIds = [...new Set(res.entries.map(e => e.item_id))];
+          const { data: existingDbItems } = await ctx.supabase
+            .from('stationery_items')
+            .select('id, item_code, item_name')
+            .in('id', targetIds);
+          const existingIdSet = new Set((existingDbItems || []).map(x => x.id));
+          const missingItems = targetIds
+            .filter(id => !existingIdSet.has(id))
+            .map(id => items.find(it => it.id === id))
+            .filter(Boolean)
+            .map(toSqlStationeryItemRow);
+          if (missingItems.length) {
+            const { error: seedErr } = await ctx.supabase
+              .from('stationery_items')
+              .upsert(missingItems, { onConflict: 'id' });
+            if (seedErr) throw seedErr;
+          }
+          for (const entry of res.entries) {
+            const { error } = await ctx.supabase.rpc('record_stationery_transaction', {
+              p_item_id: entry.item_id,
+              p_tx_type: entry.tx_type,
+              p_qty: entry.qty,
+              p_tx_date: entry.tx_date,
+              p_sloc_raw: entry.sloc_canonical,
+              p_sloc_canonical: entry.sloc_canonical,
+              p_reference_no: '',
+              p_notes: entry.notes,
+              p_created_by: entry.created_by
+            });
+            if (error) throw error;
+          }
+          invalidateOpsStateCache();
+        }
+        closeModal();
+        await renderStationeryInputView(host, ctx);
+        showInlineBanner(host, `${res.entries.length} item ${txType === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} (${department}) berhasil disimpan.`, 'ok');
+      } catch (err) {
+        errBox.textContent = err?.message || 'Transaksi ditolak.';
       }
     });
   };
-  batchBody?.querySelectorAll('.atk-batch-row').forEach(bindBatchRow);
 
-  host.querySelector('#ops-atk-add-row')?.addEventListener('click', () => {
-    const idx = batchBody?.querySelectorAll('.atk-batch-row').length || 0;
-    const tmp = document.createElement('tbody');
-    tmp.innerHTML = buildBatchRowHtml(idx);
-    const newRow = tmp.firstElementChild;
-    if (newRow && batchBody) {
-      batchBody.appendChild(newRow);
-      bindBatchRow(newRow);
-    }
-  });
-
-  host.querySelector('#ops-atk-submit')?.addEventListener('click', async () => {
-    const txDate = host.querySelector('#ops-atk-date')?.value || todayIso;
-    const txType = host.querySelector('#ops-atk-type')?.value || 'OUT';
-    const department = host.querySelector('#ops-atk-dept')?.value || 'HR GA';
-    const rows = [...(batchBody?.querySelectorAll('.atk-batch-row') || [])].map(tr => ({
-      item_id: tr.querySelector('.atk-batch-item')?.value || '',
-      qty: Number(tr.querySelector('.atk-batch-qty')?.value || 0),
-      notes: tr.querySelector('.atk-batch-notes')?.value?.trim() || ''
-    }));
-
-    try {
-      const res = applyStationeryBatchTransactions({
-        items,
-        ledger: state.stationeryMovements,
-        txDate,
-        txType,
-        department,
-        rows,
-        createdBy: ctx.profile?.username || 'ADMIN',
-        settings: state.settings
-      });
-
-      if (ctx.isDemoMode) {
-        state.stationeryItems = res.items;
-        state.stationeryMovements = res.ledger;
-        saveDemoOpsState(state);
-      } else {
-        for (const entry of res.entries) {
-          const { error } = await ctx.supabase.rpc('record_stationery_transaction', {
-            p_item_id: entry.item_id,
-            p_tx_type: entry.tx_type,
-            p_qty: entry.qty,
-            p_tx_date: entry.tx_date,
-            p_sloc_raw: entry.sloc_canonical,
-            p_sloc_canonical: entry.sloc_canonical,
-            p_reference_no: '',
-            p_notes: entry.notes,
-            p_created_by: entry.created_by
-          });
-          if (error) throw error;
-        }
-        invalidateOpsStateCache();
-      }
-      await renderStationeryInputView(host, ctx);
-      showInlineBanner(host, `${res.entries.length} item ${txType === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} (${department}) berhasil disimpan.`, 'ok');
-    } catch (err) {
-      showInlineBanner(host, err?.message || 'Transaksi ditolak.', 'error');
-    }
-  });
+  host.querySelector('#ops-atk-open-modal')?.addEventListener('click', openTransactionModal);
 }
 
 function renderAtkBarChartSvg(series, scaleMax, ticks) {
@@ -2895,6 +3154,7 @@ export async function renderStationeryReportsView(host, ctx) {
                 <th>Purchase Unit</th>
                 <th class="num" style="width:130px">Purchase Qty Decision</th>
                 <th>Purchase Unit</th>
+                <th class="num" style="width:155px">Convert to Unit</th>
               </tr>
             </thead>
             <tbody>
@@ -2911,11 +3171,16 @@ export async function renderStationeryReportsView(host, ctx) {
                   </td>
                   <td>${esc(r.purchaseUnit)}</td>
                   <td class="num">
-                    <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
+                    <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" data-conv="${r.conversionQty}" data-unit="${esc(r.unit)}" data-punit="${esc(r.purchaseUnit)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
                   </td>
                   <td>${esc(r.purchaseUnit)}</td>
+                  <td class="num atk-convert-cell" data-conv-cell="${esc(r.id)}">
+                    ${r.convertedDecisionQty !== ''
+                      ? `<b>${r.convertedDecisionQty} ${esc(r.unit)}</b><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`
+                      : `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`}
+                  </td>
                 </tr>
-              `).join('') : '<tr><td colspan="10" class="empty">No items match the current filter.</td></tr>'}
+              `).join('') : '<tr><td colspan="11" class="empty">No items match the current filter.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -2956,16 +3221,33 @@ export async function renderStationeryReportsView(host, ctx) {
     inp.addEventListener('change', () => handleManualChange(inp.dataset.itemId, 'minPurchase', inp.value));
   });
   host.querySelectorAll('.ops-plan-dec-inp').forEach(inp => {
-    inp.addEventListener('input', () => handleManualChange(inp.dataset.itemId, 'decisionQty', inp.value));
+    inp.addEventListener('input', () => {
+      const itemId = inp.dataset.itemId;
+      const convQty = Math.max(1, Number(inp.dataset.conv) || 1);
+      const unitLbl = inp.dataset.unit || 'PCS';
+      const pUnitLbl = inp.dataset.punit || 'PACK';
+      const cell = host.querySelector(`[data-conv-cell="${CSS.escape(itemId)}"]`);
+      if (cell) {
+        if (inp.value !== '' && Number.isFinite(Number(inp.value))) {
+          const totalConverted = Math.round(Math.max(0, Number(inp.value)) * convQty * 100) / 100;
+          cell.innerHTML = `<b>${totalConverted} ${esc(unitLbl)}</b><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>`;
+        } else {
+          cell.innerHTML = `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>`;
+        }
+      }
+      handleManualChange(itemId, 'decisionQty', inp.value);
+    });
   });
 
   host.querySelector('#ops-srep-atk-xlsx')?.addEventListener('click', async () => {
     const manual = state.stationeryPlanManual || {};
     const aoa = [
       ['Purchase Period', plan.window.periodLabel, 'Planning Window', plan.window.dateRangeLabel],
-      ['Rank', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit'],
+      ['Rank', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit', 'Convert to Unit', 'Unit'],
       ...visibleRows.map(r => {
         const ov = manual[r.id] || {};
+        const dq = ov.decisionQty ?? r.decisionQty;
+        const converted = dq !== '' && Number.isFinite(Number(dq)) ? Math.round(Number(dq) * r.conversionQty * 100) / 100 : '';
         return [
           r.rank,
           r.item_name,
@@ -2975,8 +3257,10 @@ export async function renderStationeryReportsView(host, ctx) {
           r.unit,
           ov.minPurchase ?? r.minPurchase,
           r.purchaseUnit,
-          ov.decisionQty ?? r.decisionQty,
-          r.purchaseUnit
+          dq,
+          r.purchaseUnit,
+          converted,
+          r.unit
         ];
       })
     ];
@@ -2989,6 +3273,7 @@ export async function renderStationeryReportsView(host, ctx) {
       const ov = manual[r.id] || {};
       const mp = ov.minPurchase ?? r.minPurchase;
       const dq = ov.decisionQty ?? r.decisionQty;
+      const converted = dq !== '' && Number.isFinite(Number(dq)) ? `${Math.round(Number(dq) * r.conversionQty * 100) / 100} ${esc(r.unit)}` : '—';
       return `
         <tr>
           <td class="c">${r.rank}</td>
@@ -3001,6 +3286,7 @@ export async function renderStationeryReportsView(host, ctx) {
           <td class="c">${esc(r.purchaseUnit)}</td>
           <td class="num">${dq !== '' ? esc(dq) : ''}</td>
           <td class="c">${esc(r.purchaseUnit)}</td>
+          <td class="num">${converted}</td>
         </tr>
       `;
     }).join('');
@@ -3024,6 +3310,7 @@ export async function renderStationeryReportsView(host, ctx) {
               <th>Purchase Unit</th>
               <th>Purchase Qty Decision</th>
               <th>Purchase Unit</th>
+              <th>Convert to Unit</th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
@@ -3070,6 +3357,9 @@ export async function renderStationeryMaterialsView(host, ctx) {
           <div>
             <h2>Material Management</h2>
           </div>
+          <div class="ops-actions">
+            <button type="button" class="btn btn-secondary" id="mat-reset-stock-btn">Reset Stok &amp; Transaksi ATK (0)</button>
+          </div>
         </div>
         <div class="tab-bar" role="tablist" style="margin-top:10px">
           <button type="button" class="tab-btn ${activeTab === 'materials' ? 'active' : ''}" data-mat-tab="materials">1. Daftar Material (${items.length})</button>
@@ -3101,6 +3391,10 @@ export async function renderStationeryMaterialsView(host, ctx) {
                 ${unitOptions.map(u => `<option value="${u}" ${u === 'PACK' ? 'selected' : ''}>${u}</option>`).join('')}
               </select>
             </label>
+            <label class="ops-field">
+              <span>Isi per Satuan Beli (Konversi)</span>
+              <input id="mat-add-conv" type="number" min="1" step="1" class="input" value="1" placeholder="Contoh: 36">
+            </label>
             <div class="ops-field ops-field-end">
               <button type="button" class="btn btn-primary" id="mat-add-save">Tambah Material</button>
             </div>
@@ -3118,10 +3412,11 @@ export async function renderStationeryMaterialsView(host, ctx) {
             <table>
               <thead>
                 <tr>
-                  <th style="width:120px">Kode Material</th>
+                  <th style="width:110px">Kode Material</th>
                   <th>Nama Item</th>
-                  <th style="width:120px">Satuan</th>
-                  <th style="width:160px">Satuan Minimal Pembelian</th>
+                  <th style="width:110px">Satuan</th>
+                  <th style="width:150px">Satuan Pembelian</th>
+                  <th style="width:210px">Konversi (1 Sat. Beli =)</th>
                   <th style="width:90px">Aksi</th>
                 </tr>
               </thead>
@@ -3137,10 +3432,16 @@ export async function renderStationeryMaterialsView(host, ctx) {
                       </select>
                     </td>
                     <td>
-                      <select class="input mat-row-punit" aria-label="Satuan minimal pembelian ${esc(it.item_code)}">
+                      <select class="input mat-row-punit" aria-label="Satuan pembelian ${esc(it.item_code)}">
                         ${unitOptions.map(u => `<option value="${u}" ${it.purchase_unit === u ? 'selected' : ''}>${u}</option>`).join('')}
                         ${!unitOptions.includes(it.purchase_unit) ? `<option value="${esc(it.purchase_unit)}" selected>${esc(it.purchase_unit)}</option>` : ''}
                       </select>
+                    </td>
+                    <td>
+                      <div class="mat-conv-inline">
+                        <input type="number" min="1" step="1" class="input mat-row-conv atk-plan-input" value="${Math.max(1, Number(it.conversion_qty) || 1)}" aria-label="Konversi satuan ${esc(it.item_code)}">
+                        <span class="mat-conv-unit-lbl">${esc(it.unit)}</span>
+                      </div>
                     </td>
                     <td><button type="button" class="btn btn-sm btn-secondary mat-row-save" data-id="${esc(it.id)}">Simpan</button></td>
                   </tr>
@@ -3206,6 +3507,31 @@ export async function renderStationeryMaterialsView(host, ctx) {
     });
   });
 
+  host.querySelector('#mat-reset-stock-btn')?.addEventListener('click', async () => {
+    const btn = host.querySelector('#mat-reset-stock-btn');
+    if (!btn) return;
+    if (btn.dataset.armed !== '1') {
+      btn.dataset.armed = '1';
+      btn.textContent = 'Klik Lagi untuk Konfirmasi Reset (0)';
+      setTimeout(() => {
+        if (btn.isConnected) {
+          btn.dataset.armed = '';
+          btn.textContent = 'Reset Stok & Transaksi ATK (0)';
+        }
+      }, 4500);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Mereset...';
+    try {
+      await clearStationeryStockAndMovementsAction(ctx);
+      await renderStationeryMaterialsView(host, ctx);
+      showInlineBanner(host, 'Seluruh transaksi ATK dan saldo stok berhasil dikosongkan ke 0 (Daftar Material tetap aman).', 'ok');
+    } catch (err) {
+      showInlineBanner(host, err?.message || 'Gagal mereset stok ATK.', 'error');
+    }
+  });
+
   let matSearchTimer = null;
   host.querySelector('#mat-search')?.addEventListener('input', e => {
     host.dataset.matSearch = e.target.value || '';
@@ -3218,6 +3544,7 @@ export async function renderStationeryMaterialsView(host, ctx) {
     const rawName = host.querySelector('#mat-add-name')?.value?.trim().toUpperCase() || '';
     const unit = host.querySelector('#mat-add-unit')?.value || 'PCS';
     const pUnit = host.querySelector('#mat-add-punit')?.value || deriveDefaultPurchaseUnit(rawName, unit);
+    const convQty = Math.max(1, Number(host.querySelector('#mat-add-conv')?.value || 1) || 1);
     if (!/^\d{5}$/.test(rawCode)) {
       showInlineBanner(host, 'Kode Material harus tepat 5 angka.', 'error');
       return;
@@ -3236,6 +3563,7 @@ export async function renderStationeryMaterialsView(host, ctx) {
       item_name: rawName,
       unit,
       purchase_unit: pUnit,
+      conversion_qty: convQty,
       min_purchase_qty: 1,
       opening_stock: 0,
       current_stock: 0,
@@ -3243,27 +3571,29 @@ export async function renderStationeryMaterialsView(host, ctx) {
       is_active: true
     };
     state.stationeryItems = [...items, newItem];
+    const nextMeta = extractMaterialMetaMap(state.stationeryItems);
+    saveStoredMaterialMeta(nextMeta);
     if (ctx.isDemoMode) {
       saveDemoOpsState(state);
     } else if (ctx.supabase) {
-      const { error } = await ctx.supabase.from('stationery_items').insert({
-        id: newItem.id,
-        item_code: newItem.item_code,
-        item_name: newItem.item_name,
-        unit: newItem.unit,
-        opening_stock: 0,
-        current_stock: 0,
-        min_stock: 2,
-        is_active: true
-      });
+      const { error } = await ctx.supabase.from('stationery_items').insert(toSqlStationeryItemRow(newItem));
       if (error) {
         showInlineBanner(host, `Gagal menyimpan material: ${error.message}`, 'error');
         return;
       }
+      await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
       invalidateOpsStateCache();
     }
     await renderStationeryMaterialsView(host, ctx);
     showInlineBanner(host, `Material "${rawCode} — ${rawName}" berhasil ditambahkan.`, 'ok');
+  });
+
+  host.querySelectorAll('.mat-row-unit').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const tr = sel.closest('tr');
+      const lbl = tr?.querySelector('.mat-conv-unit-lbl');
+      if (lbl) lbl.textContent = sel.value || 'PCS';
+    });
   });
 
   host.querySelectorAll('.mat-row-save').forEach(btn => {
@@ -3273,6 +3603,7 @@ export async function renderStationeryMaterialsView(host, ctx) {
       const nextName = tr?.querySelector('.mat-row-name')?.value?.trim().toUpperCase() || '';
       const nextUnit = tr?.querySelector('.mat-row-unit')?.value || 'PCS';
       const nextPUnit = tr?.querySelector('.mat-row-punit')?.value || 'PCS';
+      const nextConv = Math.max(1, Number(tr?.querySelector('.mat-row-conv')?.value || 1) || 1);
       if (!nextName) {
         showInlineBanner(host, 'Nama Item tidak boleh kosong.', 'error');
         return;
@@ -3281,16 +3612,23 @@ export async function renderStationeryMaterialsView(host, ctx) {
         ...it,
         item_name: nextName,
         unit: nextUnit,
-        purchase_unit: nextPUnit
+        purchase_unit: nextPUnit,
+        conversion_qty: nextConv
       } : it);
+      const nextMeta = extractMaterialMetaMap(state.stationeryItems);
+      saveStoredMaterialMeta(nextMeta);
       if (ctx.isDemoMode) {
         saveDemoOpsState(state);
       } else if (ctx.supabase) {
-        await ctx.supabase.from('stationery_items').update({ item_name: nextName, unit: nextUnit }).eq('id', id);
+        const updatedItem = state.stationeryItems.find(it => it.id === id);
+        if (updatedItem) {
+          await ctx.supabase.from('stationery_items').upsert(toSqlStationeryItemRow(updatedItem), { onConflict: 'id' });
+        }
+        await ctx.supabase.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
         invalidateOpsStateCache();
       }
       await renderStationeryMaterialsView(host, ctx);
-      showInlineBanner(host, `Perubahan material "${nextName}" disimpan.`, 'ok');
+      showInlineBanner(host, `Perubahan material "${nextName}" (1 ${nextPUnit} = ${nextConv} ${nextUnit}) disimpan.`, 'ok');
     });
   });
 
@@ -4219,6 +4557,189 @@ export async function renderOpsSettingsView(host, ctx) {
       showInlineBanner(host, err?.message || 'Periksa input pengaturan sebelum menyimpan.', 'error');
     }
   });
+}
+
+// ============================================================================
+// 7. ATK DATA IMPORT ACTIONS (Used by System Settings -> Data Import)
+// ============================================================================
+export async function importStationeryMasterAction(ctx, { rawRows = [], replaceExisting = false } = {}) {
+  const state = await loadOpsState(ctx, true);
+  const parsed = parseStationeryMasterImportRows(rawRows);
+  if (!parsed.rows.length) {
+    throw new Error(parsed.errors.slice(0, 3).join(' ') || 'Tidak ada baris Master Item ATK valid.');
+  }
+
+  const res = importStationeryMasterDataset({
+    existingItems: state.stationeryItems,
+    existingLedger: state.stationeryMovements,
+    parsedRows: parsed.rows,
+    replaceExisting
+  });
+
+  const nextMeta = extractMaterialMetaMap(res.items);
+  saveStoredMaterialMeta(nextMeta);
+
+  if (ctx.isDemoMode || !ctx.supabase) {
+    state.stationeryItems = res.items;
+    state.stationeryMovements = res.ledger;
+    saveDemoOpsState(state);
+    invalidateOpsStateCache();
+  } else {
+    const sb = ctx.supabase;
+    let itemsToPersist = res.items;
+
+    if (replaceExisting) {
+      const { error: delMvErr } = await sb.from('stationery_movements').delete().neq('id', '');
+      if (delMvErr) throw delMvErr;
+      const { error: delItemErr } = await sb.from('stationery_items').delete().neq('id', '');
+      if (delItemErr) throw delItemErr;
+    } else {
+      // Align IDs to any existing SQL rows matching item_code or item_name to avoid UNIQUE constraint errors
+      const { data: dbRows } = await sb.from('stationery_items').select('id, item_code, item_name');
+      const byCode = new Map((dbRows || []).map(r => [normalizeMaterialCode(r.item_code, 0), r.id]));
+      const byName = new Map((dbRows || []).map(r => [String(r.item_name || '').trim().toUpperCase(), r.id]));
+      itemsToPersist = res.items.map(it => {
+        const matchedId = byCode.get(normalizeMaterialCode(it.item_code, 0)) || byName.get(String(it.item_name || '').trim().toUpperCase());
+        return matchedId ? { ...it, id: matchedId } : it;
+      });
+    }
+
+    const sqlPayloads = itemsToPersist.map(toSqlStationeryItemRow);
+    for (let i = 0; i < sqlPayloads.length; i += 100) {
+      const batch = sqlPayloads.slice(i, i + 100);
+      const { error } = await sb.from('stationery_items').upsert(batch, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    await sb.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+    invalidateOpsStateCache();
+  }
+
+  return {
+    ...res,
+    parseErrors: parsed.errors,
+    parsedCount: parsed.rows.length
+  };
+}
+
+export async function importStationeryMovementsAction(ctx, {
+  rawRows = [],
+  replaceLedger = false,
+  autoSeedOpeningIfShort = true
+} = {}) {
+  const state = await loadOpsState(ctx, true);
+  const parsed = parseStationeryMovementImportRows(rawRows, state.settings);
+  if (!parsed.rows.length) {
+    throw new Error(parsed.errors.slice(0, 3).join(' ') || 'Tidak ada transaksi Stock Movement ATK yang valid.');
+  }
+
+  const res = importStationeryMovementsDataset({
+    items: state.stationeryItems,
+    existingLedger: state.stationeryMovements,
+    parsedRows: parsed.rows,
+    replaceLedger,
+    autoSeedOpeningIfShort,
+    createdBy: ctx.profile?.displayName || ctx.profile?.username || 'HR Admin',
+    settings: state.settings
+  });
+
+  const nextMeta = extractMaterialMetaMap(res.items);
+  saveStoredMaterialMeta(nextMeta);
+
+  if (ctx.isDemoMode || !ctx.supabase) {
+    state.stationeryItems = res.items;
+    state.stationeryMovements = res.ledger;
+    saveDemoOpsState(state);
+    invalidateOpsStateCache();
+  } else {
+    const sb = ctx.supabase;
+    const { data: dbRows } = await sb.from('stationery_items').select('id, item_code, item_name');
+    const byCode = new Map((dbRows || []).map(r => [normalizeMaterialCode(r.item_code, 0), r.id]));
+    const byName = new Map((dbRows || []).map(r => [String(r.item_name || '').trim().toUpperCase(), r.id]));
+
+    const remappedIdMap = new Map();
+    const itemsToPersist = res.items.map(it => {
+      const matchedId = byCode.get(normalizeMaterialCode(it.item_code, 0)) || byName.get(String(it.item_name || '').trim().toUpperCase());
+      if (matchedId && matchedId !== it.id) {
+        remappedIdMap.set(it.id, matchedId);
+        return { ...it, id: matchedId };
+      }
+      return it;
+    });
+
+    if (replaceLedger) {
+      const { error: delMvErr } = await sb.from('stationery_movements').delete().neq('id', '');
+      if (delMvErr) throw delMvErr;
+    }
+
+    const sqlItems = itemsToPersist.map(toSqlStationeryItemRow);
+    for (let i = 0; i < sqlItems.length; i += 100) {
+      const batch = sqlItems.slice(i, i + 100);
+      const { error: upErr } = await sb.from('stationery_items').upsert(batch, { onConflict: 'id' });
+      if (upErr) throw upErr;
+    }
+
+    const sqlMovements = res.importedEntries.map(mv => ({
+      id: String(mv.id),
+      tx_date: String(mv.tx_date).slice(0, 10),
+      tx_type: String(mv.tx_type),
+      item_id: remappedIdMap.get(mv.item_id) || String(mv.item_id),
+      item_code: String(mv.item_code || ''),
+      item_name: String(mv.item_name || ''),
+      qty: Number(mv.qty || 0),
+      unit: String(mv.unit || 'PCS'),
+      sloc_raw: String(mv.sloc_raw || mv.sloc_canonical || 'HR GA'),
+      sloc_canonical: String(mv.sloc_canonical || mv.sloc_raw || 'HR GA'),
+      reference_no: '',
+      balance_before: Number(mv.balance_before ?? 0),
+      balance_after: Number(mv.balance_after ?? 0),
+      notes: String(mv.notes || ''),
+      created_by: String(mv.created_by || 'HR Admin')
+    }));
+
+    for (let i = 0; i < sqlMovements.length; i += 100) {
+      const batch = sqlMovements.slice(i, i + 100);
+      const { error: insErr } = await sb.from('stationery_movements').insert(batch);
+      if (insErr) throw insErr;
+    }
+
+    await sb.from('portal_settings').upsert({ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }).catch(() => {});
+    invalidateOpsStateCache();
+  }
+
+  return {
+    ...res,
+    parseErrors: parsed.errors,
+    parsedCount: parsed.rows.length
+  };
+}
+
+export async function clearStationeryStockAndMovementsAction(ctx) {
+  const state = await loadOpsState(ctx, true);
+  const zeroedItems = normalizeStationeryItems(state.stationeryItems || []).map(it => ({
+    ...it,
+    opening_stock: 0,
+    current_stock: 0
+  }));
+  state.stationeryItems = zeroedItems;
+  state.stationeryMovements = [];
+  try { localStorage.setItem(ATK_STOCK_CLEANUP_KEY, '1'); } catch {}
+
+  if (ctx.isDemoMode || !ctx.supabase) {
+    saveDemoOpsState(state);
+    invalidateOpsStateCache();
+  } else {
+    const sb = ctx.supabase;
+    const { error: delMvErr } = await sb.from('stationery_movements').delete().neq('id', '');
+    if (delMvErr) throw delMvErr;
+    const { error: upItemErr } = await sb
+      .from('stationery_items')
+      .update({ opening_stock: 0, current_stock: 0, updated_at: new Date().toISOString() })
+      .neq('id', '');
+    if (upItemErr) throw upItemErr;
+    invalidateOpsStateCache();
+  }
+
+  return { clearedItems: zeroedItems.length };
 }
 
 // Keep evaluateStaffArrivalStatus and applyStationeryTransaction referenced cleanly

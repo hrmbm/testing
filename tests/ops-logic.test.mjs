@@ -17,6 +17,7 @@ import {
 } from '../assets/js/ops-settings-logic.js';
 import {
   SEED_STATIONERY_ITEMS,
+  SEED_STATIONERY_MOVEMENTS,
   SEED_EMPLOYEES,
   SEED_DRIVERS,
   SEED_STAFF_SAMPLES,
@@ -76,7 +77,11 @@ import {
   sliceTopFavoriteItems,
   buildDepartmentUsageChartData,
   computeNextPurchasePlanWindow,
-  buildPurchasePlanSuggestions
+  buildPurchasePlanSuggestions,
+  parseStationeryMasterImportRows,
+  importStationeryMasterDataset,
+  parseStationeryMovementImportRows,
+  importStationeryMovementsDataset
 } from '../assets/js/stationery-logic.js';
 
 // Helper removed (deleted obsolete Project Tambahan fixtures)
@@ -523,13 +528,22 @@ test('Stationery aliases, strict non-negative ledger guard, Adjustment notes & r
   assert.equal(resolveCanonicalSloc('marketing'), 'MARKETING SERVICE');
   assert.equal(resolveCanonicalSloc('radin'), 'RADIN MITRA LESTARI');
 
-  const binder155 = SEED_STATIONERY_ITEMS.find(x => x.item_name === 'BINDER CLIP 155');
+  // Seeds retain all 121 Material Management definitions with stock zeroed & movements cleared
+  assert.equal(SEED_STATIONERY_ITEMS.length, 121);
+  assert.ok(SEED_STATIONERY_ITEMS.every(x => x.opening_stock === 0 && x.current_stock === 0));
+  assert.equal(SEED_STATIONERY_MOVEMENTS.length, 0);
+
+  const baseBinder = SEED_STATIONERY_ITEMS.find(x => x.item_name === 'BINDER CLIP 155');
+  const testItems = SEED_STATIONERY_ITEMS.map(x =>
+    x.id === baseBinder.id ? { ...x, opening_stock: 2, current_stock: 2 } : x
+  );
+  const binder155 = testItems.find(x => x.id === baseBinder.id);
   assert.equal(binder155.current_stock, 2);
 
   // Attempting to take 3 when stock is 2 MUST fail
   assert.throws(() => {
     applyStationeryTransaction({
-      items: SEED_STATIONERY_ITEMS,
+      items: testItems,
       ledger: [],
       tx: { tx_type: 'OUT', item_id: binder155.id, qty: 3, sloc_raw: 'HR GA' }
     });
@@ -538,7 +552,7 @@ test('Stationery aliases, strict non-negative ledger guard, Adjustment notes & r
   // Adjustment without notes MUST fail
   assert.throws(() => {
     applyStationeryTransaction({
-      items: SEED_STATIONERY_ITEMS,
+      items: testItems,
       ledger: [],
       tx: { tx_type: 'ADJUSTMENT', item_id: binder155.id, qty: -1, notes: '' }
     });
@@ -546,7 +560,7 @@ test('Stationery aliases, strict non-negative ledger guard, Adjustment notes & r
 
   // Valid IN followed by OUT
   const afterIn = applyStationeryTransaction({
-    items: SEED_STATIONERY_ITEMS,
+    items: testItems,
     ledger: [],
     tx: { tx_type: 'IN', item_id: binder155.id, qty: 5, sloc_raw: 'HR GA', notes: 'PO ATK' }
   });
@@ -822,4 +836,112 @@ test('Stationery multi-item batch input, 5-digit Material/3-digit Dept codes, Re
   assert.equal(planRowB.minPurchase, 1);
   assert.equal(planRowB.decisionQty, '');
 });
+
+test('ATK Master & Stock Movement spreadsheet import computes chronological IN/OUT balances cleanly and flows into reports', () => {
+  // 1. Parse and import Master ATK (Clean Replace)
+  const rawMaster = [
+    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Minimal Pembelian': 'PACK', 'Stock Awal': 50, 'Min Stock': 10 },
+    { 'Kode Material': '', 'Nama Item': 'KERTAS HVS A4', 'Satuan': 'RIM', 'Satuan Minimal Pembelian': 'RIM', 'Stock Awal': 5, 'Min Stock': 2 }
+  ];
+  const parsedMaster = parseStationeryMasterImportRows(rawMaster);
+  assert.equal(parsedMaster.errors.length, 0);
+  assert.equal(parsedMaster.rows.length, 2);
+
+  const masterRes = importStationeryMasterDataset({
+    existingItems: SEED_STATIONERY_ITEMS,
+    existingLedger: [{ id: 'old-mv' }],
+    parsedRows: parsedMaster.rows,
+    replaceExisting: true
+  });
+  assert.equal(masterRes.items.length, 2);
+  assert.equal(masterRes.ledger.length, 0);
+  assert.equal(masterRes.items[1].item_code, '10002');
+
+  // 2. Parse and import chronological Stock Movements (mix of ISO, DD/MM/YYYY, Excel serial date, existing + new items, auto-seed opening stock)
+  const rawMovements = [
+    { Tanggal: '15/11/2026', Type: 'Barang Keluar', Departemen: 'PPC INDOOR', Item: 'BOLPOINT HITAM', Qty: 12, Satuan: 'PCS', Keterangan: 'Rutin' },
+    { Tanggal: '2026-11-15', Type: 'Barang Masuk', Departemen: 'PURCHASING', Item: 'BOLPOINT HITAM', Qty: 20, Satuan: 'PCS', Keterangan: 'Masuk sama tanggal' },
+    { Tanggal: 46331, Type: 'Barang Keluar', Departemen: 'HR GA', Item: 'KERTAS HVS A4', Qty: 8, Satuan: 'RIM', Keterangan: 'Exceeds opening -> auto seed 3' },
+    { Tanggal: '2026-11-16', Type: 'OUT', Departemen: 'FINANCE', Item: 'CLIP BINDER NO 155', Qty: 6, Satuan: 'PACK', Keterangan: 'Item baru auto-create' }
+  ];
+  const parsedMv = parseStationeryMovementImportRows(rawMovements);
+  assert.equal(parsedMv.errors.length, 0);
+  assert.equal(parsedMv.rows.length, 4);
+  // Same-date IN must sort before OUT
+  assert.equal(parsedMv.rows[1].tx_date, '2026-11-15');
+  assert.equal(parsedMv.rows[1].tx_type, 'IN');
+  assert.equal(parsedMv.rows[2].tx_date, '2026-11-15');
+  assert.equal(parsedMv.rows[2].tx_type, 'OUT');
+
+  const mvRes = importStationeryMovementsDataset({
+    items: masterRes.items,
+    existingLedger: [],
+    parsedRows: parsedMv.rows,
+    replaceLedger: true,
+    autoSeedOpeningIfShort: true
+  });
+  assert.equal(mvRes.importedEntries.length, 4);
+  assert.equal(mvRes.createdItemsCount, 1);
+  assert.equal(mvRes.autoSeededCount, 2); // KERTAS HVS A4 (+3) & CLIP BINDER (+6)
+
+  const pen = mvRes.items.find(i => i.item_name === 'BOLPOINT HITAM');
+  // Opening 50 + IN 20 - OUT 12 = 58
+  assert.equal(pen.current_stock, 58);
+
+  const paper = mvRes.items.find(i => i.item_name === 'KERTAS HVS A4');
+  // Opening auto-seeded 5+3=8, OUT 8 => closing 0
+  assert.equal(paper.opening_stock, 8);
+  assert.equal(paper.current_stock, 0);
+
+  // Check downstream reports
+  const rep = buildStationeryReports({ items: mvRes.items, ledger: mvRes.ledger, monthKey: '2026-11' });
+  assert.equal(rep.totals.totalIn, 20);
+  assert.equal(rep.totals.totalOut, 26);
+  const favTop = rep.favoriteItems[0];
+  assert.equal(favTop.item_name, 'BOLPOINT HITAM');
+  assert.equal(favTop.totalOut, 12);
+
+  const chart = buildDepartmentUsageChartData({ favoriteItems: rep.favoriteItems, topN: 10 });
+  assert.equal(chart.globalSeries.bars[0].qty, 12);
+
+  const plan = buildPurchasePlanSuggestions({ items: mvRes.items, ledger: mvRes.ledger, purchasePeriod: '1w', referenceDate: '2026-11-24' });
+  assert.equal(plan.rows[0].item_name, 'BOLPOINT HITAM');
+  assert.ok(plan.rows[0].periodRequirement >= 1);
+  // Verify Master ATK conversion ('Konversi Satuan') & Purchase Plan convertedDecisionQty
+  const rawConvMaster = [
+    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Minimal Pembelian': 'PACK', 'Konversi Satuan': 36, 'Stock Awal': 0, 'Min Stock': 10 }
+  ];
+  const parsedConv = parseStationeryMasterImportRows(rawConvMaster);
+  assert.equal(parsedConv.errors.length, 0);
+  assert.equal(parsedConv.rows[0].conversion_qty, 36);
+  const convRes = importStationeryMasterDataset({
+    existingItems: [],
+    existingLedger: [],
+    parsedRows: parsedConv.rows,
+    replaceExisting: true
+  });
+  assert.equal(convRes.items[0].conversion_qty, 36);
+  const convPlan = buildPurchasePlanSuggestions({
+    items: convRes.items,
+    ledger: [],
+    purchasePeriod: '1w',
+    referenceDate: '2026-11-24',
+    manualOverrides: {
+      [convRes.items[0].id]: { minPurchase: 1, decisionQty: '2' }
+    }
+  });
+  assert.equal(convPlan.rows[0].conversionQty, 36);
+  assert.equal(convPlan.rows[0].convertedDecisionQty, 72);
+});
+
+test('Cache worker and HTML entrypoints stay synchronized on build 20261124-hrga-workspace-22 without cache-first JS traps', () => {
+  const swText = fs.readFileSync('sw.js', 'utf8');
+  const htmlText = fs.readFileSync('index.html', 'utf8');
+  const cacheText = fs.readFileSync('assets/js/cache.js', 'utf8');
+  assert.ok(swText.includes("const BUILD = '20261124-hrga-workspace-22';"));
+  assert.ok(htmlText.includes("const BUILD = '20261124-hrga-workspace-22';"));
+  assert.ok(cacheText.includes("APP_BUILD = '20261124-hrga-workspace-22';"));
+  assert.ok(!swText.includes('isImmutableVersioned'), 'sw.js must not cache-first JS/CSS files');
+});
+
 

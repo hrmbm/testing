@@ -10,7 +10,15 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
 
 app.use((req, res, next) => {
-  if (req.path === '/form' || req.path.startsWith('/form/') || req.path === '/sw.js') {
+  if (
+    req.path === '/' ||
+    req.path === '/index.html' ||
+    req.path === '/sw.js' ||
+    req.path === '/form' ||
+    req.path.startsWith('/form/') ||
+    req.path.startsWith('/assets/js/') ||
+    req.path.startsWith('/assets/css/')
+  ) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   }
   next();

@@ -1,8 +1,8 @@
-import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-20';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-20';
-import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-20';
-import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-20';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-20';
+import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-22';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-22';
+import { $, $$, esc, idDate } from './common.js?v=20261124-hrga-workspace-22';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
+import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-22';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -46,7 +46,7 @@ import {
   getMemoizedDiscResult,
   paginateRows,
   preserveCaretCurrencyValue
-} from './workspace-logic.js?v=20261124-hrga-workspace-20';
+} from './workspace-logic.js?v=20261124-hrga-workspace-22';
 import {
   bindSafeModalClose,
   openDuplicateCandidateModal,
@@ -58,7 +58,7 @@ import {
   openUserModal,
   openPinRevealPrompt,
   openConfirmDialog
-} from './admin-modals.js?v=20261124-hrga-workspace-20';
+} from './admin-modals.js?v=20261124-hrga-workspace-22';
 import {
   DEFAULT_CONTRACT_SETTINGS,
   buildContractWorkspaceQueue,
@@ -69,7 +69,7 @@ import {
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
   formatContractCode
-} from './contract-logic.js?v=20261124-hrga-workspace-20';
+} from './contract-logic.js?v=20261124-hrga-workspace-22';
 import {
   DISTRICTS_BY_CITY,
   APPLY_INFO_SOURCES,
@@ -85,7 +85,7 @@ import {
   normalizeDistrictToken,
   calculateVacancyMaxScore,
   buildShareUrl
-} from './vacancy-logic.js?v=20261124-hrga-workspace-20';
+} from './vacancy-logic.js?v=20261124-hrga-workspace-22';
 import {
   APPLY_CUSTOM_FIELD_TYPES,
   FORM_CUSTOM_FIELD_TYPES,
@@ -98,8 +98,16 @@ import {
   STAGE2_SECTION_META,
   normalizeApplySchema,
   normalizeStage2Schema
-} from './form-schema.js?v=20261124-hrga-workspace-20';
-import { SEED_EMPLOYEES } from './ops-seed-data.js?v=20261124-hrga-workspace-20';
+} from './form-schema.js?v=20261124-hrga-workspace-22';
+import { SEED_EMPLOYEES } from './ops-seed-data.js?v=20261124-hrga-workspace-22';
+import {
+  STATIONERY_MASTER_IMPORT_HEADERS,
+  STATIONERY_MASTER_SAMPLE_ROW,
+  STATIONERY_MOVEMENT_IMPORT_HEADERS,
+  STATIONERY_MOVEMENT_SAMPLE_ROWS,
+  parseStationeryMasterImportRows,
+  parseStationeryMovementImportRows
+} from './stationery-logic.js?v=20261124-hrga-workspace-22';
 
 const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -137,17 +145,17 @@ function writeSavedContractSettings(settings = {}) {
 }
 
 let printModPromise = null;
-const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261124-hrga-workspace-20'));
+const loadPrintModule = () => (printModPromise ??= import('./print.js?v=20261124-hrga-workspace-22'));
 
 let applicantModPromise = null;
-const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261124-hrga-workspace-20'));
+const loadApplicantModule = () => (applicantModPromise ??= import('./applicant.js?v=20261124-hrga-workspace-22'));
 
 let contractModalPromise = null;
-const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261124-hrga-workspace-20'));
+const loadContractModalModule = () => (contractModalPromise ??= import('./contract-modal.js?v=20261124-hrga-workspace-22'));
 
 let opsViewsPromise = null;
 let opsViewsModuleRef = null;
-const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261124-hrga-workspace-20').then(mod => {
+const loadOpsViewsModule = () => (opsViewsPromise ??= import('./ops-views.js?v=20261124-hrga-workspace-22').then(mod => {
   opsViewsModuleRef = mod;
   return mod;
 }));
@@ -3492,14 +3500,15 @@ async function renderContractSettings() {
 /* ============================================================================
  * SYSTEM SETTINGS -> DATA IMPORT (Candidate List & Lead Register XLSX/CSV)
  * ============================================================================ */
-function downloadCsvFile(headers, sampleRow, filename) {
+function downloadCsvFile(headers, sampleRowOrRows, filename) {
   const escapeCell = v => {
     const s = String(v ?? '');
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const sampleList = Array.isArray(sampleRowOrRows) ? sampleRowOrRows : [sampleRowOrRows];
   const csv = [
     headers.map(escapeCell).join(','),
-    headers.map(h => escapeCell(sampleRow[h] ?? '')).join(',')
+    ...sampleList.map(row => headers.map(h => escapeCell(row?.[h] ?? '')).join(','))
   ].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -3569,13 +3578,14 @@ async function readSpreadsheetFileObjects(file) {
   return XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { defval: '' });
 }
 
-async function downloadSpreadsheetTemplateXlsx(headers, sampleRow, sheetName, filename) {
+async function downloadSpreadsheetTemplateXlsx(headers, sampleRowOrRows, sheetName, filename) {
   try {
     const XLSX = await loadXlsxLib();
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet([sampleRow], { header: headers });
+    const sampleList = Array.isArray(sampleRowOrRows) ? sampleRowOrRows : [sampleRowOrRows];
+    const ws = XLSX.utils.json_to_sheet(sampleList, { header: headers });
     ws['!cols'] = headers.map(h => ({ wch: Math.max(16, h.length + 4) }));
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
     XLSX.writeFile(wb, filename);
     say(`Downloaded ${filename}.`);
   } catch (err) {
@@ -3583,7 +3593,7 @@ async function downloadSpreadsheetTemplateXlsx(headers, sampleRow, sheetName, fi
   }
 }
 
-function renderSystemImport() {
+function renderSystemImport(opsCtx = null) {
   content.innerHTML = `<div class="import-cards-grid">
     <section class="panel">
       <div class="panel-head">
@@ -3649,6 +3659,64 @@ function renderSystemImport() {
         </div>
         <div id="import-disc-preview" class="upload-preview-box hidden"></div>
         <div id="import-disc-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="card-import-atk-master">
+      <div class="panel-head">
+        <h3>ATK Master Item &amp; Stock Awal Import</h3>
+        <span class="status-pill green">ATK / XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${STATIONERY_MASTER_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-atk-master-xlsx">Download XLSX Template ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-atk-master-csv">Download CSV Template ↓</button>
+        </div>
+        <label class="confirm-box" style="margin:0">
+          <input type="checkbox" id="import-atk-master-replace">
+          <span>Reset &amp; ganti seluruh Master ATK dan riwayat stok lama (mulai bersih dari file ini)</span>
+        </label>
+        <div class="import-drop-row">
+          <input id="import-atk-master-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-atk-master-submit" disabled>Import Master ATK</button>
+        </div>
+        <div id="import-atk-master-preview" class="upload-preview-box hidden"></div>
+        <div id="import-atk-master-result" class="upload-preview-box hidden"></div>
+        <div id="import-atk-master-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="card-import-atk-movements">
+      <div class="panel-head">
+        <h3>ATK Stock Movement Import (Masuk / Keluar)</h3>
+        <span class="status-pill green">ATK / XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${STATIONERY_MOVEMENT_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-atk-mv-xlsx">Download Sample XLSX ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-atk-mv-csv">Download Sample CSV ↓</button>
+        </div>
+        <label class="confirm-box" style="margin:0">
+          <input type="checkbox" id="import-atk-mv-replace">
+          <span>Reset riwayat transaksi lama &amp; hitung ulang stok dari file ini</span>
+        </label>
+        <label class="confirm-box" style="margin:0">
+          <input type="checkbox" id="import-atk-mv-autoseed" checked>
+          <span>Auto sesuaikan Stock Awal jika histori Keluar melebihi saldo awal</span>
+        </label>
+        <div class="import-drop-row">
+          <input id="import-atk-mv-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-atk-mv-submit" disabled>Import Movement ATK</button>
+        </div>
+        <div id="import-atk-mv-preview" class="upload-preview-box hidden"></div>
+        <div id="import-atk-mv-result" class="upload-preview-box hidden"></div>
+        <div id="import-atk-mv-error" class="form-error" role="alert"></div>
       </div>
     </section>
   </div>`;
@@ -3925,6 +3993,175 @@ function renderSystemImport() {
     } finally {
       discSubmit.disabled = true;
       discSubmit.textContent = 'Import DISC Results';
+    }
+  });
+
+  // ---- Card 4: ATK Master Item & Stock Awal Import ----
+  const resolvedOpsCtx = opsCtx || {
+    isDemoMode,
+    supabase,
+    profile: currentAdminProfile,
+    getEmployees: () => employees
+  };
+
+  $('#dl-atk-master-xlsx').addEventListener('click', () =>
+    downloadSpreadsheetTemplateXlsx(STATIONERY_MASTER_IMPORT_HEADERS, STATIONERY_MASTER_SAMPLE_ROW, 'Master ATK', 'Template_ATK_Master_Item.xlsx')
+  );
+  $('#dl-atk-master-csv').addEventListener('click', () =>
+    downloadCsvFile(STATIONERY_MASTER_IMPORT_HEADERS, STATIONERY_MASTER_SAMPLE_ROW, 'Template_ATK_Master_Item.csv')
+  );
+
+  let rawAtkMasterRows = [];
+  const atkMasterFile = $('#import-atk-master-file');
+  const atkMasterSubmit = $('#import-atk-master-submit');
+  const atkMasterPreview = $('#import-atk-master-preview');
+  const atkMasterResult = $('#import-atk-master-result');
+  const atkMasterError = $('#import-atk-master-error');
+  const atkMasterReplace = $('#import-atk-master-replace');
+
+  atkMasterFile.addEventListener('change', async () => {
+    rawAtkMasterRows = [];
+    atkMasterSubmit.disabled = true;
+    atkMasterError.textContent = '';
+    atkMasterPreview.classList.add('hidden');
+    atkMasterResult.classList.add('hidden');
+    const file = atkMasterFile.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readSpreadsheetFileObjects(file);
+      const { rows, errors } = parseStationeryMasterImportRows(raw);
+      if (errors.length) atkMasterError.textContent = errors.slice(0, 3).join(' ');
+      if (!rows.length) {
+        if (!atkMasterError.textContent) atkMasterError.textContent = 'Tidak ada baris Master Item ATK yang valid.';
+        return;
+      }
+      rawAtkMasterRows = raw;
+      atkMasterSubmit.disabled = false;
+      atkMasterPreview.classList.remove('hidden');
+      atkMasterPreview.innerHTML = `<b>${rows.length} master item ATK siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <code>${esc(r.raw_code || 'AUTO')}</code> <b>${esc(r.item_name)}</b> — Stok Awal: ${r.opening_stock} ${esc(r.unit)} (1 ${esc(r.purchase_unit)} = ${r.conversion_qty || 1} ${esc(r.unit)})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} item lainnya</div>` : ''}</div>`;
+    } catch (err) {
+      atkMasterError.textContent = err.message || 'Gagal membaca file Master ATK.';
+    }
+  });
+
+  atkMasterSubmit.addEventListener('click', async () => {
+    if (!rawAtkMasterRows.length) return;
+    atkMasterSubmit.disabled = true;
+    atkMasterSubmit.textContent = 'Importing…';
+    atkMasterError.textContent = '';
+    atkMasterResult.classList.add('hidden');
+    try {
+      const mod = await loadOpsViewsModule();
+      const res = await mod.importStationeryMasterAction(resolvedOpsCtx, {
+        rawRows: rawAtkMasterRows,
+        replaceExisting: Boolean(atkMasterReplace?.checked)
+      });
+      rawAtkMasterRows = [];
+      atkMasterFile.value = '';
+      atkMasterPreview.classList.add('hidden');
+      atkMasterResult.classList.remove('hidden');
+      atkMasterResult.innerHTML = `
+        <b>Berhasil import ${res.parsedCount} Master Item ATK</b> (${res.insertedCount} baru, ${res.updatedCount} diperbarui).
+        <div class="row-actions" style="margin-top:8px">
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryMaterials">Buka Material Management →</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryStock">Buka Report ATK →</button>
+        </div>`;
+      atkMasterResult.querySelectorAll('[data-jump-view]').forEach(b => b.addEventListener('click', () => loadView(b.dataset.jumpView)));
+      say(`Master Item ATK berhasil diimport (${res.insertedCount} baru, ${res.updatedCount} diperbarui).`);
+    } catch (err) {
+      atkMasterError.textContent = err.message || 'Gagal mengimport Master ATK.';
+      atkMasterSubmit.disabled = false;
+    } finally {
+      if (!rawAtkMasterRows.length) atkMasterSubmit.disabled = true;
+      atkMasterSubmit.textContent = 'Import Master ATK';
+    }
+  });
+
+  // ---- Card 5: ATK Stock Movement Import (Barang Masuk / Keluar) ----
+  $('#dl-atk-mv-xlsx').addEventListener('click', () =>
+    downloadSpreadsheetTemplateXlsx(STATIONERY_MOVEMENT_IMPORT_HEADERS, STATIONERY_MOVEMENT_SAMPLE_ROWS, 'Stock Movement', 'Template_ATK_Stock_Movement.xlsx')
+  );
+  $('#dl-atk-mv-csv').addEventListener('click', () =>
+    downloadCsvFile(STATIONERY_MOVEMENT_IMPORT_HEADERS, STATIONERY_MOVEMENT_SAMPLE_ROWS, 'Template_ATK_Stock_Movement.csv')
+  );
+
+  let rawAtkMvRows = [];
+  const atkMvFile = $('#import-atk-mv-file');
+  const atkMvSubmit = $('#import-atk-mv-submit');
+  const atkMvPreview = $('#import-atk-mv-preview');
+  const atkMvResult = $('#import-atk-mv-result');
+  const atkMvError = $('#import-atk-mv-error');
+  const atkMvReplace = $('#import-atk-mv-replace');
+  const atkMvAutoseed = $('#import-atk-mv-autoseed');
+
+  atkMvFile.addEventListener('change', async () => {
+    rawAtkMvRows = [];
+    atkMvSubmit.disabled = true;
+    atkMvError.textContent = '';
+    atkMvPreview.classList.add('hidden');
+    atkMvResult.classList.add('hidden');
+    const file = atkMvFile.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readSpreadsheetFileObjects(file);
+      const { rows, errors } = parseStationeryMovementImportRows(raw);
+      if (errors.length) atkMvError.textContent = errors.slice(0, 3).join(' ');
+      if (!rows.length) {
+        if (!atkMvError.textContent) atkMvError.textContent = 'Tidak ada baris transaksi Stock Movement yang valid.';
+        return;
+      }
+      rawAtkMvRows = raw;
+      atkMvSubmit.disabled = false;
+      const inRows = rows.filter(r => r.tx_type === 'IN');
+      const outRows = rows.filter(r => r.tx_type === 'OUT');
+      const totalInQty = inRows.reduce((s, r) => s + r.qty, 0);
+      const totalOutQty = outRows.reduce((s, r) => s + r.qty, 0);
+      const uniqueItems = new Set(rows.map(r => r.item_name));
+      const minDate = rows[0]?.tx_date || '-';
+      const maxDate = rows[rows.length - 1]?.tx_date || '-';
+
+      atkMvPreview.classList.remove('hidden');
+      atkMvPreview.innerHTML = `
+        <b>${rows.length} transaksi siap diimport</b> (${uniqueItems.size} jenis item · ${esc(minDate)} s/d ${esc(maxDate)})
+        <div style="margin-top:4px;font-size:12px">Masuk: <b>${inRows.length}</b> trx (${totalInQty} qty) · Keluar: <b>${outRows.length}</b> trx (${totalOutQty} qty)</div>
+        <div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• ${esc(r.tx_date)} · <b>${r.tx_type === 'IN' ? 'Masuk' : 'Keluar'}</b> · ${esc(r.department)} · <b>${esc(r.item_name)}</b> (${r.qty} ${esc(r.unit || '')})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} transaksi lainnya</div>` : ''}</div>`;
+    } catch (err) {
+      atkMvError.textContent = err.message || 'Gagal membaca file Stock Movement ATK.';
+    }
+  });
+
+  atkMvSubmit.addEventListener('click', async () => {
+    if (!rawAtkMvRows.length) return;
+    atkMvSubmit.disabled = true;
+    atkMvSubmit.textContent = 'Importing…';
+    atkMvError.textContent = '';
+    atkMvResult.classList.add('hidden');
+    try {
+      const mod = await loadOpsViewsModule();
+      const res = await mod.importStationeryMovementsAction(resolvedOpsCtx, {
+        rawRows: rawAtkMvRows,
+        replaceLedger: Boolean(atkMvReplace?.checked),
+        autoSeedOpeningIfShort: Boolean(atkMvAutoseed?.checked ?? true)
+      });
+      rawAtkMvRows = [];
+      atkMvFile.value = '';
+      atkMvPreview.classList.add('hidden');
+      atkMvResult.classList.remove('hidden');
+      atkMvResult.innerHTML = `
+        <b>Berhasil import ${res.importedEntries.length} transaksi ATK</b> (${res.createdItemsCount} item baru dibuat${res.autoSeededCount ? `, ${res.autoSeededCount} Stock Awal disesuaikan otomatis` : ''}).
+        <div class="row-actions" style="margin-top:8px">
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryStock">Buka Report ATK →</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryReports">Buka Purchase Plan Suggestion →</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="stationeryInput">Stock Movement Input →</button>
+        </div>`;
+      atkMvResult.querySelectorAll('[data-jump-view]').forEach(b => b.addEventListener('click', () => loadView(b.dataset.jumpView)));
+      say(`Berhasil import ${res.importedEntries.length} transaksi ATK.`);
+    } catch (err) {
+      atkMvError.textContent = err.message || 'Gagal mengimport transaksi Stock Movement ATK.';
+      atkMvSubmit.disabled = false;
+    } finally {
+      if (!rawAtkMvRows.length) atkMvSubmit.disabled = true;
+      atkMvSubmit.textContent = 'Import Movement ATK';
     }
   });
 }
@@ -6561,7 +6798,7 @@ async function loadView(view, forceRefresh = false) {
     else if (view === 'stationeryReports') await (await loadOpsViewsModule()).renderStationeryReportsView(content, opsCtx);
     else if (view === 'stationeryMaterials') await (await loadOpsViewsModule()).renderStationeryMaterialsView(content, opsCtx);
     else if (view === 'vehicleReports') await (await loadOpsViewsModule()).renderVehicleReportsView(content, opsCtx);
-    else if (view === 'systemImport') renderSystemImport();
+    else if (view === 'systemImport') renderSystemImport(opsCtx);
     else if (view === 'print') renderPrint();
     else if (view === 'settings') await renderSettings();
     else if (view === 'userManagement') await renderUserManagement();

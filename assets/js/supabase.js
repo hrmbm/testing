@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js?v=20261124-hrga-workspace-20';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js?v=20261124-hrga-workspace-22';
 
 const configured = SUPABASE_URL.startsWith('https://') &&
   !SUPABASE_URL.includes('YOUR-PROJECT') &&

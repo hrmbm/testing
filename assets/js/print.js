@@ -4,12 +4,12 @@ import {
   REHOLZ_TEMPLATE_URL,
   REHOLZ_MASTER_REVISION,
   CV_BUCKET
-} from './config.js?v=20261124-hrga-workspace-20';
-import { supabase } from './supabase.js?v=20261124-hrga-workspace-20';
-import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-20';
-import { esc } from './common.js?v=20261124-hrga-workspace-20';
-import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261124-hrga-workspace-20';
-import { buildApplicationPdfTitle } from './vacancy-logic.js?v=20261124-hrga-workspace-20';
+} from './config.js?v=20261124-hrga-workspace-22';
+import { supabase } from './supabase.js?v=20261124-hrga-workspace-22';
+import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
+import { esc } from './common.js?v=20261124-hrga-workspace-22';
+import { cacheGet, cacheSet, cacheDelete } from './cache.js?v=20261124-hrga-workspace-22';
+import { buildApplicationPdfTitle } from './vacancy-logic.js?v=20261124-hrga-workspace-22';
 
 const MASTER_HTML_MEMORY = new Map();
 let pdfjsLoaderPromise = null;
