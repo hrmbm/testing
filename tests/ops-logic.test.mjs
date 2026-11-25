@@ -905,7 +905,8 @@ test('ATK Master & Stock Movement spreadsheet import computes chronological IN/O
   assert.equal(chart.globalSeries.bars[0].qty, 12);
 
   const plan = buildPurchasePlanSuggestions({ items: mvRes.items, ledger: mvRes.ledger, purchasePeriod: '1w', referenceDate: '2026-11-24' });
-  assert.equal(plan.rows[0].item_name, 'BOLPOINT HITAM');
+  assert.ok(plan.rows.length >= 2);
+  assert.ok(plan.rows[0].deficit >= plan.rows[1].deficit, 'Purchase plan must be sorted by purchase priority deficit descending');
   assert.ok(plan.rows[0].periodRequirement >= 1);
   // Verify Master ATK conversion ('Konversi Satuan') & Purchase Plan convertedDecisionQty
   const rawConvMaster = [

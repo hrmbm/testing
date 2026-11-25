@@ -619,11 +619,13 @@ export function buildPurchasePlanSuggestions({
   );
   const observedDays = Math.max(1, outMonths.size) * 30;
 
-  const rows = globalReport.favoriteItems.map(fav => {
+  const mappedRows = globalReport.favoriteItems.map(fav => {
     const ov = manualOverrides?.[fav.id] || {};
     const avgDaily = (fav.totalOut || 0) / observedDays;
     const periodRequirement = avgDaily > 0 ? Math.ceil(avgDaily * planWindow.periodDays) : 0;
     const minStock = periodRequirement * 2;
+    const currentStock = Number(fav.currentStock ?? 0);
+    const deficit = Math.max(0, minStock - currentStock);
     const conversionQty = Math.max(1, Number(fav.conversion_qty) || 1);
     const minPurchase = ov.minPurchase !== undefined && ov.minPurchase !== ''
       ? Math.max(1, Number(ov.minPurchase) || 1)
@@ -637,14 +639,15 @@ export function buildPurchasePlanSuggestions({
       : '';
 
     return {
-      rank: fav.rank,
+      favRank: fav.rank,
       id: fav.id,
       item_code: fav.item_code,
       item_name: fav.item_name,
-      currentStock: fav.currentStock,
+      currentStock,
       totalGlobalOut: fav.totalOut,
       periodRequirement,
       minStock,
+      deficit,
       unit: fav.unit,
       conversionQty,
       minPurchase,
@@ -653,6 +656,17 @@ export function buildPurchasePlanSuggestions({
       convertedDecisionQty
     };
   });
+
+  mappedRows.sort((a, b) => {
+    if (b.deficit !== a.deficit) return b.deficit - a.deficit;
+    if (b.periodRequirement !== a.periodRequirement) return b.periodRequirement - a.periodRequirement;
+    return a.favRank - b.favRank;
+  });
+
+  const rows = mappedRows.map((r, idx) => ({
+    ...r,
+    rank: idx + 1
+  }));
 
   return {
     window: planWindow,

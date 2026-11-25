@@ -3144,7 +3144,7 @@ export async function renderStationeryReportsView(host, ctx) {
           <table>
             <thead>
               <tr>
-                <th style="width:56px">Rank</th>
+                <th style="width:72px">Priority</th>
                 <th>Item</th>
                 <th class="num">Current Stock</th>
                 <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
@@ -3243,7 +3243,7 @@ export async function renderStationeryReportsView(host, ctx) {
     const manual = state.stationeryPlanManual || {};
     const aoa = [
       ['Purchase Period', plan.window.periodLabel, 'Planning Window', plan.window.dateRangeLabel],
-      ['Rank', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit', 'Convert to Unit', 'Unit'],
+      ['Priority', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit', 'Convert to Unit', 'Unit'],
       ...visibleRows.map(r => {
         const ov = manual[r.id] || {};
         const dq = ov.decisionQty ?? r.decisionQty;
@@ -3300,7 +3300,7 @@ export async function renderStationeryReportsView(host, ctx) {
         <table class="drv-pdf-table">
           <thead>
             <tr>
-              <th>Rank</th>
+              <th>Priority</th>
               <th>Item</th>
               <th>Current Stock</th>
               <th>${esc(plan.window.requirementColumnLabel)}</th>
