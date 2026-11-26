@@ -1120,35 +1120,6 @@ async function renderDashboard(opsCtx = null) {
     }
   } catch {}
 
-  const opsAttentionItems = [];
-  if (opsSummary.staffPendingSelectedDate > 0) {
-    opsAttentionItems.push({
-      id: 'ops-staff-pending',
-      category: 'Attendance Suite Staff',
-      title: 'Absensi Staff Perlu Penyesuaian',
-      description: `${opsSummary.staffPendingSelectedDate} staff belum disesuaikan (${opsSummary.staffFocusDate}).`,
-      count: opsSummary.staffPendingSelectedDate,
-      severity: 'warning',
-      targetView: 'attendanceStaffManagement',
-      ctaLabel: 'Open Staff Management'
-    });
-  }
-  if (opsSummary.driverAnomalyCount > 0) {
-    opsAttentionItems.push({
-      id: 'ops-driver-anomaly',
-      category: 'Drivers Command Center',
-      title: 'Data Janggal Absensi Driver',
-      description: `${opsSummary.driverAnomalyCount} jadwal driver belum cocok dengan tap absensi.`,
-      count: opsSummary.driverAnomalyCount,
-      severity: 'urgent',
-      targetView: 'attendanceDriverManagement',
-      ctaLabel: 'Atur Case Abnormal'
-    });
-  }
-
-  const allAttentionItems = [...opsAttentionItems, ...baseAttention];
-  const totalAttentionCount = allAttentionItems.reduce((sum, item) => sum + item.count, 0);
-
   const recruitmentAttentionCount = baseAttention
     .filter(it => ['leads-recommended', 'candidates-awaiting-disc', 'candidates-awaiting-interview', 'invited-sync'].includes(it.id))
     .reduce((sum, it) => sum + it.count, 0);
@@ -1236,8 +1207,6 @@ async function renderDashboard(opsCtx = null) {
     }
   ];
 
-  const activeAttentionModules = moduleCards.filter(c => c.attentionCount > 0).length;
-  const firstAttentionView = moduleCards.find(c => c.attentionCount > 0)?.targetView || 'tracking';
   const todayLabel = new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
     day: 'numeric',
@@ -1271,29 +1240,6 @@ async function renderDashboard(opsCtx = null) {
           title="Hapus Cache Storage, Service Worker, IndexedDB, localStorage, dan mulai sesi baru"
         >&#8635; Reset Cache &amp; Sesi Baru</button>
       </div>
-    </section>
-
-    <section class="dash-pulse-strip" aria-label="Operational Snapshot">
-      <button type="button" class="dash-pulse-tile" data-view="employees">
-        <span class="dash-pulse-label">Active Workforce</span>
-        <strong class="dash-pulse-value">${hired}</strong>
-        <span class="dash-pulse-sub">${opsSummary.staffCount} staff · ${opsSummary.driverCount} drivers</span>
-      </button>
-      <button type="button" class="dash-pulse-tile" data-view="tracking">
-        <span class="dash-pulse-label">Recruitment Pipeline</span>
-        <strong class="dash-pulse-value">${total}</strong>
-        <span class="dash-pulse-sub">${stage1} leads · ${submitted} submitted</span>
-      </button>
-      <button type="button" class="dash-pulse-tile ${totalAttentionCount > 0 ? 'is-alert' : ''}" data-view="${esc(firstAttentionView)}">
-        <span class="dash-pulse-label">Pending Follow-Up</span>
-        <strong class="dash-pulse-value">${totalAttentionCount}</strong>
-        <span class="dash-pulse-sub">${activeAttentionModules > 0 ? `Across ${activeAttentionModules} modules` : 'All queues clear'}</span>
-      </button>
-      <button type="button" class="dash-pulse-tile" data-view="stationeryReports">
-        <span class="dash-pulse-label">Fleet &amp; Inventory</span>
-        <strong class="dash-pulse-value">${opsSummary.vehicleCount} / ${opsSummary.atkItemCount || 0}</strong>
-        <span class="dash-pulse-sub">${opsSummary.vehicleScheduleCount} trips · ${opsSummary.atkNeedBuyCount || 0} ATK alerts</span>
-      </button>
     </section>
 
     <div class="dash-section-head">
