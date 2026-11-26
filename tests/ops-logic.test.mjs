@@ -1304,6 +1304,7 @@ test('Dashboard renders 6 module boxes and supports Lead Register & Invited Edit
   assert.ok(adminText.includes('dash_atk_stationery_1795673206455.jpg'));
   assert.ok(adminText.includes("targetView: 'contracts'"));
   assert.ok(adminText.includes("targetView: 'stationeryReports'"));
+  assert.ok(adminText.includes('dash-pulse-strip') && adminText.includes('dash-module-glass'), 'Dashboard must render operational pulse strip and glass module cards');
 
   // Lead Register must include Actions column with Edit & Delete controls (and never Remarks)
   assert.ok(adminText.includes('data-stage1-edit=') && adminText.includes('data-stage1-delete='), 'Lead Register must render Edit and Delete actions');

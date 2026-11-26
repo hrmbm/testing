@@ -1158,6 +1158,7 @@ async function renderDashboard(opsCtx = null) {
   const moduleCards = [
     {
       key: 'recruitment',
+      spanClass: 'span-7',
       title: 'Recruitment',
       reportLabel: 'Tracking & Report',
       targetView: 'tracking',
@@ -1169,6 +1170,7 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'pkwt-contracts',
+      spanClass: 'span-5',
       title: 'PKWT & Contracts',
       reportLabel: 'Contracts',
       targetView: 'contracts',
@@ -1180,6 +1182,7 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'staff-attendance',
+      spanClass: 'span-5',
       title: 'Attendance Suite Staff',
       reportLabel: 'Staff Reports',
       targetView: 'attendanceStaffReports',
@@ -1193,6 +1196,7 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'drivers-command',
+      spanClass: 'span-7',
       title: 'Drivers Command Center',
       reportLabel: 'Driver Reports',
       targetView: 'attendanceDriverReports',
@@ -1206,6 +1210,7 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'vehicle-management',
+      spanClass: 'span-6',
       title: 'Vehicle Management',
       reportLabel: 'Vehicle Reports',
       targetView: 'vehicleReports',
@@ -1217,6 +1222,7 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'stationery-atk',
+      spanClass: 'span-6',
       title: 'ATK / Stationery',
       reportLabel: 'Purchase Plan',
       targetView: 'stationeryReports',
@@ -1230,12 +1236,23 @@ async function renderDashboard(opsCtx = null) {
     }
   ];
 
+  const activeAttentionModules = moduleCards.filter(c => c.attentionCount > 0).length;
+  const firstAttentionView = moduleCards.find(c => c.attentionCount > 0)?.targetView || 'tracking';
+  const todayLabel = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  }).format(new Date());
+
+  const attWarnIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Workspace overview">
       <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio" referrerpolicy="no-referrer">
       <div class="atelier-hero-scrim" aria-hidden="true"></div>
       <div class="atelier-hero-content">
-        <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
+        <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur · ${esc(todayLabel)}</p>
         <h1 class="atelier-hero-title">Welcome, ${esc(adminDisplayName)}</h1>
         <div class="atelier-hero-meta">
           <span><b>${hired}</b> active employees</span>
@@ -1256,23 +1273,53 @@ async function renderDashboard(opsCtx = null) {
       </div>
     </section>
 
+    <section class="dash-pulse-strip" aria-label="Operational Snapshot">
+      <button type="button" class="dash-pulse-tile" data-view="employees">
+        <span class="dash-pulse-label">Active Workforce</span>
+        <strong class="dash-pulse-value">${hired}</strong>
+        <span class="dash-pulse-sub">${opsSummary.staffCount} staff · ${opsSummary.driverCount} drivers</span>
+      </button>
+      <button type="button" class="dash-pulse-tile" data-view="tracking">
+        <span class="dash-pulse-label">Recruitment Pipeline</span>
+        <strong class="dash-pulse-value">${total}</strong>
+        <span class="dash-pulse-sub">${stage1} leads · ${submitted} submitted</span>
+      </button>
+      <button type="button" class="dash-pulse-tile ${totalAttentionCount > 0 ? 'is-alert' : ''}" data-view="${esc(firstAttentionView)}">
+        <span class="dash-pulse-label">Pending Follow-Up</span>
+        <strong class="dash-pulse-value">${totalAttentionCount}</strong>
+        <span class="dash-pulse-sub">${activeAttentionModules > 0 ? `Across ${activeAttentionModules} modules` : 'All queues clear'}</span>
+      </button>
+      <button type="button" class="dash-pulse-tile" data-view="stationeryReports">
+        <span class="dash-pulse-label">Fleet &amp; Inventory</span>
+        <strong class="dash-pulse-value">${opsSummary.vehicleCount} / ${opsSummary.atkItemCount || 0}</strong>
+        <span class="dash-pulse-sub">${opsSummary.vehicleScheduleCount} trips · ${opsSummary.atkNeedBuyCount || 0} ATK alerts</span>
+      </button>
+    </section>
+
+    <div class="dash-section-head">
+      <h2>Operational Modules</h2>
+      <span>Select a module card to open live records, schedules &amp; reports</span>
+    </div>
+
     <section class="dashboard-menu-grid" aria-label="Operational Modules">
       ${moduleCards.map(card => `
-        <button type="button" class="dash-module-box ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
+        <button type="button" class="dash-module-box ${esc(card.spanClass)} ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
           <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}" referrerpolicy="no-referrer">
           <div class="dash-module-scrim" aria-hidden="true"></div>
           <div class="dash-module-inner">
             <div class="dash-module-top">
               <span class="dash-module-eyebrow">${esc(card.reportLabel)}</span>
               ${card.attentionCount > 0
-                ? `<span class="dash-module-att-badge">Attention: ${card.attentionCount}</span>`
+                ? `<span class="dash-module-att-badge">${attWarnIcon} Attention: ${card.attentionCount}</span>`
                 : ''}
             </div>
-            <div class="dash-module-bottom">
-              <h2 class="dash-module-title">${esc(card.title)}</h2>
+            <div class="dash-module-bottom dash-module-glass">
+              <div class="dash-module-headline-row">
+                <h3 class="dash-module-title">${esc(card.title)}</h3>
+                <span class="dash-module-cta">Open <span aria-hidden="true">↗</span></span>
+              </div>
               <p class="dash-module-stat">${esc(card.statLine)}</p>
               ${card.attentionCount > 0 ? `<p class="dash-module-alert">${esc(card.attentionNote)}</p>` : ''}
-              <span class="dash-module-cta">Open ${esc(card.reportLabel)} <span aria-hidden="true">↗</span></span>
             </div>
           </div>
         </button>
