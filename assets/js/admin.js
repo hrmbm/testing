@@ -2,7 +2,14 @@ import { supabase, isConfigured } from './supabase.js?v=20261124-hrga-workspace-
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEMPLATE_URL, DEFAULT_MASTER_REVISION } from './config.js?v=20261124-hrga-workspace-22';
 import { $, $$, esc, idDate, formatAppError, savePortalSettingsBatch, parseSortableDateMs } from './common.js?v=20261124-hrga-workspace-22';
 import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
-import { cacheGet, cacheSet, cacheDelete, clearAllWorkspaceCache } from './cache.js?v=20261124-hrga-workspace-22';
+import {
+  cacheGet,
+  cacheSet,
+  cacheDelete,
+  clearAllWorkspaceCache,
+  buildFreshReloadUrl,
+  resetAllBrowserCachesAndStorage
+} from './cache.js?v=20261124-hrga-workspace-22';
 import {
   EMPLOYEE_TABLE_HEADERS,
   EMPLOYEE_UI_HEADERS,
@@ -1183,6 +1190,15 @@ async function renderDashboard(opsCtx = null) {
           <span><b>${opsSummary.driverCount}</b> active drivers</span>
         </div>
       </div>
+      <div class="atelier-hero-actions">
+        <button
+          type="button"
+          id="dashboard-hard-reset-btn"
+          class="atelier-reset-btn"
+          aria-label="Hapus semua cache dan mulai sesi baru"
+          title="Hapus Cache Storage, Service Worker, IndexedDB, localStorage, dan mulai sesi baru"
+        >&#8635; Reset Cache &amp; Sesi Baru</button>
+      </div>
     </section>
 
     <section class="dashboard-menu-grid" aria-label="Operational Modules">
@@ -1212,6 +1228,38 @@ async function renderDashboard(opsCtx = null) {
   `;
 
   $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));
+  $('#dashboard-hard-reset-btn')?.addEventListener('click', async event => {
+    const resetBtn = event.currentTarget;
+    const confirmed = await openConfirmDialog({
+      title: 'Hapus Cache & Mulai Sesi Baru?',
+      message: 'Semua cache yang membandel (Cache Storage, Service Worker, IndexedDB, localStorage, sessionStorage) serta sesi aktif akan dihapus bersih dan aplikasi dimulai ulang dari awal.',
+      confirmLabel: 'Hapus Cache & Mulai Baru',
+      danger: true
+    });
+    if (!confirmed) return;
+
+    const prevLabel = resetBtn.textContent;
+    resetBtn.disabled = true;
+    resetBtn.textContent = 'Menghapus Cache…';
+    try {
+      await resetAllBrowserCachesAndStorage({
+        onBeforeClear: () => {
+          invalidateDataCache();
+          workspaceIndexesCache = null;
+          opsViewsModuleRef?.invalidateOpsStateCache?.();
+          printedContractsMap.clear();
+          currentAdminProfile = null;
+          currentUserId = null;
+        },
+        onSignOut: () => (isDemoMode ? null : supabase?.auth?.signOut?.({ scope: 'local' }))
+      });
+      location.replace(buildFreshReloadUrl(location.href, { preserveDemo: isDemoMode }));
+    } catch (error) {
+      console.error('Hard cache reset failed:', error);
+      resetBtn.disabled = false;
+      resetBtn.textContent = prevLabel;
+    }
+  });
   scheduleIdleModulePreload();
 }
 

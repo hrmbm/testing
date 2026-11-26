@@ -1597,6 +1597,83 @@ test('Candidate List strips address type prefix and MS-Word template editor help
   assert.ok(normalized['01-pkwt'].includes('contract-editor-spacer'));
 });
 
+test('Dashboard hard cache reset clears caches, service workers, IndexedDB, local/session storage and builds fresh reload URL', async () => {
+  const {
+    buildFreshReloadUrl,
+    resetAllBrowserCachesAndStorage
+  } = await import('../assets/js/cache.js');
+
+  assert.equal(
+    buildFreshReloadUrl('http://localhost:3000/?foo=1#sec', { preserveDemo: false, nowMs: 12345 }),
+    'http://localhost:3000/?_fresh=12345'
+  );
+  assert.equal(
+    buildFreshReloadUrl('http://localhost:3000/?demo=1&nonroot=1&stale=9#dash', { preserveDemo: true, nowMs: 99999 }),
+    'http://localhost:3000/?demo=1&nonroot=1&_fresh=99999'
+  );
+
+  const deletedCaches = [];
+  const unregistered = [];
+  const deletedDbs = [];
+  let localCleared = false;
+  let sessionCleared = false;
+  let beforeCleared = false;
+  let signedOut = false;
+
+  const summary = await resetAllBrowserCachesAndStorage({
+    cachesApi: {
+      keys: async () => ['hrga-workspace-app-assets-old', 'other-cache'],
+      delete: async name => { deletedCaches.push(name); return true; }
+    },
+    serviceWorkerApi: {
+      getRegistrations: async () => [
+        { unregister: async () => { unregistered.push('sw-1'); return true; } },
+        { unregister: async () => { unregistered.push('sw-2'); return true; } }
+      ]
+    },
+    idbFactory: {
+      deleteDatabase: name => {
+        deletedDbs.push(name);
+        const req = {};
+        queueMicrotask(() => req.onsuccess?.());
+        return req;
+      }
+    },
+    localStore: { clear: () => { localCleared = true; } },
+    sessionStore: { clear: () => { sessionCleared = true; } },
+    onBeforeClear: () => { beforeCleared = true; },
+    onSignOut: async () => { signedOut = true; }
+  });
+
+  assert.equal(beforeCleared, true);
+  assert.equal(signedOut, true);
+  assert.equal(summary.cachesDeleted, 2);
+  assert.deepEqual(deletedCaches, ['hrga-workspace-app-assets-old', 'other-cache']);
+  assert.equal(summary.workersUnregistered, 2);
+  assert.equal(summary.idbDeleted, true);
+  assert.deepEqual(deletedDbs, ['hrga-workspace-cache-db']);
+  assert.equal(summary.localStorageCleared, true);
+  assert.equal(summary.sessionStorageCleared, true);
+  assert.equal(localCleared, true);
+  assert.equal(sessionCleared, true);
+
+  // Graceful fallback even if Cache Storage or SW APIs reject
+  const resilient = await resetAllBrowserCachesAndStorage({
+    cachesApi: { keys: async () => { throw new Error('blocked'); } },
+    serviceWorkerApi: null,
+    idbFactory: null,
+    localStore: { clear: () => { localCleared = 'again'; } },
+    sessionStore: { clear: () => { sessionCleared = 'again'; } }
+  });
+  assert.equal(resilient.cachesDeleted, 0);
+  assert.equal(resilient.localStorageCleared, true);
+  assert.equal(localCleared, 'again');
+
+  const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(adminJs.includes('dashboard-hard-reset-btn'), 'Dashboard must expose hard cache reset button');
+  assert.ok(adminJs.includes('resetAllBrowserCachesAndStorage'), 'Dashboard reset button must call resetAllBrowserCachesAndStorage');
+});
+
 
 
 

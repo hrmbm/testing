@@ -94,5 +94,114 @@ export async function clearAllWorkspaceCache() {
         resolve();
       }
     });
+    try {
+      db.close();
+    } catch {}
+    dbPromise = null;
   }
 }
+
+export function buildFreshReloadUrl(currentHref = '', { preserveDemo = false, nowMs = Date.now() } = {}) {
+  try {
+    const url = new URL(String(currentHref || 'http://localhost/'));
+    const hadDemo = preserveDemo && url.searchParams.get('demo') === '1';
+    const hadNonRoot = preserveDemo && url.searchParams.get('nonroot') === '1';
+    url.search = '';
+    url.hash = '';
+    if (hadDemo) url.searchParams.set('demo', '1');
+    if (hadNonRoot) url.searchParams.set('nonroot', '1');
+    url.searchParams.set('_fresh', String(nowMs));
+    return url.toString();
+  } catch {
+    return `?_fresh=${nowMs}`;
+  }
+}
+
+export async function resetAllBrowserCachesAndStorage({
+  cachesApi = typeof caches !== 'undefined' ? caches : null,
+  serviceWorkerApi = typeof navigator !== 'undefined' ? navigator.serviceWorker : null,
+  idbFactory = typeof indexedDB !== 'undefined' ? indexedDB : null,
+  localStore = typeof localStorage !== 'undefined' ? localStorage : null,
+  sessionStore = typeof sessionStorage !== 'undefined' ? sessionStorage : null,
+  onBeforeClear = null,
+  onSignOut = null,
+  timeoutMs = 2500
+} = {}) {
+  const summary = {
+    cachesDeleted: 0,
+    workersUnregistered: 0,
+    idbDeleted: false,
+    localStorageCleared: false,
+    sessionStorageCleared: false,
+    signedOut: false
+  };
+
+  const withTimeout = (promise, ms = timeoutMs) =>
+    Promise.race([
+      Promise.resolve(promise).catch(() => null),
+      new Promise(resolve => setTimeout(resolve, ms))
+    ]);
+
+  if (typeof onBeforeClear === 'function') {
+    try { onBeforeClear(); } catch {}
+  }
+
+  await clearAllWorkspaceCache().catch(() => {});
+
+  if (typeof onSignOut === 'function') {
+    await withTimeout((async () => {
+      await onSignOut();
+      summary.signedOut = true;
+    })());
+  }
+
+  if (cachesApi && typeof cachesApi.keys === 'function') {
+    await withTimeout((async () => {
+      const names = await cachesApi.keys();
+      if (Array.isArray(names) && names.length) {
+        const deleted = await Promise.all(names.map(name => cachesApi.delete(name).catch(() => false)));
+        summary.cachesDeleted = deleted.filter(Boolean).length;
+      }
+    })());
+  }
+
+  if (serviceWorkerApi && typeof serviceWorkerApi.getRegistrations === 'function') {
+    await withTimeout((async () => {
+      const regs = await serviceWorkerApi.getRegistrations();
+      if (Array.isArray(regs) && regs.length) {
+        const res = await Promise.all(regs.map(reg => reg.unregister().catch(() => false)));
+        summary.workersUnregistered = res.filter(Boolean).length;
+      }
+    })());
+  }
+
+  if (idbFactory && typeof idbFactory.deleteDatabase === 'function') {
+    await withTimeout(new Promise(resolve => {
+      try {
+        const req = idbFactory.deleteDatabase(DB_NAME);
+        req.onsuccess = () => { summary.idbDeleted = true; resolve(); };
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      } catch {
+        resolve();
+      }
+    }));
+  }
+
+  if (localStore && typeof localStore.clear === 'function') {
+    try {
+      localStore.clear();
+      summary.localStorageCleared = true;
+    } catch {}
+  }
+
+  if (sessionStore && typeof sessionStore.clear === 'function') {
+    try {
+      sessionStore.clear();
+      summary.sessionStorageCleared = true;
+    } catch {}
+  }
+
+  return summary;
+}
+
