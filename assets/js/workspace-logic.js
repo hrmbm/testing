@@ -2106,6 +2106,70 @@ export function normalizeEmployeeRecordUppercase(emp = {}) {
 
 export const normalizeEmployeeRecordCasing = normalizeEmployeeRecordUppercase;
 
+export function findStage1LeadById(rows = [], targetId = '') {
+  const key = String(targetId ?? '').trim();
+  if (!key || !Array.isArray(rows)) return null;
+  return rows.find(item => item && String(item.id ?? '').trim() === key) || null;
+}
+
+export async function deleteStage1LeadRemote(supabaseClient, record) {
+  if (!supabaseClient) {
+    throw new Error('Koneksi database Supabase tidak tersedia.');
+  }
+  const id = record?.id;
+  if (id === null || id === undefined || String(id).trim() === '') {
+    throw new Error('ID Lead Register tidak valid.');
+  }
+
+  let deletedViaRpc = false;
+  let directError = null;
+  let directCount = 0;
+
+  try {
+    const res = await supabaseClient
+      .from('candidate_stage1_applications')
+      .delete()
+      .eq('id', id)
+      .select('id');
+    directError = res?.error || null;
+    if (!directError && Array.isArray(res?.data)) {
+      directCount = res.data.length;
+    }
+  } catch (err) {
+    directError = err;
+  }
+
+  if (directError || directCount === 0) {
+    const rpcRes = await supabaseClient.rpc('delete_stage1_application', { p_id: String(id) });
+    if (rpcRes?.error) {
+      if (directError) throw directError;
+      const rpcMsg = String(rpcRes.error?.message || '').toLowerCase();
+      if (rpcMsg.includes('delete_stage1_application') && (rpcMsg.includes('could not find') || rpcMsg.includes('does not exist'))) {
+        throw new Error('Penghapusan Lead Register ditolak oleh aturan database (0 baris terhapus). Jalankan migrasi SQL terbaru database/migrations/20261126_hrga_v11_stage1_delete_rls.sql di Supabase SQL Editor.');
+      }
+      throw rpcRes.error;
+    }
+    const rpcDeleted = typeof rpcRes?.data === 'number'
+      ? rpcRes.data
+      : (rpcRes?.data === true ? 1 : Number(rpcRes?.data || 0));
+    if (rpcDeleted <= 0) {
+      if (directError) throw directError;
+      throw new Error('Data Lead Register tidak dapat dihapus di database (0 baris terhapus). Jalankan database/migrations/20261126_hrga_v11_stage1_delete_rls.sql di Supabase SQL Editor atau muat ulang data.');
+    }
+    deletedViaRpc = true;
+  }
+
+  const cvPath = String(record?.cv_path || '').trim();
+  if (cvPath && !cvPath.startsWith('demo-cv/') && typeof supabaseClient.storage?.from === 'function') {
+    try {
+      await supabaseClient.storage.from('candidate-stage1-cv').remove([cvPath]);
+    } catch {}
+  }
+
+  return { deleted: true, viaRpc: deletedViaRpc };
+}
+
+
 
 
 

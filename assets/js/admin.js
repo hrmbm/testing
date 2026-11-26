@@ -54,7 +54,9 @@ import {
   getMemoizedDiscResult,
   paginateRows,
   preserveCaretCurrencyValue,
-  stripAddressTypePrefix
+  stripAddressTypePrefix,
+  findStage1LeadById,
+  deleteStage1LeadRemote
 } from './workspace-logic.js?v=20261124-hrga-workspace-22';
 import {
   bindSafeModalClose,
@@ -261,6 +263,7 @@ const PRINTED_CONTRACTS_KEY = 'hrga_printed_contracts_v1';
 const DEMO_CONTRACT_HISTORY_KEY = 'hrga_contract_history_demo_v1';
 const DEMO_RECRUITMENT_SETTINGS_KEY = 'hrga_demo_recruitment_v1';
 const DEMO_STAGE1_LEADS_KEY = 'hrga_demo_stage1_leads_v1';
+const DEMO_DISMISSED_STAGE1_KEY = 'hrga_demo_dismissed_stage1_v1';
 const DEMO_DISMISSED_INVITED_KEY = 'hrga_dismissed_invited_v1';
 const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'opsSettings', 'systemImport']);
 let employeeSubTab = 'directory';
@@ -354,8 +357,15 @@ function seedDemoWorkspaceData() {
   } catch {}
   dismissedInvitedKeys = storedDismissed.map(k => String(k || '').trim()).filter(Boolean);
 
-  stage1Leads = [
-    ...storedLeads,
+  let dismissedDemoStage1Ids = [];
+  try {
+    const parsedDismissedStage1 = JSON.parse(localStorage.getItem(DEMO_DISMISSED_STAGE1_KEY) || '[]');
+    if (Array.isArray(parsedDismissedStage1)) {
+      dismissedDemoStage1Ids = parsedDismissedStage1.map(id => String(id || '').trim()).filter(Boolean);
+    }
+  } catch {}
+
+  const defaultDemoLeads = [
     {
       id: 'lead-demo-1',
       full_name: 'Rizky Pratama',
@@ -368,6 +378,11 @@ function seedDemoWorkspaceData() {
       },
       created_at: new Date().toISOString()
     }
+  ].filter(item => !dismissedDemoStage1Ids.includes(item.id));
+
+  stage1Leads = [
+    ...storedLeads,
+    ...defaultDemoLeads
   ];
   invitedCandidates = [];
   applicants = [
@@ -1410,20 +1425,22 @@ function renderStage1() {
 function syncDemoStage1LeadStorage() {
   if (!isDemoMode) return;
   try {
-    const customOnly = stage1Leads.filter(item => item.id !== 'lead-demo-1');
+    const customOnly = stage1Leads.filter(item => String(item.id) !== 'lead-demo-1');
     localStorage.setItem(DEMO_STAGE1_LEADS_KEY, JSON.stringify(customOnly));
+    const hasDemoSeed = stage1Leads.some(item => String(item.id) === 'lead-demo-1');
+    localStorage.setItem(DEMO_DISMISSED_STAGE1_KEY, JSON.stringify(hasDemoSeed ? [] : ['lead-demo-1']));
   } catch {}
 }
 
 function bindStage1Actions(rows) {
   $$('[data-stage1-cv]').forEach(button => button.addEventListener('click', () => {
-    const record = rows.find(item => item.id === button.dataset.stage1Cv);
+    const record = findStage1LeadById(rows, button.dataset.stage1Cv);
     if (!record?.cv_path) { say('CV file path not found.'); return; }
     openSignedDocumentInNewTab('candidate-stage1-cv', record.cv_path, 'CV', button);
   }));
 
   $$('[data-stage1-edit]').forEach(button => button.addEventListener('click', async () => {
-    const record = rows.find(item => item.id === button.dataset.stage1Edit);
+    const record = findStage1LeadById(rows, button.dataset.stage1Edit);
     if (!record) return;
     const positions = await loadPositionList().catch(() => stage2PositionsCache);
     openStage1LeadModal({
@@ -1431,7 +1448,7 @@ function bindStage1Actions(rows) {
       positions,
       onSave: async payload => {
         if (isDemoMode || !supabase) {
-          stage1Leads = stage1Leads.map(item => (item.id === record.id
+          stage1Leads = stage1Leads.map(item => (String(item.id) === String(record.id)
             ? {
                 ...item,
                 full_name: payload.full_name,
@@ -1454,7 +1471,11 @@ function bindStage1Actions(rows) {
           ...(stage1HasSourceCol ? { source: payload.source } : {}),
           ...(stage1HasRecommendationCol ? { recommendation: payload.recommendation } : {})
         };
-        let { error } = await supabase.from('candidate_stage1_applications').update(updatePayload).eq('id', record.id);
+        let { data: updatedRows, error } = await supabase
+          .from('candidate_stage1_applications')
+          .update(updatePayload)
+          .eq('id', record.id)
+          .select('id');
         if (error && isMissingSchemaError(error)) {
           const msg = String(error.message || '').toLowerCase();
           if (msg.includes('source')) stage1HasSourceCol = false;
@@ -1466,9 +1487,16 @@ function bindStage1Actions(rows) {
             ...(stage1HasSourceCol ? { source: payload.source } : {}),
             ...(stage1HasRecommendationCol ? { recommendation: payload.recommendation } : {})
           };
-          ({ error } = await supabase.from('candidate_stage1_applications').update(fallbackPayload).eq('id', record.id));
+          ({ data: updatedRows, error } = await supabase
+            .from('candidate_stage1_applications')
+            .update(fallbackPayload)
+            .eq('id', record.id)
+            .select('id'));
         }
         if (error) throw error;
+        if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+          throw new Error('Perubahan Lead Register tidak tersimpan di database (0 baris diperbarui). Jalankan database/migrations/20261126_hrga_v11_stage1_delete_rls.sql di Supabase SQL Editor.');
+        }
         invalidateDataCache();
         workspaceIndexesCache = null;
         say(`Updated lead record for ${payload.full_name}.`);
@@ -1478,7 +1506,7 @@ function bindStage1Actions(rows) {
   }));
 
   $$('[data-stage1-delete]').forEach(button => button.addEventListener('click', async () => {
-    const record = rows.find(item => item.id === button.dataset.stage1Delete);
+    const record = findStage1LeadById(rows, button.dataset.stage1Delete);
     if (!record) return;
     const confirmed = await openConfirmDialog({
       title: 'Delete Lead Record',
@@ -1491,17 +1519,16 @@ function bindStage1Actions(rows) {
     button.textContent = 'Deleting…';
     try {
       if (isDemoMode || !supabase) {
-        stage1Leads = stage1Leads.filter(item => item.id !== record.id);
+        stage1Leads = stage1Leads.filter(item => String(item.id) !== String(record.id));
         syncDemoStage1LeadStorage();
         workspaceIndexesCache = null;
         say(`Deleted lead ${record.full_name}.`);
         renderStage1();
         return;
       }
-      const { error } = await supabase.from('candidate_stage1_applications').delete().eq('id', record.id);
-      if (error) throw error;
+      await deleteStage1LeadRemote(supabase, record);
       invalidateDataCache();
-      stage1Leads = stage1Leads.filter(item => item.id !== record.id);
+      stage1Leads = stage1Leads.filter(item => String(item.id) !== String(record.id));
       workspaceIndexesCache = null;
       say(`Deleted lead ${record.full_name}.`);
       await loadView('stage1', true);

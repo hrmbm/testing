@@ -120,7 +120,9 @@ import {
   buildEmployeeUserOptionLabel,
   EMPLOYEE_TABLE_HEADERS,
   FINAL_INTERVIEW_DECISIONS,
-  normalizeInterviewDecision
+  normalizeInterviewDecision,
+  findStage1LeadById,
+  deleteStage1LeadRemote
 } from '../assets/js/workspace-logic.js';
 
 test('calculateContractDates computes exact inclusive end date matching 17 March 2026 - 16 March 2027', () => {
@@ -1672,6 +1674,97 @@ test('Dashboard hard cache reset clears caches, service workers, IndexedDB, loca
   const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
   assert.ok(adminJs.includes('dashboard-hard-reset-btn'), 'Dashboard must expose hard cache reset button');
   assert.ok(adminJs.includes('resetAllBrowserCachesAndStorage'), 'Dashboard reset button must call resetAllBrowserCachesAndStorage');
+});
+
+test('Lead Register ID lookup handles numeric and UUID string IDs and Stage 1 remote delete avoids silent 0-row RLS failures', async () => {
+  const leads = [
+    { id: 42, full_name: 'Numeric Lead' },
+    { id: 'uuid-abc-1', full_name: 'UUID Lead' }
+  ];
+  assert.equal(findStage1LeadById(leads, '42')?.full_name, 'Numeric Lead');
+  assert.equal(findStage1LeadById(leads, 'uuid-abc-1')?.full_name, 'UUID Lead');
+  assert.equal(findStage1LeadById(leads, 'missing'), null);
+
+  // 1. Direct delete succeeds with returned id row and triggers CV cleanup
+  const removedPaths = [];
+  const directSupabase = {
+    from: table => {
+      assert.equal(table, 'candidate_stage1_applications');
+      return {
+        delete: () => ({
+          eq: (col, val) => {
+            assert.equal(col, 'id');
+            assert.equal(val, 'uuid-abc-1');
+            return {
+              select: () => Promise.resolve({ data: [{ id: 'uuid-abc-1' }], error: null })
+            };
+          }
+        })
+      };
+    },
+    storage: {
+      from: bucket => {
+        assert.equal(bucket, 'candidate-stage1-cv');
+        return {
+          remove: async paths => {
+            removedPaths.push(...paths);
+            return { data: paths, error: null };
+          }
+        };
+      }
+    }
+  };
+  const directRes = await deleteStage1LeadRemote(directSupabase, {
+    id: 'uuid-abc-1',
+    cv_path: 'stage1-cv/uuid-abc-1/cv.pdf'
+  });
+  assert.deepEqual(directRes, { deleted: true, viaRpc: false });
+  assert.deepEqual(removedPaths, ['stage1-cv/uuid-abc-1/cv.pdf']);
+
+  // 2. Silent 0-row PostgREST RLS response (data: [], error: null) triggers RPC fallback
+  let rpcCalledWith = null;
+  const silentRlsWithRpcFallback = {
+    from: () => ({
+      delete: () => ({
+        eq: () => ({
+          select: () => Promise.resolve({ data: [], error: null })
+        })
+      })
+    }),
+    rpc: async (fn, params) => {
+      rpcCalledWith = { fn, params };
+      return { data: 1, error: null };
+    }
+  };
+  const rpcRes = await deleteStage1LeadRemote(silentRlsWithRpcFallback, { id: 42 });
+  assert.deepEqual(rpcRes, { deleted: true, viaRpc: true });
+  assert.deepEqual(rpcCalledWith, { fn: 'delete_stage1_application', params: { p_id: '42' } });
+
+  // 3. When both direct delete and RPC report 0 deleted rows or missing RPC, throw explicitly (never fake success)
+  const silentBlockedBoth = {
+    from: () => ({
+      delete: () => ({
+        eq: () => ({
+          select: () => Promise.resolve({ data: [], error: null })
+        })
+      })
+    }),
+    rpc: async () => ({ data: 0, error: { message: 'Could not find the function public.delete_stage1_application(p_id) in the schema cache' } })
+  };
+  await assert.rejects(
+    () => deleteStage1LeadRemote(silentBlockedBoth, { id: 'lead-1' }),
+    /20261126_hrga_v11_stage1_delete_rls\.sql/
+  );
+
+  // 4. Migration v11 and admin.js integration assertions
+  const v11Sql = fs.readFileSync('database/migrations/20261126_hrga_v11_stage1_delete_rls.sql', 'utf8');
+  assert.ok(v11Sql.includes('candidate_stage1_admin_delete'), 'v11 SQL must define admin DELETE policy on candidate_stage1_applications');
+  assert.ok(v11Sql.includes('delete_stage1_application'), 'v11 SQL must define SECURITY DEFINER delete_stage1_application RPC');
+
+  const adminJs = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(adminJs.includes('deleteStage1LeadRemote'), 'admin.js must use deleteStage1LeadRemote for Lead Register delete');
+  assert.ok(adminJs.includes('findStage1LeadById'), 'admin.js must use findStage1LeadById for Stage 1 row lookups');
+  assert.ok(adminJs.includes('DEMO_DISMISSED_STAGE1_KEY'), 'admin.js must persist dismissed demo Stage 1 leads across refreshes');
 });
 
 
