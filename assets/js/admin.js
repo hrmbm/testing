@@ -1129,36 +1129,36 @@ async function renderDashboard(opsCtx = null) {
   const moduleCards = [
     {
       key: 'recruitment',
-      spanClass: 'span-7',
       title: 'Recruitment',
       reportLabel: 'Tracking & Report',
       targetView: 'tracking',
       imgSrc: 'assets/img/dash_recruitment_grads_1795673203042.jpg',
       imgAlt: 'University graduates celebrating career readiness in bright glass atrium',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
       statLine: `${total} candidates · ${stage1} leads · ${submitted} forms`,
       attentionCount: recruitmentAttentionCount,
       attentionNote: recruitmentAttentionCount > 0 ? `${recruitmentAttentionCount} items need follow-up` : ''
     },
     {
       key: 'pkwt-contracts',
-      spanClass: 'span-5',
       title: 'PKWT & Contracts',
       reportLabel: 'Contracts',
       targetView: 'contracts',
       imgSrc: 'assets/img/dash_pkwt_contracts_1795673205288.jpg',
       imgAlt: 'Clean sunlit oak contract desk with legal agreements and fountain pen',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg>',
       statLine: `${contractQueue.expiringCount} expiring · ${contractQueue.finalInterviewCount} pass interview`,
       attentionCount: pkwtAttentionCount,
       attentionNote: pkwtAttentionCount > 0 ? `${pkwtAttentionCount} PKWT need setup/renewal` : ''
     },
     {
       key: 'staff-attendance',
-      spanClass: 'span-5',
       title: 'Attendance Suite Staff',
       reportLabel: 'Staff Reports',
       targetView: 'attendanceStaffReports',
       imgSrc: 'assets/img/dash_staff_bright_1795673204438.jpg',
       imgAlt: 'Sunlit modern bright corporate workspace desk',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
       statLine: `${opsSummary.staffCount} active staff non-driver`,
       attentionCount: opsSummary.staffPendingSelectedDate,
       attentionNote: opsSummary.staffPendingSelectedDate > 0
@@ -1167,12 +1167,12 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'drivers-command',
-      spanClass: 'span-7',
       title: 'Drivers Command Center',
       reportLabel: 'Driver Reports',
       targetView: 'attendanceDriverReports',
       imgSrc: 'assets/img/dash_drivers_bus_park_1795673204702.jpg',
       imgAlt: 'Luxury white executive charter buses parked neatly in sunlit depot',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
       statLine: `${opsSummary.driverCount} active drivers · Payroll & Checksheet`,
       attentionCount: opsSummary.driverAnomalyCount,
       attentionNote: opsSummary.driverAnomalyCount > 0
@@ -1181,24 +1181,24 @@ async function renderDashboard(opsCtx = null) {
     },
     {
       key: 'vehicle-management',
-      spanClass: 'span-6',
       title: 'Vehicle Management',
       reportLabel: 'Vehicle Reports',
       targetView: 'vehicleReports',
       imgSrc: 'assets/img/dash_vehicle_supercar_1795673204825.jpg',
       imgAlt: 'Pearl white modern supercar parked at sunlit travertine architectural pavilion',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="2"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
       statLine: `${opsSummary.vehicleCount} active fleet units · ${opsSummary.vehicleScheduleCount} trips`,
       attentionCount: 0,
       attentionNote: ''
     },
     {
       key: 'stationery-atk',
-      spanClass: 'span-6',
       title: 'ATK / Stationery',
       reportLabel: 'Purchase Plan',
       targetView: 'stationeryReports',
       imgSrc: 'assets/img/dash_atk_stationery_1795673206455.jpg',
       imgAlt: 'Bright sunlit organized office stationery supplies and paper reams',
+      iconSvg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
       statLine: `${opsSummary.atkItemCount || 0} ATK items · ${opsSummary.atkDraftCount || 0} PR drafts`,
       attentionCount: opsSummary.atkNeedBuyCount || 0,
       attentionNote: (opsSummary.atkNeedBuyCount || 0) > 0
@@ -1217,60 +1217,67 @@ async function renderDashboard(opsCtx = null) {
   const attWarnIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
 
   content.innerHTML = `
-    <section class="dashboard-atelier-hero" aria-label="Workspace overview">
-      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio" referrerpolicy="no-referrer">
-      <div class="atelier-hero-scrim" aria-hidden="true"></div>
-      <div class="atelier-hero-content">
-        <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur · ${esc(todayLabel)}</p>
-        <h1 class="atelier-hero-title">Welcome, ${esc(adminDisplayName)}</h1>
-        <div class="atelier-hero-meta">
-          <span><b>${hired}</b> active employees</span>
-          <span aria-hidden="true">·</span>
-          <span><b>${total}</b> recorded candidates</span>
-          <span aria-hidden="true">·</span>
-          <span><b>${opsSummary.driverCount}</b> active drivers</span>
-        </div>
-      </div>
-      <div class="atelier-hero-actions">
-        <button
-          type="button"
-          id="dashboard-hard-reset-btn"
-          class="atelier-reset-btn"
-          aria-label="Hapus semua cache dan mulai sesi baru"
-          title="Hapus Cache Storage, Service Worker, IndexedDB, localStorage, dan mulai sesi baru"
-        >&#8635; Reset Cache &amp; Sesi Baru</button>
-      </div>
-    </section>
-
-    <div class="dash-section-head">
-      <h2>Operational Modules</h2>
-      <span>Select a module card to open live records, schedules &amp; reports</span>
-    </div>
-
-    <section class="dashboard-menu-grid" aria-label="Operational Modules">
-      ${moduleCards.map(card => `
-        <button type="button" class="dash-module-box ${esc(card.spanClass)} ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
-          <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}" referrerpolicy="no-referrer">
-          <div class="dash-module-scrim" aria-hidden="true"></div>
-          <div class="dash-module-inner">
-            <div class="dash-module-top">
-              <span class="dash-module-eyebrow">${esc(card.reportLabel)}</span>
-              ${card.attentionCount > 0
-                ? `<span class="dash-module-att-badge">${attWarnIcon} Attention: ${card.attentionCount}</span>`
-                : ''}
-            </div>
-            <div class="dash-module-bottom dash-module-glass">
-              <div class="dash-module-headline-row">
-                <h3 class="dash-module-title">${esc(card.title)}</h3>
-                <span class="dash-module-cta">Open <span aria-hidden="true">↗</span></span>
-              </div>
-              <p class="dash-module-stat">${esc(card.statLine)}</p>
-              ${card.attentionCount > 0 ? `<p class="dash-module-alert">${esc(card.attentionNote)}</p>` : ''}
-            </div>
+    <div class="dashboard-onepage">
+      <section class="dashboard-atelier-hero" aria-label="Workspace overview">
+        <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio" referrerpolicy="no-referrer">
+        <div class="atelier-hero-scrim" aria-hidden="true"></div>
+        <div class="atelier-hero-content">
+          <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur · ${esc(todayLabel)}</p>
+          <h1 class="atelier-hero-title">Welcome, ${esc(adminDisplayName)}</h1>
+          <div class="atelier-hero-meta">
+            <span><b>${hired}</b> active employees</span>
+            <span aria-hidden="true">·</span>
+            <span><b>${total}</b> recorded candidates</span>
+            <span aria-hidden="true">·</span>
+            <span><b>${opsSummary.driverCount}</b> active drivers</span>
           </div>
-        </button>
-      `).join('')}
-    </section>
+        </div>
+        <div class="atelier-hero-actions">
+          <button
+            type="button"
+            id="dashboard-hard-reset-btn"
+            class="atelier-reset-btn"
+            aria-label="Hapus semua cache dan mulai sesi baru"
+            title="Hapus Cache Storage, Service Worker, IndexedDB, localStorage, dan mulai sesi baru"
+          >&#8635; Reset Cache &amp; Sesi Baru</button>
+        </div>
+      </section>
+
+      <div class="dash-section-head">
+        <h2>Operational Modules</h2>
+        <span>6 integrated HR &amp; GA workspaces</span>
+      </div>
+
+      <section class="dashboard-menu-grid" aria-label="Operational Modules">
+        ${moduleCards.map(card => `
+          <button type="button" class="dash-module-box ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
+            <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}" referrerpolicy="no-referrer">
+            <div class="dash-module-scrim" aria-hidden="true"></div>
+            <div class="dash-module-inner">
+              <div class="dash-module-top">
+                <span class="dash-module-eyebrow">${esc(card.reportLabel)}</span>
+                ${card.attentionCount > 0
+                  ? `<span class="dash-module-att-badge">${attWarnIcon} Attention: ${card.attentionCount}</span>`
+                  : ''}
+              </div>
+              <div class="dash-module-bottom dash-module-glass">
+                <div class="dash-module-headline-row">
+                  <div class="dash-module-title-wrap">
+                    <span class="dash-module-icon">${card.iconSvg}</span>
+                    <div class="dash-module-copy">
+                      <h3 class="dash-module-title">${esc(card.title)}</h3>
+                      <p class="dash-module-stat">${esc(card.statLine)}</p>
+                    </div>
+                  </div>
+                  <span class="dash-module-cta">Open <span aria-hidden="true">↗</span></span>
+                </div>
+                ${card.attentionCount > 0 ? `<p class="dash-module-alert">${esc(card.attentionNote)}</p>` : ''}
+              </div>
+            </div>
+          </button>
+        `).join('')}
+      </section>
+    </div>
   `;
 
   $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));
