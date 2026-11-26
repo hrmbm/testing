@@ -1191,25 +1191,6 @@ async function renderDashboard(opsCtx = null) {
     }
   ];
 
-  const attentionHtml = allAttentionItems.length
-    ? `<section class="panel dashboard-attention-panel" aria-label="Needs Attention">
-        <div class="panel-head">
-          <h3>Needs Attention</h3>
-          <span class="status-pill ${totalAttentionCount > 0 ? 'gold' : 'green'}">${totalAttentionCount} item${totalAttentionCount === 1 ? '' : 's'}</span>
-        </div>
-        <div class="attention-grid">${allAttentionItems.map(item => `
-          <button type="button" class="attention-card is-${esc(item.severity)}" data-view="${esc(item.targetView)}">
-            <div class="attention-card-top">
-              <span class="attention-category">${esc(item.category)}</span>
-              <span class="attention-count">${item.count}</span>
-            </div>
-            <div class="attention-title">${esc(item.title)}</div>
-            <div class="attention-desc">${esc(item.description)}</div>
-            <div class="attention-cta">${esc(item.ctaLabel)} <span aria-hidden="true">↗</span></div>
-          </button>`).join('')}</div>
-      </section>`
-    : '';
-
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Workspace overview">
       <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio" referrerpolicy="no-referrer">
@@ -1258,8 +1239,6 @@ async function renderDashboard(opsCtx = null) {
         </button>
       `).join('')}
     </section>
-
-    ${attentionHtml}
   `;
 
   $$('#admin-content [data-view]').forEach(button => button.addEventListener('click', () => loadView(button.dataset.view)));

@@ -354,7 +354,7 @@
   color: #ffffff;
 }
 
-/* Dashboard Interior Atelier Hero — Luminous Daylight Edition */
+/* Dashboard Interior Atelier Hero — Low-Glare Charcoal Slate Edition */
 .dashboard-atelier-hero {
   position: relative;
   overflow: hidden;
@@ -367,11 +367,11 @@
   padding: 24px 28px;
   margin-bottom: 18px;
   border-radius: 16px;
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  border-bottom: 2px solid rgba(13, 92, 107, 0.22);
-  background: #f8fafc;
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.05);
-  color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-bottom: 2px solid rgba(45, 212, 191, 0.34);
+  background: #141b24;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  color: #f1f5f9;
 }
 
 .atelier-hero-img {
@@ -381,7 +381,7 @@
   height: 100%;
   object-fit: cover;
   object-position: center 48%;
-  filter: brightness(1.16) saturate(0.92);
+  filter: brightness(0.68) saturate(0.88);
   z-index: 0;
 }
 
@@ -391,10 +391,10 @@
   z-index: 1;
   background: linear-gradient(
     98deg,
-    rgba(255, 255, 255, 0.96) 0%,
-    rgba(252, 250, 246, 0.91) 42%,
-    rgba(244, 249, 250, 0.68) 76%,
-    rgba(255, 255, 255, 0.36) 100%
+    rgba(13, 18, 25, 0.94) 0%,
+    rgba(15, 21, 30, 0.86) 44%,
+    rgba(15, 21, 30, 0.56) 76%,
+    rgba(13, 18, 25, 0.28) 100%
   );
 }
 
@@ -408,7 +408,7 @@
   margin: 0 0 4px;
   font-size: 11.5px;
   font-weight: 700;
-  color: #0d5c6b;
+  color: #5eead4;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -420,7 +420,7 @@
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.025em;
-  color: #0f172a;
+  color: #f8fafc;
   text-wrap: balance;
 }
 
@@ -430,12 +430,12 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #475569;
+  color: #cbd5e1;
 }
 
 .atelier-hero-meta b {
   font-weight: 700;
-  color: #0f172a;
+  color: #f8fafc;
   font-variant-numeric: tabular-nums;
 }
 
@@ -455,29 +455,29 @@
   gap: 7px;
   padding: 9px 15px;
   border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(20, 27, 36, 0.84);
   backdrop-filter: blur(8px);
-  color: #0f172a;
+  color: #e2e8f0;
   font-family: var(--font-sans);
   font-size: 12.5px;
   font-weight: 600;
   line-height: 1.25;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.14s ease;
 }
 
 .atelier-reset-btn:hover:not(:disabled) {
-  background: #fef2f2;
-  border-color: #ef4444;
-  color: #b91c1c;
+  background: rgba(127, 29, 29, 0.42);
+  border-color: rgba(248, 113, 113, 0.65);
+  color: #fecaca;
   transform: translateY(-1px);
 }
 
 .atelier-reset-btn:focus-visible {
-  outline: 2px solid #0d5c6b;
+  outline: 2px solid #2dd4bf;
   outline-offset: 2px;
 }
 
@@ -3442,7 +3442,7 @@
 }
 
 /* ============================================================================
- * Dashboard — Luminous Daylight 3x2 Module Photo Boxes & Attention Indicators
+ * Dashboard — Low-Glare Slate 3x2 Module Photo Boxes
  * ============================================================================ */
 .dashboard-menu-grid {
   display: grid;
@@ -3458,25 +3458,25 @@
   flex-direction: column;
   min-height: 244px;
   padding: 0;
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 15px;
-  background: #ffffff;
-  color: #0f172a;
+  background: #141b24;
+  color: #f1f5f9;
   text-align: left;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.24);
   transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .dash-module-box.has-attention {
-  border-color: rgba(217, 119, 6, 0.42);
-  box-shadow: 0 10px 26px rgba(180, 83, 9, 0.09);
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow: 0 10px 26px rgba(180, 83, 9, 0.18);
 }
 
 .dash-module-box:hover {
   transform: translateY(-3px);
-  box-shadow: 0 16px 36px rgba(13, 92, 107, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
-  border-color: rgba(13, 92, 107, 0.48);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(45, 212, 191, 0.35);
+  border-color: rgba(45, 212, 191, 0.55);
 }
 
 .dash-module-bg {
@@ -3486,8 +3486,8 @@
   height: 100%;
   object-fit: cover;
   object-position: center 38%;
-  filter: brightness(1.04) saturate(1.04);
-  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  filter: brightness(0.76) saturate(0.94);
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
   z-index: 0;
 }
 
@@ -3501,6 +3501,7 @@
 
 .dash-module-box:hover .dash-module-bg {
   transform: scale(1.04);
+  filter: brightness(0.84) saturate(1.0);
 }
 
 .dash-module-scrim {
@@ -3509,10 +3510,10 @@
   z-index: 1;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.01) 0%,
-    rgba(255, 255, 255, 0.12) 42%,
-    rgba(255, 255, 255, 0.89) 66%,
-    rgba(255, 255, 255, 0.98) 100%
+    rgba(11, 16, 23, 0.08) 0%,
+    rgba(11, 16, 23, 0.22) 40%,
+    rgba(11, 16, 23, 0.88) 66%,
+    rgba(11, 16, 23, 0.97) 100%
   );
 }
 
@@ -3541,15 +3542,15 @@
   align-items: center;
   padding: 4px 9px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 34, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   backdrop-filter: blur(8px);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #0d5c6b;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  color: #5eead4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
 .dash-module-att-badge {
@@ -3558,12 +3559,12 @@
   gap: 5px;
   padding: 4px 9px;
   border-radius: 6px;
-  background: rgba(254, 243, 199, 0.96);
-  border: 1px solid rgba(245, 158, 11, 0.55);
-  color: #92400e;
+  background: rgba(120, 53, 15, 0.88);
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  color: #fef3c7;
   font-size: 10.5px;
   font-weight: 700;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
 .dash-module-bottom {
@@ -3580,14 +3581,14 @@
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  color: #0f172a;
+  color: #f8fafc;
 }
 
 .dash-module-stat {
   margin: 0;
   font-size: 12.5px;
   font-weight: 500;
-  color: #475569;
+  color: #cbd5e1;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3595,7 +3596,7 @@
   margin: 1px 0 0;
   font-size: 12px;
   font-weight: 600;
-  color: #b45309;
+  color: #fbbf24;
   line-height: 1.3;
 }
 
@@ -3606,11 +3607,11 @@
   gap: 5px;
   font-size: 12px;
   font-weight: 700;
-  color: #0d5c6b;
+  color: #5eead4;
 }
 
 .dash-module-box:hover .dash-module-cta {
-  color: #083d47;
+  color: #99f6e4;
 }
 
 @media (max-width: 1120px) {
@@ -3781,6 +3782,10 @@
 
 .ops-form-grid:has(.atk-plan-window-field) {
   grid-template-columns: minmax(150px, 0.8fr) minmax(275px, 1.45fr) minmax(180px, 1fr) minmax(180px, 1fr);
+}
+
+.ops-form-grid.atk-pr-controls-grid:has(.atk-plan-window-field) {
+  grid-template-columns: minmax(160px, 0.75fr) minmax(265px, 1.15fr) minmax(290px, 1.4fr);
 }
 
 .atk-plan-window-field {
@@ -4156,8 +4161,486 @@
 }
 
 .ops-plan-note-inp {
-  min-width: 170px;
+  min-width: 120px;
 }
+
+.ops-stack .atk-pr-table th,
+.ops-stack .atk-pr-table td {
+  padding: 8px 8px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.ops-stack .atk-pr-table thead th {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.atk-pr-table td:nth-child(3) {
+  min-width: 150px;
+  max-width: 210px;
+  white-space: normal;
+}
+
+.atk-pr-table .atk-plan-input {
+  width: 66px;
+  min-height: 34px;
+  padding: 5px 7px;
+}
+
+.atk-pr-table .ops-plan-note-inp {
+  min-width: 120px;
+  min-height: 34px;
+  padding: 5px 8px;
+}
+
+/* ============================================================================
+ * LOW-GLARE CHARCOAL SLATE ADMIN SHELL THEME
+ * Scoped strictly to .admin-shell so Candidate Portals & Printable Sheets stay clean
+ * ============================================================================ */
+.admin-shell {
+  --ink: #e8eff7;
+  --ink-2: #c6d2e0;
+  --muted: #90a1b5;
+  --paper: #19222d;
+  --canvas: #131a23;
+  --surface: #1e2836;
+  --surface-subtle: #212c3b;
+  --line: rgba(148, 163, 184, 0.18);
+  --line-strong: rgba(148, 163, 184, 0.30);
+  --teal: #2dd4bf;
+  --teal-dark: #5eead4;
+  --teal-soft: rgba(20, 184, 166, 0.14);
+  --red: #fca5a5;
+  --green: #6ee7b7;
+  --gold: #fcd34d;
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.28), 0 10px 24px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.56);
+  color-scheme: dark;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+.admin-shell .admin-main {
+  background:
+    radial-gradient(960px 440px at 88% -4%, rgba(20, 184, 166, 0.08), transparent 62%),
+    radial-gradient(840px 420px at 10% 6%, rgba(168, 121, 72, 0.07), transparent 60%),
+    linear-gradient(180deg, #111720 0%, #161e29 100%);
+}
+
+.admin-shell .admin-topbar {
+  background: rgba(19, 26, 35, 0.88);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.admin-shell .profile-chip,
+.admin-shell .mobile-nav-toggle {
+  background: rgba(29, 39, 52, 0.88);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.admin-shell .btn-primary {
+  background: linear-gradient(180deg, #0f766e 0%, #0d5c6b 100%);
+  color: #ffffff;
+  border-color: rgba(45, 212, 191, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.admin-shell .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #149186 0%, #0e6b7c 100%);
+  border-color: rgba(94, 234, 212, 0.45);
+}
+
+.admin-shell .btn-secondary,
+.admin-shell .icon-btn,
+.admin-shell .modal-close {
+  background: #212b38;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.admin-shell .btn-secondary:hover:not(:disabled),
+.admin-shell .icon-btn:hover:not(:disabled),
+.admin-shell .modal-close:hover {
+  background: #2a3646;
+  border-color: rgba(148, 163, 184, 0.48);
+  color: var(--ink);
+}
+
+.admin-shell .btn-danger,
+.admin-shell .stage2-actions .danger {
+  background: rgba(127, 29, 29, 0.28);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+.admin-shell .btn-danger:hover:not(:disabled),
+.admin-shell .stage2-actions .danger:hover {
+  background: rgba(153, 27, 27, 0.46);
+  border-color: rgba(252, 165, 165, 0.6);
+}
+
+.admin-shell .input,
+.admin-shell .select,
+.admin-shell .textarea,
+.admin-shell .table-search input,
+.admin-shell .page-size-select,
+.admin-shell .pkwt-optional-input,
+.admin-shell .schema-order-num {
+  background: #131a23;
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.admin-shell .input::placeholder,
+.admin-shell .textarea::placeholder,
+.admin-shell .table-search input::placeholder {
+  color: #6b7d93;
+}
+
+.admin-shell .stat-card {
+  background: linear-gradient(165deg, #1c2531 0%, #17202b 100%);
+  border-color: var(--line);
+}
+
+.admin-shell .stat-note {
+  border-top-color: var(--line);
+}
+
+.admin-shell .stat-icon-tile {
+  background: rgba(20, 184, 166, 0.14);
+  border-color: rgba(45, 212, 191, 0.28);
+  color: #5eead4;
+}
+
+.admin-shell .stat-icon-tile.walnut {
+  background: rgba(217, 119, 6, 0.14);
+  border-color: rgba(251, 191, 36, 0.28);
+  color: #fbbf24;
+}
+
+.admin-shell .panel,
+.admin-shell .card,
+.admin-shell .workspace-module,
+.admin-shell .schema-panel,
+.admin-shell .schema-options-wrap,
+.admin-shell .schema-step-order-card,
+.admin-shell .q-builder-item,
+.admin-shell .atk-pr-drafts-card,
+.admin-shell .atk-chart-card {
+  background: var(--paper);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.admin-shell .panel-head {
+  background: linear-gradient(180deg, #1d2734 0%, #18212c 100%);
+  border-bottom-color: var(--line);
+}
+
+.admin-shell .tab-btn,
+.admin-shell .contracts-tab,
+.admin-shell .recruit-tab-btn,
+.admin-shell .pkwt-doc-tab,
+.admin-shell .cme-doc-tab,
+.admin-shell .schema-section-tab {
+  background: #161d26;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.admin-shell .tab-btn:hover,
+.admin-shell .contracts-tab:hover,
+.admin-shell .recruit-tab-btn:hover,
+.admin-shell .pkwt-doc-tab:hover,
+.admin-shell .cme-doc-tab:hover {
+  background: #232e3d;
+  color: var(--ink);
+}
+
+.admin-shell .tab-btn.active,
+.admin-shell .contracts-tab.is-active,
+.admin-shell .recruit-tab-btn.is-active,
+.admin-shell .pkwt-doc-tab.is-active,
+.admin-shell .cme-doc-tab.active,
+.admin-shell .schema-section-tab.active {
+  background: #0f766e;
+  border-color: #2dd4bf;
+  color: #ffffff;
+}
+
+.admin-shell .data-table thead th,
+.admin-shell table thead th,
+.admin-shell .data-table thead th:first-child,
+.admin-shell .atk-matrix-table thead th,
+.admin-shell .atk-matrix-table thead th.atk-sticky-item,
+.admin-shell .stf-matrix-table thead th,
+.admin-shell .stf-matrix-table thead th.stf-sticky-name,
+.admin-shell .stf-matrix-table thead th.stf-sticky-nik,
+.admin-shell .stf-matrix-table tfoot th,
+.admin-shell .stf-meal-table thead th,
+.admin-shell .stf-meal-table tfoot th {
+  background: #202a38;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.admin-shell .data-table thead th:hover,
+.admin-shell table thead th:hover {
+  background: #283546;
+}
+
+.admin-shell .data-table td,
+.admin-shell .data-table td:first-child,
+.admin-shell .atk-matrix-table td,
+.admin-shell .atk-sticky-item,
+.admin-shell .stf-matrix-table td,
+.admin-shell .stf-sticky-name,
+.admin-shell .stf-sticky-nik,
+.admin-shell .stf-meal-table td {
+  background: var(--paper);
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+
+.admin-shell .data-table tbody tr:hover td,
+.admin-shell .data-table tbody tr:hover td:first-child,
+.admin-shell .emp-row-clickable:hover td,
+.admin-shell .contract-row-clickable:hover td,
+.admin-shell .contract-row-clickable:hover td:first-child {
+  background: #222d3c !important;
+}
+
+.admin-shell .contract-priority-row td:first-child {
+  background: #232a33;
+}
+
+.admin-shell .atk-matrix-wrap,
+.admin-shell .stf-matrix-wrap,
+.admin-shell .ops-modal-scroll,
+.admin-shell .district-picker-list {
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.admin-shell .table-pagination,
+.admin-shell .ops-subbox,
+.admin-shell .ops-sig-editor-box,
+.admin-shell .drv-activities-box,
+.admin-shell .drv-report-card,
+.admin-shell .atk-pr-draft-item,
+.admin-shell .cme-toolbar,
+.admin-shell .v-form-section,
+.admin-shell .schema-field-card,
+.admin-shell .schema-pos-row,
+.admin-shell .q-summary-item,
+.admin-shell .q-options-box,
+.admin-shell .share-preview-box,
+.admin-shell .pkwt-config-pane,
+.admin-shell .pkwt-fieldset {
+  background: #151c26;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.admin-shell .drv-act-row,
+.admin-shell .drv-anomaly-item,
+.admin-shell .q-option-del,
+.admin-shell .vacancy-opt-tag {
+  background: #1e2835;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.admin-shell .drv-report-card:hover,
+.admin-shell .drv-report-card.is-active,
+.admin-shell .atk-pr-draft-item.is-active {
+  background: rgba(20, 184, 166, 0.14);
+  border-color: #2dd4bf;
+}
+
+.admin-shell .atk-pr-draft-code {
+  background: rgba(20, 184, 166, 0.18);
+  border-color: rgba(45, 212, 191, 0.35);
+  color: #5eead4;
+}
+
+.admin-shell .status-pill {
+  background: #222d3d;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+
+.admin-shell .status-pill.blue {
+  background: rgba(14, 165, 233, 0.16);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+}
+
+.admin-shell .status-pill.green {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #6ee7b7;
+}
+
+.admin-shell .status-pill.gold {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(251, 191, 36, 0.35);
+  color: #fcd34d;
+}
+
+.admin-shell .status-pill.gray {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+}
+
+.admin-shell .ops-flash-ok {
+  background: rgba(6, 78, 59, 0.36);
+  border-color: rgba(52, 211, 153, 0.38);
+  color: #a7f3d0;
+}
+
+.admin-shell .ops-flash-warn,
+.admin-shell .form-warning {
+  background: rgba(120, 53, 15, 0.34);
+  border-color: rgba(251, 191, 36, 0.42);
+  color: #fde68a;
+}
+
+.admin-shell .ops-flash-error,
+.admin-shell .drv-anomaly-card {
+  background: rgba(127, 29, 29, 0.32);
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+.admin-shell .ops-flash-info,
+.admin-shell .drv-abnormal-editor {
+  background: rgba(12, 74, 110, 0.34);
+  border-color: rgba(56, 189, 248, 0.38);
+  color: #bae6fd;
+}
+
+.admin-shell .drv-abn-preview-box {
+  background: #141c26;
+  border-color: rgba(56, 189, 248, 0.38);
+  color: var(--ink);
+}
+
+.admin-shell .stf-tot-th {
+  background: #273344 !important;
+  color: var(--ink) !important;
+}
+
+.admin-shell .stf-tot-td {
+  background: #1e2836 !important;
+}
+
+.admin-shell .stf-col-sun,
+.admin-shell .ops-cal-row-sun td {
+  background: rgba(234, 179, 8, 0.12) !important;
+}
+
+.admin-shell .stf-col-hol,
+.admin-shell .ops-cal-row-hol td {
+  background: rgba(239, 68, 68, 0.14) !important;
+}
+
+.admin-shell .stf-code-warn {
+  background: rgba(245, 158, 11, 0.16) !important;
+  color: #fcd34d;
+}
+
+.admin-shell .stf-code-danger {
+  background: rgba(239, 68, 68, 0.16) !important;
+  color: #fca5a5;
+}
+
+.admin-shell .stf-code-info {
+  background: rgba(56, 189, 248, 0.14) !important;
+  color: #7dd3fc;
+}
+
+.admin-shell .stf-meal-yes,
+.admin-shell .ops-cs-S {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+
+.admin-shell .ops-cs-L {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+.admin-shell .ops-cs-I {
+  background: #232f3e;
+  color: #cbd5e1;
+}
+
+.admin-shell .ops-cs-R {
+  background: rgba(14, 165, 233, 0.2);
+  color: #7dd3fc;
+}
+
+.admin-shell .employee-modal-card,
+.admin-shell .pkwt-modal-card,
+.admin-shell .pkwt-modal-head,
+.admin-shell .vacancy-modal-card,
+.admin-shell .vacancy-modal-footer,
+.admin-shell .share-modal-card,
+.admin-shell .ops-print-modal-card,
+.admin-shell .ops-print-modal-head {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.admin-shell .ops-print-hint {
+  background: rgba(12, 74, 110, 0.34);
+  border-bottom-color: rgba(56, 189, 248, 0.32);
+  color: #bae6fd;
+}
+
+.admin-shell .drv-pdf-preview-wrap,
+.admin-shell .ops-print-modal-body,
+.admin-shell .pkwt-preview-pane,
+.admin-shell .cme-stage-wrap {
+  background: #0d1219;
+  border-color: var(--line);
+}
+
+/* Keep printable paper sheets strict crisp white-on-black */
+.admin-shell .drv-pdf-sheet,
+.admin-shell .atk-pr-sheet,
+.admin-shell .atk-pr-attach-sheet,
+.admin-shell .stf-pdf-sheet,
+.admin-shell .cs-landscape-page,
+.admin-shell .cs-sheet-box,
+.admin-shell .cme-stage-wrap .pkwt-page,
+.admin-shell .pkwt-preview-frame-wrap {
+  background: #ffffff;
+  color: #000000;
+}
+
+.admin-shell .drv-pdf-table thead th,
+.admin-shell .drv-pdf-table td,
+.admin-shell .drv-pdf-table tfoot th,
+.admin-shell .cs-grid-table thead th,
+.admin-shell .cs-grid-table td,
+.admin-shell .cs-vlabel,
+.admin-shell .cs-sec-label,
+.admin-shell .cs-tot-col {
+  background: #ffffff;
+  color: #000000;
+  border-color: #222222;
+}
+
+.admin-shell .text-danger {
+  color: #fca5a5;
+}
+
 
 
 

@@ -679,11 +679,14 @@ export function buildPurchasePlanSuggestions({
   });
 
   const rows = mappedRows.map((r, idx) => {
-    const rank = idx + 1;
+    const priority = idx + 1;
+    const favRank = Math.max(1, Number(r.favRank) || priority);
     return {
       ...r,
-      rank,
-      frequency: classifyPurchasePlanFrequency(rank, stkCfg)
+      priority,
+      rank: priority,
+      favRank,
+      frequency: classifyPurchasePlanFrequency(favRank, stkCfg)
     };
   });
 
@@ -726,12 +729,15 @@ export function buildPurchaseRequisitionWorkspaceRows({
       : '';
     const note = ov.note !== undefined ? String(ov.note) : String(r.note || '');
 
+    const freqRank = Math.max(1, Number(r.favRank ?? r.rank) || 1);
     activeRows.push({
       ...r,
+      priority: Number(r.priority ?? r.rank) || 1,
+      favRank: freqRank,
       minPurchase,
       decisionQty,
       convertedDecisionQty,
-      frequency: r.frequency || classifyPurchasePlanFrequency(r.rank, stationerySettings),
+      frequency: r.frequency || classifyPurchasePlanFrequency(freqRank, stationerySettings),
       note,
       isNonZeroSuggestion,
       isManualAdded: !isNonZeroSuggestion && isManualAdded
@@ -775,6 +781,8 @@ export function buildPurchaseRequisitionPrintData({
         no: idx + 1,
         item_code: normalizeMaterialCode(r.item_code),
         item_name: r.item_name,
+        currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
+        baseUnit: String(r.unit || '').trim(),
         purchaseQty: qtyVal,
         unit: unitLbl
       };
@@ -785,21 +793,21 @@ export function buildPurchaseRequisitionPrintData({
   return {
     meta: {
       draftCode: String(draft.draftCode || '').trim() || 'PR-DRAFT',
-      title: String(draft.title || 'Purchase Requisition ATK').trim(),
+      title: String(draft.title || prCfg.defaultDraftTitle || 'Purchase Requisition ATK').trim(),
       periodLabel: String(draft.periodLabel || '').trim(),
       dateRangeLabel: String(draft.dateRangeLabel || '').trim(),
       docDate: String(draft.docDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
       locationLabel: String(draft.locationLabel || prCfg.locationLabel || 'Pasuruan').trim(),
       preparedLabel: String(prCfg.preparedLabel || 'Dibuat oleh,').trim(),
       approvedLabel: String(prCfg.approvedLabel || 'Menyetujui,').trim(),
-      signatureLayout: prCfg.signatureLayout === 'columns' ? 'columns' : 'stacked',
+      signatureLayout: 'columns',
       preparedBy: {
-        nik: String(draft.preparedBy?.nik || '').trim(),
+        nik: String(draft.preparedBy?.nik || prCfg.defaultPreparedNik || '').trim(),
         name: String(draft.preparedBy?.name || prCfg.defaultPreparedName || '').trim(),
         title: String(draft.preparedBy?.title || prCfg.defaultPreparedTitle || '').trim()
       },
       approvedBy: {
-        nik: String(draft.approvedBy?.nik || '').trim(),
+        nik: String(draft.approvedBy?.nik || prCfg.defaultApprovedNik || '').trim(),
         name: String(draft.approvedBy?.name || prCfg.defaultApprovedName || '').trim(),
         title: String(draft.approvedBy?.title || prCfg.defaultApprovedTitle || '').trim()
       },

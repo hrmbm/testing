@@ -1217,11 +1217,80 @@ test('ATK Plan Purchase Requisition frequency classification, non-zero + manual 
   });
   assert.equal(printData.purchaseItems.length, 1);
   assert.equal(printData.purchaseItems[0].item_code, '10001');
+  assert.equal(printData.purchaseItems[0].currentStock, 2);
+  assert.equal(printData.purchaseItems[0].baseUnit, 'RIM');
   assert.equal(printData.purchaseItems[0].purchaseQty, 14);
   assert.equal(printData.attachmentItems.length, 3);
   assert.equal(printData.attachmentItems[0].note, 'Stok habis awal bulan');
+  assert.equal(printData.meta.signatureLayout, 'columns');
   assert.equal(printData.meta.preparedBy.name, 'Ayuk Nur Khotifah');
   assert.equal(printData.meta.approvedBy.name, 'Samsul Hariyadi');
+});
+
+test('PR Frequency uses global Rank (favRank) rather than deficit urgency Priority, and UI/Print/Settings contracts hold', () => {
+  // Build 55 items: item_01 is heavily used (favRank #1) with ample stock -> low deficit priority;
+  // item_55 is rarely used (favRank #55) with 0 stock -> high deficit priority (#1 when sorted by deficit)
+  const items = Array.from({ length: 55 }, (_, i) => ({
+    id: `stk-${i + 1}`,
+    item_code: String(10001 + i),
+    item_name: `ATK ITEM ${String(i + 1).padStart(2, '0')}`,
+    unit: 'PCS',
+    purchase_unit: 'PCS',
+    conversion_qty: 1,
+    opening_stock: i === 54 ? 0 : 1000,
+    current_stock: i === 54 ? 0 : 1000
+  }));
+
+  const ledger = [
+    // Item 1 used 200 times -> Rank #1 globally, ample stock 1000 -> deficit 0
+    { item_id: 'stk-1', tx_type: 'OUT', tx_date: '2026-11-05', qty: 200, sloc_canonical: 'HR GA' },
+    // Items 2..54 used decreasing amounts 150..98, ample stock 1000 -> deficit 0
+    ...Array.from({ length: 53 }, (_, k) => ({
+      item_id: `stk-${k + 2}`,
+      tx_type: 'OUT',
+      tx_date: '2026-11-05',
+      qty: 150 - k,
+      sloc_canonical: 'HR GA'
+    })),
+    // Item 55 used 10 times -> Rank #55 globally, 0 stock -> deficit > 0 -> Priority #1
+    { item_id: 'stk-55', tx_type: 'OUT', tx_date: '2026-11-05', qty: 10, sloc_canonical: 'HR GA' }
+  ];
+
+  const plan = buildPurchasePlanSuggestions({
+    items,
+    ledger,
+    purchasePeriod: '1w',
+    referenceDate: '2026-11-24'
+  });
+
+  const prio1Row = plan.rows[0];
+  assert.equal(prio1Row.id, 'stk-55');
+  assert.equal(prio1Row.priority, 1);
+  assert.equal(prio1Row.favRank, 55);
+  assert.equal(prio1Row.frequency, 'Very Slow Moving');
+
+  const topUsageRow = plan.rows.find(r => r.id === 'stk-1');
+  assert.equal(topUsageRow.favRank, 1);
+  assert.ok(topUsageRow.priority > 1);
+  assert.equal(topUsageRow.frequency, 'Very Fast Moving');
+
+  // Verify Dashboard removes Needs Attention panel & darkens theme in CSS without affecting white print sheets
+  const adminText = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(!adminText.includes('dashboard-attention-panel'), 'Needs Attention panel must be removed from Dashboard');
+  assert.ok(!adminText.includes('Needs Attention'), 'Needs Attention heading must be removed from Dashboard');
+
+  const cssText = fs.readFileSync('assets/css/workspace.css', 'utf8');
+  assert.ok(cssText.includes('.admin-shell {') && cssText.includes('color-scheme: dark;'), 'Admin workspace must use dimmed low-glare slate theme');
+  assert.ok(cssText.includes('.admin-shell .drv-pdf-sheet') && cssText.includes('background: #ffffff;'), 'Print sheets must remain strict white-on-black');
+
+  // Verify Plan PR UI has only 3 streamlined controls, Current Stock after Nama Item, and 2-column signatures
+  const opsViewsText = fs.readFileSync('assets/js/ops-views.js', 'utf8');
+  assert.ok(opsViewsText.includes('atk-pr-controls-grid'), 'Plan PR must use compact 3-control grid');
+  assert.ok(!opsViewsText.includes('id="pr-prep-name"'), 'Signatory configuration must live in System Settings, not inside Plan PR');
+  assert.ok(!opsViewsText.includes('id="pr-draft-code"'), 'Draft config inputs must not clutter Plan PR workspace');
+  assert.ok(opsViewsText.includes("renderSigSelector('sig-pr-l'") && opsViewsText.includes("renderSigSelector('sig-pr-r'"), 'System Settings must host 2-column PR signatories');
+  assert.match(opsViewsText, /Nama Item<\/th>\s*<th[^>]*>Current Stock<\/th>/, 'Current Stock column must immediately follow Nama Item');
+  assert.ok(!opsViewsText.includes('atk-pr-sig-stacked'), 'PR print signatures must always sit side-by-side (Left Dibuat oleh, Right Menyetujui)');
 });
 
 test('Dashboard renders 6 luminous module boxes including Recruitment grads, PKWT, Staff, Drivers luxury bus, Vehicle supercar, and ATK Stationery', () => {
@@ -1235,6 +1304,7 @@ test('Dashboard renders 6 luminous module boxes including Recruitment grads, PKW
   assert.ok(adminText.includes("targetView: 'contracts'"));
   assert.ok(adminText.includes("targetView: 'stationeryReports'"));
 });
+
 
 
 

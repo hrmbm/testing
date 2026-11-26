@@ -154,6 +154,8 @@ const STANDALONE_PRINT_CSS = `
     margin-top: 26px;
     font-size: 9.5px;
     color: #000000;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .drv-pdf-footer-3 {
     display: grid;
@@ -164,11 +166,12 @@ const STANDALONE_PRINT_CSS = `
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+    min-width: 150px;
   }
   .drv-pdf-sig-right {
     align-items: center;
     text-align: center;
-    min-width: 140px;
+    min-width: 150px;
   }
   .drv-pdf-sig-center {
     align-items: center;
@@ -176,9 +179,9 @@ const STANDALONE_PRINT_CSS = `
   }
   .drv-pdf-loc { margin-bottom: 2px; }
   .drv-pdf-sig-role { font-weight: 400; color: #000000; }
-  .drv-pdf-sig-space { height: 90px; }
-  .drv-pdf-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; color: #000000; }
-  .drv-pdf-sig-title { font-weight: 400; margin-top: 1px; color: #000000; }
+  .drv-pdf-sig-space { height: 78px; }
+  .drv-pdf-sig-name { font-weight: 700; text-decoration: underline; text-underline-offset: 2px; color: #000000; }
+  .drv-pdf-sig-title { font-weight: 400; margin-top: 2px; color: #000000; }
   .drv-section-highlight {
     display: inline-block;
     background: #ffff00 !important;
@@ -189,23 +192,21 @@ const STANDALONE_PRINT_CSS = `
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+  .atk-pr-header {
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    border-bottom: 1.5px solid #000000;
+  }
+  .atk-pr-doc-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    margin: 2px 0 6px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
   .atk-pr-sheet .drv-pdf-table { font-size: 9.5px; }
-  .atk-pr-sheet .drv-pdf-table th, .atk-pr-sheet .drv-pdf-table td { padding: 5px 7px; }
-  .atk-pr-sig-stacked {
-    margin-top: 22px;
-    font-size: 9.5px;
-    color: #000000;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    max-width: 280px;
-  }
-  .atk-pr-sig-block {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .atk-pr-sig-gap { height: 64px; }
+  .atk-pr-sheet .drv-pdf-table th, .atk-pr-sheet .drv-pdf-table td { padding: 6px 8px; }
   .atk-pr-attach-sheet {
     width: 297mm;
     min-height: 210mm;
@@ -213,10 +214,12 @@ const STANDALONE_PRINT_CSS = `
     padding: 10mm 9mm;
     background: #ffffff;
     box-shadow: 0 18px 46px rgba(0,0,0,.38);
-    font-size: 9px;
+    font-size: 8.5px;
     line-height: 1.25;
     color: #000000;
   }
+  .atk-pr-attach-sheet .drv-pdf-table { font-size: 8.2px; }
+  .atk-pr-attach-sheet .drv-pdf-table th, .atk-pr-attach-sheet .drv-pdf-table td { padding: 4px 5px; }
   .atk-pr-attach-sheet .drv-pdf-table thead { display: table-header-group; }
   .atk-pr-attach-sheet .drv-pdf-table tr { page-break-inside: avoid; break-inside: avoid; }
 

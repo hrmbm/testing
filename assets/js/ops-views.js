@@ -2765,12 +2765,12 @@ function renderAtkBarChartSvg(series, scaleMax, ticks) {
   const gridLines = ticks.map(t => {
     const x = leftPad + (scaleMax > 0 ? (t / scaleMax) * plotW : 0);
     return `
-      <line x1="${x.toFixed(1)}" y1="${topPad - 4}" x2="${x.toFixed(1)}" y2="${height - bottomPad}" stroke="#e2e8f0" stroke-width="1"/>
-      <text x="${x.toFixed(1)}" y="${height - 10}" font-size="10" text-anchor="middle" fill="#64748b">${t}</text>
+      <line x1="${x.toFixed(1)}" y1="${topPad - 4}" x2="${x.toFixed(1)}" y2="${height - bottomPad}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${x.toFixed(1)}" y="${height - 10}" font-size="10" text-anchor="middle" fill="var(--muted)">${t}</text>
     `;
   }).join('');
 
-  const barColor = series.key === 'GLOBAL' ? '#0d5c6b' : '#0f766e';
+  const barColor = series.key === 'GLOBAL' ? '#14b8a6' : '#0ea5e9';
   const rowsSvg = bars.map((b, idx) => {
     const y = topPad + idx * rowH;
     const clampedQty = Math.min(scaleMax, Math.max(0, b.qty));
@@ -2778,16 +2778,16 @@ function renderAtkBarChartSvg(series, scaleMax, ticks) {
     const labelText = `${b.rank}. ${b.item_name}`;
     const shortLabel = labelText.length > 30 ? `${labelText.slice(0, 29)}…` : labelText;
     return `
-      <text x="6" y="${y + 15}" font-size="10.5" fill="#1e293b">${esc(shortLabel)}</text>
+      <text x="6" y="${y + 15}" font-size="10.5" fill="var(--ink-2)">${esc(shortLabel)}</text>
       <rect x="${leftPad}" y="${y + 4}" width="${Math.max(b.qty > 0 ? 3 : 0, w)}" height="15" rx="3" fill="${barColor}"></rect>
-      <text x="${leftPad + w + 6}" y="${y + 15}" font-size="10.5" font-weight="600" fill="#0f172a">${b.qty}</text>
+      <text x="${leftPad + w + 6}" y="${y + 15}" font-size="10.5" font-weight="600" fill="var(--ink)">${b.qty}</text>
     `;
   }).join('');
 
   return `
     <svg viewBox="0 0 ${width} ${height}" class="atk-chart-svg" role="img" aria-label="${esc(series.title)}">
       ${gridLines}
-      <line x1="${leftPad}" y1="${topPad - 4}" x2="${leftPad}" y2="${height - bottomPad}" stroke="#94a3b8" stroke-width="1.2"/>
+      <line x1="${leftPad}" y1="${topPad - 4}" x2="${leftPad}" y2="${height - bottomPad}" stroke="var(--line-strong)" stroke-width="1.2"/>
       ${rowsSvg}
     </svg>
   `;
@@ -3147,55 +3147,49 @@ function buildPurchaseRequisitionPrintPagesHtml({ draft, reqRows, periodWindow, 
           <td class="c">${item.no}</td>
           <td class="c nowrap"><code>${esc(item.item_code)}</code></td>
           <td>${esc(item.item_name)}</td>
+          <td class="num nowrap">${item.currentStock}${item.baseUnit ? ` ${esc(item.baseUnit)}` : ''}</td>
           <td class="num"><b>${esc(item.purchaseQty)}</b></td>
           <td class="c nowrap">${esc(item.unit)}</td>
         </tr>
       `).join('')
-    : '<tr><td colspan="5" class="c">Belum ada item dengan Purchase Qty &gt; 0.</td></tr>';
+    : '<tr><td colspan="6" class="c">Belum ada item dengan Purchase Qty &gt; 0.</td></tr>';
+
+  const buyFootHtml = purchaseItems.length
+    ? `
+      <tfoot>
+        <tr>
+          <th colspan="4" class="c">TOTAL ITEM DIBELI</th>
+          <th colspan="2" class="c">${purchaseItems.length} ITEM</th>
+        </tr>
+      </tfoot>
+    `
+    : '';
 
   const dateLine = `${esc(meta.locationLabel)}, ${esc(formatIndoLongDate(meta.docDate))}`;
-  const sigHtml = meta.signatureLayout === 'columns'
-    ? `
-      <div class="drv-pdf-footer">
-        <div class="drv-pdf-sig-col">
-          <div class="drv-pdf-loc">${dateLine}</div>
-          <div class="drv-pdf-sig-role">${esc(meta.preparedLabel)}</div>
-          <div class="drv-pdf-sig-space"></div>
-          <div class="drv-pdf-sig-name">${esc(meta.preparedBy.name || '-')}</div>
-          <div class="drv-pdf-sig-title">${esc(meta.preparedBy.title || '')}</div>
-        </div>
-        <div class="drv-pdf-sig-col drv-pdf-sig-right">
-          <div class="drv-pdf-loc">&nbsp;</div>
-          <div class="drv-pdf-sig-role">${esc(meta.approvedLabel)}</div>
-          <div class="drv-pdf-sig-space"></div>
-          <div class="drv-pdf-sig-name">${esc(meta.approvedBy.name || '-')}</div>
-          <div class="drv-pdf-sig-title">${esc(meta.approvedBy.title || '')}</div>
-        </div>
+  const sigHtml = `
+    <div class="drv-pdf-footer">
+      <div class="drv-pdf-sig-col">
+        <div class="drv-pdf-loc">${dateLine}</div>
+        <div class="drv-pdf-sig-role">${esc(meta.preparedLabel || 'Dibuat oleh,')}</div>
+        <div class="drv-pdf-sig-space"></div>
+        <div class="drv-pdf-sig-name">${esc(meta.preparedBy.name || '-')}</div>
+        <div class="drv-pdf-sig-title">${esc(meta.preparedBy.title || '')}</div>
       </div>
-    `
-    : `
-      <div class="atk-pr-sig-stacked">
-        <div class="atk-pr-sig-block">
-          <div class="drv-pdf-loc">${dateLine}</div>
-          <div class="drv-pdf-sig-role">${esc(meta.preparedLabel)}</div>
-          <div class="atk-pr-sig-gap"></div>
-          <div class="drv-pdf-sig-name">${esc(meta.preparedBy.name || '-')}</div>
-          <div class="drv-pdf-sig-title">${esc(meta.preparedBy.title || '')}</div>
-        </div>
-        <div class="atk-pr-sig-block">
-          <div class="drv-pdf-sig-role">${esc(meta.approvedLabel)}</div>
-          <div class="atk-pr-sig-gap"></div>
-          <div class="drv-pdf-sig-name">${esc(meta.approvedBy.name || '-')}</div>
-          <div class="drv-pdf-sig-title">${esc(meta.approvedBy.title || '')}</div>
-        </div>
+      <div class="drv-pdf-sig-col drv-pdf-sig-right">
+        <div class="drv-pdf-loc">&nbsp;</div>
+        <div class="drv-pdf-sig-role">${esc(meta.approvedLabel || 'Menyetujui,')}</div>
+        <div class="drv-pdf-sig-space"></div>
+        <div class="drv-pdf-sig-name">${esc(meta.approvedBy.name || '-')}</div>
+        <div class="drv-pdf-sig-title">${esc(meta.approvedBy.title || '')}</div>
       </div>
-    `;
+    </div>
+  `;
 
   const page1Html = `
     <div class="drv-pdf-sheet atk-pr-sheet pkwt-print-sheet">
-      <div class="drv-pdf-header">
+      <div class="drv-pdf-header atk-pr-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
-        <div><span class="drv-section-highlight">${esc(meta.prTitle)}</span></div>
+        <div class="atk-pr-doc-title">${esc(meta.prTitle)}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">NO. DRAFT</span>: ${esc(meta.draftCode)}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">JUDUL</span>: ${esc(meta.title)}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(periodWindow.periodLabel)} (${esc(periodWindow.dateRangeLabel)})</div>
@@ -3204,13 +3198,15 @@ function buildPurchaseRequisitionPrintPagesHtml({ draft, reqRows, periodWindow, 
         <thead>
           <tr>
             <th style="width:34px">No</th>
-            <th style="width:86px">Kode Material</th>
-            <th>Item</th>
-            <th style="width:92px">Purchase Qty</th>
-            <th style="width:74px">Unit</th>
+            <th style="width:88px">Kode Material</th>
+            <th>Nama Item</th>
+            <th style="width:94px">Current Stock</th>
+            <th style="width:86px">Purchase Qty</th>
+            <th style="width:68px">Unit</th>
           </tr>
         </thead>
         <tbody>${buyBodyHtml}</tbody>
+        ${buyFootHtml}
       </table>
       ${sigHtml}
     </div>
@@ -3221,9 +3217,12 @@ function buildPurchaseRequisitionPrintPagesHtml({ draft, reqRows, periodWindow, 
         const converted = r.convertedDecisionQty !== '' && Number.isFinite(Number(r.convertedDecisionQty))
           ? `${r.convertedDecisionQty} ${esc(r.unit)}`
           : '—';
+        const prioNo = Number(r.priority ?? r.rank) || 1;
+        const favRankNo = Number(r.favRank ?? r.rank) || prioNo;
         return `
           <tr>
-            <td class="c">#${r.rank}</td>
+            <td class="c">#${prioNo}</td>
+            <td class="c">#${favRankNo}</td>
             <td>${esc(r.item_name)}</td>
             <td class="num">${r.currentStock}</td>
             <td class="num">${r.periodRequirement}</td>
@@ -3239,36 +3238,38 @@ function buildPurchaseRequisitionPrintPagesHtml({ draft, reqRows, periodWindow, 
           </tr>
         `;
       }).join('')
-    : '<tr><td colspan="13" class="c">Tidak ada barang dengan suggestion &gt; 0 pada lampiran ini.</td></tr>';
+    : '<tr><td colspan="14" class="c">Tidak ada barang dengan suggestion &gt; 0 pada lampiran ini.</td></tr>';
 
   const page2Html = `
     <div class="atk-pr-attach-sheet pkwt-print-sheet">
-      <div class="drv-pdf-header">
+      <div class="drv-pdf-header atk-pr-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
-        <div><span class="drv-section-highlight">${esc(meta.attachmentTitle)}</span></div>
+        <div class="atk-pr-doc-title">${esc(meta.attachmentTitle)}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">NO. DRAFT</span>: ${esc(meta.draftCode)} — ${esc(meta.title)}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(periodWindow.periodLabel)} (${esc(periodWindow.dateRangeLabel)})</div>
       </div>
       <table class="drv-pdf-table">
         <thead>
           <tr>
-            <th style="width:48px">Priority</th>
-            <th>Item</th>
+            <th style="width:42px">Priority</th>
+            <th style="width:38px">Rank</th>
+            <th>Nama Item</th>
             <th style="width:52px">Current Stock</th>
-            <th style="width:68px">${esc(periodWindow.requirementColumnLabel)}</th>
-            <th style="width:52px">Min Stock</th>
-            <th style="width:42px">Unit</th>
-            <th style="width:56px">Min Purchase</th>
-            <th style="width:58px">Purchase Unit</th>
-            <th style="width:66px">Purchase Qty Decision</th>
-            <th style="width:58px">Purchase Unit</th>
-            <th style="width:78px">Convert to Unit</th>
-            <th style="width:102px">Frequency</th>
-            <th style="width:120px">Note</th>
+            <th style="width:66px">${esc(periodWindow.requirementColumnLabel)}</th>
+            <th style="width:50px">Min Stock</th>
+            <th style="width:40px">Unit</th>
+            <th style="width:52px">Min Purchase</th>
+            <th style="width:54px">Purchase Unit</th>
+            <th style="width:62px">Purchase Qty Decision</th>
+            <th style="width:54px">Purchase Unit</th>
+            <th style="width:74px">Convert to Unit</th>
+            <th style="width:96px">Frequency</th>
+            <th style="width:110px">Note</th>
           </tr>
         </thead>
         <tbody>${attachRowsHtml}</tbody>
       </table>
+      ${sigHtml}
     </div>
   `;
 
@@ -3308,7 +3309,7 @@ export async function renderStationeryReportsView(host, ctx) {
     host._prWorkingDraft = {
       id: '',
       draftCode: buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', todayIso),
-      title: `Purchase Requisition ATK`,
+      title: prCfg.defaultDraftTitle || 'Purchase Requisition ATK',
       docDate: todayIso,
       locationLabel: prCfg.locationLabel || 'Pasuruan',
       preparedBy: prepDef,
@@ -3340,9 +3341,7 @@ export async function renderStationeryReportsView(host, ctx) {
     rowOverrides: host._prWorkingDraft.rowOverrides || {},
     stationerySettings: stkCfg
   });
-  const visibleReqRows = searchQ
-    ? reqData.rows.filter(r => r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ))
-    : reqData.rows;
+  const visibleReqRows = reqData.rows;
 
   const persistPrDrafts = async nextDrafts => {
     state.stationeryPrDrafts = nextDrafts;
@@ -3354,16 +3353,6 @@ export async function renderStationeryReportsView(host, ctx) {
       if (error) throw error;
       invalidateOpsStateCache();
     }
-  };
-
-  const empSelectOptions = (selectedNik, selectedName) => {
-    const cleanSelNik = compactNik(selectedNik || '');
-    const cleanSelName = String(selectedName || '').trim().toUpperCase();
-    return '<option value="">-- Pilih Karyawan --</option>' + allEmployees.map(e => {
-      const match = (cleanSelNik && compactNik(e.employee_no) === cleanSelNik) ||
-        (!cleanSelNik && cleanSelName && String(e.full_name || '').trim().toUpperCase() === cleanSelName);
-      return `<option value="${esc(e.employee_no)}" data-name="${esc(e.full_name)}" data-pos="${esc(e.position || '')}" ${match ? 'selected' : ''}>${esc(e.full_name)} (${esc(e.employee_no)})</option>`;
-    }).join('');
   };
 
   const draftsListHtml = drafts.length ? `
@@ -3407,7 +3396,6 @@ export async function renderStationeryReportsView(host, ctx) {
   ` : '';
 
   if (mode === 'requisition') {
-    const wd = host._prWorkingDraft;
     const freqClass = f => {
       if (f === (stkCfg.frequencyTiers?.veryFastLabel || 'Very Fast Moving')) return 'green';
       if (f === (stkCfg.frequencyTiers?.fastLabel || 'Fast Moving')) return 'teal';
@@ -3421,7 +3409,7 @@ export async function renderStationeryReportsView(host, ctx) {
           <div class="ops-head">
             <div>
               <h2>Plan Purchase Requisition</h2>
-              <p class="ops-sub-note" style="margin:2px 0 0">Menampilkan semua item dengan suggestion tidak nol ditambah item manual. Simpan menjadi draft kapan saja atau cetak PR + Lampiran.</p>
+              <p class="ops-sub-note" style="margin:2px 0 0">Pengaturan dokumen, frekuensi rank, dan penandatangan PR dikelola di menu System Settings.</p>
             </div>
             <div class="ops-actions">
               <button type="button" class="btn btn-secondary" id="ops-pr-back">&larr; Kembali ke Suggestion</button>
@@ -3430,15 +3418,7 @@ export async function renderStationeryReportsView(host, ctx) {
             </div>
           </div>
 
-          <div class="ops-form-grid" style="margin-top:12px">
-            <label class="ops-field">
-              <span>Kode Draft / No. PR</span>
-              <input type="text" id="pr-draft-code" class="input" value="${esc(wd.draftCode)}">
-            </label>
-            <label class="ops-field">
-              <span>Judul Draft</span>
-              <input type="text" id="pr-draft-title" class="input" value="${esc(wd.title)}" placeholder="Contoh: Pengadaan ATK Mingguan">
-            </label>
+          <div class="ops-form-grid atk-pr-controls-grid" style="margin-top:12px">
             <label class="ops-field">
               <span>Purchase Period</span>
               <select id="ops-plan-period" class="input">
@@ -3447,68 +3427,19 @@ export async function renderStationeryReportsView(host, ctx) {
                 <option value="1m" ${purchasePeriod === '1m' ? 'selected' : ''}>Monthly</option>
               </select>
             </label>
-            <label class="ops-field">
+            <label class="ops-field atk-plan-window-field">
               <span>Planning Window</span>
               <input type="text" class="input atk-plan-window-input" value="${esc(plan.window.dateRangeLabel)}" readonly>
-            </label>
-            <label class="ops-field">
-              <span>Lokasi Dokumen</span>
-              <input type="text" id="pr-doc-location" class="input" value="${esc(wd.locationLabel || 'Pasuruan')}">
-            </label>
-            <label class="ops-field">
-              <span>Tanggal PR</span>
-              <input type="date" id="pr-doc-date" class="input" value="${esc(wd.docDate)}">
-            </label>
-            <label class="ops-field">
-              <span>Search Item</span>
-              <input type="search" id="ops-plan-search" class="input" value="${esc(host.dataset.atkPlanSearch || '')}" placeholder="Filter item...">
             </label>
             <div class="ops-field">
               <span>Tambah Item Manual (Suggestion 0)</span>
               <div class="atk-pr-add-manual">
                 <select id="pr-manual-item-sel" class="input" ${reqData.availableToAdd.length ? '' : 'disabled'}>
                   ${reqData.availableToAdd.length
-                    ? '<option value="">-- Pilih item untuk ditambah --</option>' + reqData.availableToAdd.map(r => `<option value="${esc(r.id)}">#${r.rank} · ${esc(r.item_name)} (${esc(r.unit)})</option>`).join('')
+                    ? '<option value="">-- Pilih item untuk ditambah --</option>' + reqData.availableToAdd.map(r => `<option value="${esc(r.id)}">Rank #${r.favRank ?? r.rank} · ${esc(r.item_name)} (Stok: ${r.currentStock} ${esc(r.unit)})</option>`).join('')
                     : '<option value="">Semua item sudah masuk daftar</option>'}
                 </select>
                 <button type="button" class="btn btn-secondary" id="pr-manual-item-add" ${reqData.availableToAdd.length ? '' : 'disabled'}>+ Tambah</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="ops-schedule-blocks" style="margin-top:12px">
-            <div class="ops-sig-box">
-              <b>${esc(prCfg.preparedLabel || 'Dibuat oleh,')}</b>
-              <div class="ops-form-grid" style="margin-top:8px">
-                <label class="ops-field">
-                  <span>Pilih Karyawan</span>
-                  <select id="pr-prep-emp" class="input">${empSelectOptions(wd.preparedBy?.nik, wd.preparedBy?.name)}</select>
-                </label>
-                <label class="ops-field">
-                  <span>Nama Tercetak</span>
-                  <input type="text" id="pr-prep-name" class="input" value="${esc(wd.preparedBy?.name || '')}">
-                </label>
-                <label class="ops-field">
-                  <span>Jabatan</span>
-                  <input type="text" id="pr-prep-title" class="input" value="${esc(wd.preparedBy?.title || '')}">
-                </label>
-              </div>
-            </div>
-            <div class="ops-sig-box">
-              <b>${esc(prCfg.approvedLabel || 'Menyetujui,')}</b>
-              <div class="ops-form-grid" style="margin-top:8px">
-                <label class="ops-field">
-                  <span>Pilih Karyawan</span>
-                  <select id="pr-app-emp" class="input">${empSelectOptions(wd.approvedBy?.nik, wd.approvedBy?.name)}</select>
-                </label>
-                <label class="ops-field">
-                  <span>Nama Tercetak</span>
-                  <input type="text" id="pr-app-name" class="input" value="${esc(wd.approvedBy?.name || '')}">
-                </label>
-                <label class="ops-field">
-                  <span>Jabatan</span>
-                  <input type="text" id="pr-app-title" class="input" value="${esc(wd.approvedBy?.title || '')}">
-                </label>
               </div>
             </div>
           </div>
@@ -3518,11 +3449,12 @@ export async function renderStationeryReportsView(host, ctx) {
 
         <div class="card ops-card">
           <div class="table-wrap">
-            <table>
+            <table class="atk-pr-table">
               <thead>
                 <tr>
-                  <th style="width:72px">Priority</th>
-                  <th>Item</th>
+                  <th style="width:70px">Priority</th>
+                  <th style="width:58px">Rank</th>
+                  <th>Nama Item</th>
                   <th class="num">Current Stock</th>
                   <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
                   <th class="num">Min Stock</th>
@@ -3540,14 +3472,15 @@ export async function renderStationeryReportsView(host, ctx) {
                 ${visibleReqRows.length ? visibleReqRows.map(r => `
                   <tr data-plan-id="${esc(r.id)}">
                     <td class="nowrap">
-                      <b>#${r.rank}</b>
+                      <b>#${r.priority ?? r.rank}</b>
                       ${r.isManualAdded ? `<button type="button" class="btn btn-xs btn-secondary pr-manual-remove" data-item-id="${esc(r.id)}" title="Keluarkan item manual" style="margin-left:4px;padding:1px 6px">×</button>` : ''}
                     </td>
+                    <td class="nowrap"><code>#${r.favRank ?? r.rank}</code></td>
                     <td>
                       <b>${esc(r.item_name)}</b>
                       ${r.isManualAdded ? '<div class="ops-sub-note">Ditambahkan manual</div>' : ''}
                     </td>
-                    <td class="num">${r.currentStock}</td>
+                    <td class="num"><b>${r.currentStock}</b></td>
                     <td class="num"><b>${r.periodRequirement}</b></td>
                     <td class="num">${r.minStock}</td>
                     <td>${esc(r.unit)}</td>
@@ -3569,7 +3502,7 @@ export async function renderStationeryReportsView(host, ctx) {
                       <input type="text" class="input ops-plan-note-inp" data-item-id="${esc(r.id)}" value="${esc(r.note)}" placeholder="Catatan..." aria-label="Note for ${esc(r.item_name)}">
                     </td>
                   </tr>
-                `).join('') : '<tr><td colspan="13" class="empty">Belum ada barang dengan suggestion tidak nol. Catat barang keluar atau tambahkan item manual di atas.</td></tr>'}
+                `).join('') : '<tr><td colspan="14" class="empty">Belum ada barang dengan suggestion tidak nol. Catat barang keluar atau tambahkan item manual di atas.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -3626,8 +3559,9 @@ export async function renderStationeryReportsView(host, ctx) {
             <table>
               <thead>
                 <tr>
-                  <th style="width:80px">Priority</th>
-                  <th>Item</th>
+                  <th style="width:76px">Priority</th>
+                  <th style="width:68px">Rank</th>
+                  <th>Nama Item</th>
                   <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
                   <th class="num">Min Stock</th>
                   <th style="width:90px">Unit</th>
@@ -3636,13 +3570,14 @@ export async function renderStationeryReportsView(host, ctx) {
               <tbody>
                 ${visibleSuggestionRows.length ? visibleSuggestionRows.map(r => `
                   <tr data-plan-id="${esc(r.id)}">
-                    <td><b>#${r.rank}</b></td>
+                    <td><b>#${r.priority ?? r.rank}</b></td>
+                    <td><code>#${r.favRank ?? r.rank}</code></td>
                     <td><b>${esc(r.item_name)}</b></td>
                     <td class="num"><b>${r.periodRequirement}</b></td>
                     <td class="num">${r.minStock}</td>
                     <td>${esc(r.unit)}</td>
                   </tr>
-                `).join('') : '<tr><td colspan="5" class="empty">No items match the current filter.</td></tr>'}
+                `).join('') : '<tr><td colspan="6" class="empty">No items match the current filter.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -3675,7 +3610,7 @@ export async function renderStationeryReportsView(host, ctx) {
     host._prWorkingDraft = {
       id: '',
       draftCode: buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', todayIso),
-      title: `Purchase Requisition ${plan.window.periodLabel}`,
+      title: `${prCfg.defaultDraftTitle || 'Purchase Requisition ATK'} (${plan.window.periodLabel})`,
       docDate: todayIso,
       locationLabel: prCfg.locationLabel || 'Pasuruan',
       preparedBy: prepDef,
@@ -3692,44 +3627,20 @@ export async function renderStationeryReportsView(host, ctx) {
     renderStationeryReportsView(host, ctx);
   });
 
-  // Draft Header bindings in Requisition mode
   const wdRef = host._prWorkingDraft;
-  host.querySelector('#pr-draft-code')?.addEventListener('input', e => { wdRef.draftCode = e.target.value; });
-  host.querySelector('#pr-draft-title')?.addEventListener('input', e => { wdRef.title = e.target.value; });
-  host.querySelector('#pr-doc-location')?.addEventListener('input', e => { wdRef.locationLabel = e.target.value; });
-  host.querySelector('#pr-doc-date')?.addEventListener('change', e => { wdRef.docDate = e.target.value; });
-
-  host.querySelector('#pr-prep-emp')?.addEventListener('change', e => {
-    const opt = e.target.selectedOptions?.[0];
-    if (!opt || !opt.value) return;
-    wdRef.preparedBy = {
-      nik: opt.value,
-      name: opt.dataset.name || '',
-      title: opt.dataset.pos || ''
+  const syncDraftWithPrConfig = target => {
+    const prepDef = resolveEmpDefault(prCfg.defaultPreparedNik, prCfg.defaultPreparedName, prCfg.defaultPreparedTitle);
+    const appDef = resolveEmpDefault(prCfg.defaultApprovedNik, prCfg.defaultApprovedName, prCfg.defaultApprovedTitle);
+    return {
+      ...target,
+      draftCode: String(target.draftCode || '').trim() || buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', target.docDate),
+      title: String(target.title || '').trim() || `${prCfg.defaultDraftTitle || 'Purchase Requisition ATK'} (${plan.window.periodLabel})`,
+      docDate: target.docDate || new Date().toISOString().slice(0, 10),
+      locationLabel: prCfg.locationLabel || target.locationLabel || 'Pasuruan',
+      preparedBy: prepDef,
+      approvedBy: appDef
     };
-    const nameEl = host.querySelector('#pr-prep-name');
-    const titleEl = host.querySelector('#pr-prep-title');
-    if (nameEl) nameEl.value = wdRef.preparedBy.name;
-    if (titleEl) titleEl.value = wdRef.preparedBy.title;
-  });
-  host.querySelector('#pr-prep-name')?.addEventListener('input', e => { wdRef.preparedBy.name = e.target.value; });
-  host.querySelector('#pr-prep-title')?.addEventListener('input', e => { wdRef.preparedBy.title = e.target.value; });
-
-  host.querySelector('#pr-app-emp')?.addEventListener('change', e => {
-    const opt = e.target.selectedOptions?.[0];
-    if (!opt || !opt.value) return;
-    wdRef.approvedBy = {
-      nik: opt.value,
-      name: opt.dataset.name || '',
-      title: opt.dataset.pos || ''
-    };
-    const nameEl = host.querySelector('#pr-app-name');
-    const titleEl = host.querySelector('#pr-app-title');
-    if (nameEl) nameEl.value = wdRef.approvedBy.name;
-    if (titleEl) titleEl.value = wdRef.approvedBy.title;
-  });
-  host.querySelector('#pr-app-name')?.addEventListener('input', e => { wdRef.approvedBy.name = e.target.value; });
-  host.querySelector('#pr-app-title')?.addEventListener('input', e => { wdRef.approvedBy.title = e.target.value; });
+  };
 
   host.querySelector('#pr-manual-item-add')?.addEventListener('click', () => {
     const itemId = host.querySelector('#pr-manual-item-sel')?.value;
@@ -3788,8 +3699,9 @@ export async function renderStationeryReportsView(host, ctx) {
 
   // Save Draft
   host.querySelector('#ops-pr-save-draft')?.addEventListener('click', async () => {
-    const code = String(wdRef.draftCode || '').trim() || buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', wdRef.docDate);
-    const title = String(wdRef.title || '').trim() || `Purchase Requisition ${plan.window.periodLabel}`;
+    const synced = syncDraftWithPrConfig(wdRef);
+    const code = synced.draftCode;
+    const title = synced.title;
     const liveReqData = buildPurchaseRequisitionWorkspaceRows({
       planRows: plan.rows,
       manualItemIds: wdRef.manualItemIds || [],
@@ -3807,10 +3719,10 @@ export async function renderStationeryReportsView(host, ctx) {
       title,
       purchasePeriod,
       periodLabel: plan.window.periodLabel,
-      docDate: wdRef.docDate || nowIso.slice(0, 10),
-      locationLabel: wdRef.locationLabel || prCfg.locationLabel || 'Pasuruan',
-      preparedBy: { ...(wdRef.preparedBy || {}) },
-      approvedBy: { ...(wdRef.approvedBy || {}) },
+      docDate: synced.docDate || nowIso.slice(0, 10),
+      locationLabel: synced.locationLabel,
+      preparedBy: synced.preparedBy,
+      approvedBy: synced.approvedBy,
       manualItemIds: [...(wdRef.manualItemIds || [])],
       rowOverrides: structuredClone(wdRef.rowOverrides || {}),
       buyItemCount,
@@ -3821,6 +3733,8 @@ export async function renderStationeryReportsView(host, ctx) {
     wdRef.id = draftId;
     wdRef.draftCode = code;
     wdRef.title = title;
+    wdRef.preparedBy = synced.preparedBy;
+    wdRef.approvedBy = synced.approvedBy;
 
     const nextDrafts = [record, ...drafts.filter(d => d.id !== draftId)];
     try {
@@ -3834,6 +3748,7 @@ export async function renderStationeryReportsView(host, ctx) {
 
   // Print 2-part Purchase Requisition + Lampiran
   host.querySelector('#ops-pr-print')?.addEventListener('click', () => {
+    const synced = syncDraftWithPrConfig(wdRef);
     const liveReqData = buildPurchaseRequisitionWorkspaceRows({
       planRows: plan.rows,
       manualItemIds: wdRef.manualItemIds || [],
@@ -3841,7 +3756,7 @@ export async function renderStationeryReportsView(host, ctx) {
       stationerySettings: stkCfg
     });
     const { title, pagesHtml } = buildPurchaseRequisitionPrintPagesHtml({
-      draft: wdRef,
+      draft: synced,
       reqRows: liveReqData.rows,
       periodWindow: plan.window,
       stationerySettings: stkCfg
@@ -3885,7 +3800,7 @@ export async function renderStationeryReportsView(host, ctx) {
         stationerySettings: stkCfg
       });
       const { title, pagesHtml } = buildPurchaseRequisitionPrintPagesHtml({
-        draft: target,
+        draft: syncDraftWithPrConfig(target),
         reqRows: dReq.rows,
         periodWindow: dPlan.window,
         stationerySettings: stkCfg
@@ -3909,20 +3824,31 @@ export async function renderStationeryReportsView(host, ctx) {
     });
   });
 
-  // Simplified 5-col Export & Print Plan in Suggestion mode
+  // Simplified Export & Print Plan in Suggestion mode
   host.querySelector('#ops-srep-atk-xlsx')?.addEventListener('click', async () => {
     const aoa = [
       ['Purchase Period', plan.window.periodLabel, 'Planning Window', plan.window.dateRangeLabel],
-      ['Priority', 'Item', plan.window.requirementColumnLabel, 'Min Stock', 'Unit'],
-      ...visibleSuggestionRows.map(r => [r.rank, r.item_name, r.periodRequirement, r.minStock, r.unit])
+      ['Priority', 'Rank', 'Nama Item', plan.window.requirementColumnLabel, 'Min Stock', 'Unit'],
+      ...visibleSuggestionRows.map(r => [r.priority ?? r.rank, r.favRank ?? r.rank, r.item_name, r.periodRequirement, r.minStock, r.unit])
     ];
     await exportSheetXlsx(`Purchase_Plan_Suggestion_${plan.window.startDate}.xlsx`, 'Purchase Plan', aoa);
   });
 
   host.querySelector('#ops-srep-atk-print')?.addEventListener('click', () => {
+    const prepDef = resolveEmpDefault(prCfg.defaultPreparedNik, prCfg.defaultPreparedName, prCfg.defaultPreparedTitle);
+    const appDef = resolveEmpDefault(prCfg.defaultApprovedNik, prCfg.defaultApprovedName, prCfg.defaultApprovedTitle);
+    const prSig = {
+      leftLabel: prCfg.preparedLabel || 'Dibuat oleh,',
+      leftName: prepDef.name || '-',
+      leftTitle: prepDef.title || '',
+      rightLabel: prCfg.approvedLabel || 'Menyetujui,',
+      rightName: appDef.name || '-',
+      rightTitle: appDef.title || ''
+    };
     const rowsHtml = visibleSuggestionRows.map(r => `
       <tr>
-        <td class="c">${r.rank}</td>
+        <td class="c">#${r.priority ?? r.rank}</td>
+        <td class="c">#${r.favRank ?? r.rank}</td>
         <td>${esc(r.item_name)}</td>
         <td class="num">${r.periodRequirement}</td>
         <td class="num">${r.minStock}</td>
@@ -3932,22 +3858,25 @@ export async function renderStationeryReportsView(host, ctx) {
     openPrintHtml(
       `Purchase Plan Suggestion (${plan.window.periodLabel})`,
       `
-        <div class="drv-pdf-header">
-          <div>PURCHASE PLAN SUGGESTION</div>
-          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIOD</span>: ${esc(plan.window.periodLabel)} (${esc(plan.window.dateRangeLabel)})</div>
+        <div class="drv-pdf-header atk-pr-header">
+          <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+          <div class="atk-pr-doc-title">PURCHASE PLAN SUGGESTION</div>
+          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(plan.window.periodLabel)} (${esc(plan.window.dateRangeLabel)})</div>
         </div>
         <table class="drv-pdf-table">
           <thead>
             <tr>
-              <th>Priority</th>
-              <th>Item</th>
-              <th>${esc(plan.window.requirementColumnLabel)}</th>
-              <th>Min Stock</th>
-              <th>Unit</th>
+              <th style="width:52px">Priority</th>
+              <th style="width:46px">Rank</th>
+              <th>Nama Item</th>
+              <th style="width:110px">${esc(plan.window.requirementColumnLabel)}</th>
+              <th style="width:82px">Min Stock</th>
+              <th style="width:68px">Unit</th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
         </table>
+        ${renderTwoSignatoriesHtml(prSig, prCfg.locationLabel || 'Pasuruan', formatIndoLongDate(new Date().toISOString().slice(0, 10)))}
       `,
       false
     );
@@ -4890,6 +4819,13 @@ export async function renderOpsSettingsView(host, ctx) {
             ${renderSigSelector('sig-stf-r', sig.staffReport.rightLabel, sig.staffReport.rightNik, sig.staffReport.rightName, sig.staffReport.rightTitle)}
           </div>
         </div>
+        <div class="card ops-card">
+          <h3>Penandatangan Purchase Requisition / ATK (2 Kolom — Kiri Dibuat Oleh, Kanan Menyetujui)</h3>
+          <div class="ops-schedule-blocks" style="margin-top:10px">
+            ${renderSigSelector('sig-pr-l', s.stationery.prConfig.preparedLabel, s.stationery.prConfig.defaultPreparedNik, s.stationery.prConfig.defaultPreparedName, s.stationery.prConfig.defaultPreparedTitle)}
+            ${renderSigSelector('sig-pr-r', s.stationery.prConfig.approvedLabel, s.stationery.prConfig.defaultApprovedNik, s.stationery.prConfig.defaultApprovedName, s.stationery.prConfig.defaultApprovedTitle)}
+          </div>
+        </div>
       </div>
 
       <!-- TAB 4: CUTI POLICY -->
@@ -4932,7 +4868,8 @@ export async function renderOpsSettingsView(host, ctx) {
         </div>
 
         <div class="card ops-card">
-          <h3>Aturan Ranking Frequency Otomatis (Purchase Requisition)</h3>
+          <h3>Aturan Ranking Frequency Otomatis (Berdasarkan Global Rank Pemakaian)</h3>
+          <p class="ops-sub-note" style="margin:2px 0 8px">Frequency ditentukan oleh <b>Rank</b> pemakaian barang favorit (bukan Priority defisit pembelian).</p>
           <div class="ops-form-grid" style="margin-top:10px">
             <label class="ops-field"><span>Batas Maks. Rank 1</span><input id="set-stk-ft-vf-max" type="number" min="1" class="input" value="${s.stationery.frequencyTiers.veryFastMaxRank}"></label>
             <label class="ops-field"><span>Label Rank 1 – Batas 1</span><input id="set-stk-ft-vf-lbl" type="text" class="input" value="${esc(s.stationery.frequencyTiers.veryFastLabel)}"></label>
@@ -4946,29 +4883,19 @@ export async function renderOpsSettingsView(host, ctx) {
 
         <div class="card ops-card">
           <h3>Komponen Dokumen &amp; Cetak Purchase Requisition (PR)</h3>
+          <p class="ops-sub-note" style="margin:2px 0 8px">Penandatangan PR (Dibuat Oleh di kiri, Menyetujui di kanan) diatur bersama laporan lainnya di tab <b>Penandatangan Laporan</b>.</p>
           <div class="ops-form-grid" style="margin-top:10px">
             <label class="ops-field"><span>Judul Dokumen Halaman 1</span><input id="set-stk-pr-title" type="text" class="input" value="${esc(s.stationery.prConfig.prTitle)}"></label>
             <label class="ops-field"><span>Judul Dokumen Lampiran (Hal 2+)</span><input id="set-stk-pr-att-title" type="text" class="input" value="${esc(s.stationery.prConfig.attachmentTitle)}"></label>
+            <label class="ops-field"><span>Default Judul Draft PR</span><input id="set-stk-pr-draft-title" type="text" class="input" value="${esc(s.stationery.prConfig.defaultDraftTitle || 'Purchase Requisition ATK')}"></label>
             <label class="ops-field"><span>Prefix Kode Draft PR</span><input id="set-stk-pr-prefix" type="text" class="input" value="${esc(s.stationery.prConfig.draftPrefix)}"></label>
             <label class="ops-field"><span>Lokasi Default Dokumen</span><input id="set-stk-pr-loc" type="text" class="input" value="${esc(s.stationery.prConfig.locationLabel)}"></label>
-            <label class="ops-field"><span>Label Pembuat</span><input id="set-stk-pr-prep-lbl" type="text" class="input" value="${esc(s.stationery.prConfig.preparedLabel)}"></label>
-            <label class="ops-field"><span>Label Penyetuju</span><input id="set-stk-pr-app-lbl" type="text" class="input" value="${esc(s.stationery.prConfig.approvedLabel)}"></label>
-            <label class="ops-field"><span>Susunan Tanda Tangan PR</span>
-              <select id="set-stk-pr-sig-layout" class="input">
-                <option value="stacked" ${s.stationery.prConfig.signatureLayout === 'stacked' ? 'selected' : ''}>Vertikal (Dibuat oleh di atas Menyetujui)</option>
-                <option value="columns" ${s.stationery.prConfig.signatureLayout === 'columns' ? 'selected' : ''}>2 Kolom Kiri &amp; Kanan</option>
-              </select>
-            </label>
             <label class="ops-field"><span>Satuan Qty pada Hal 1 PR</span>
               <select id="set-stk-pr-qty-mode" class="input">
                 <option value="purchase_unit" ${s.stationery.prConfig.qtyPrintMode === 'purchase_unit' ? 'selected' : ''}>Purchase Unit (PACK / RIM / dll)</option>
                 <option value="converted_unit" ${s.stationery.prConfig.qtyPrintMode === 'converted_unit' ? 'selected' : ''}>Converted Unit (PCS / Stok Dasar)</option>
               </select>
             </label>
-            <label class="ops-field"><span>Default Pembuat (Nama)</span><input id="set-stk-pr-prep-name" type="text" class="input" value="${esc(s.stationery.prConfig.defaultPreparedName)}"></label>
-            <label class="ops-field"><span>Default Pembuat (Jabatan)</span><input id="set-stk-pr-prep-title" type="text" class="input" value="${esc(s.stationery.prConfig.defaultPreparedTitle)}"></label>
-            <label class="ops-field"><span>Default Penyetuju (Nama)</span><input id="set-stk-pr-app-name" type="text" class="input" value="${esc(s.stationery.prConfig.defaultApprovedName)}"></label>
-            <label class="ops-field"><span>Default Penyetuju (Jabatan)</span><input id="set-stk-pr-app-title" type="text" class="input" value="${esc(s.stationery.prConfig.defaultApprovedTitle)}"></label>
           </div>
         </div>
       </div>
@@ -5228,6 +5155,8 @@ export async function renderOpsSettingsView(host, ctx) {
       const csR = readSig('sig-cs-r');
       const stfL = readSig('sig-stf-l');
       const stfR = readSig('sig-stf-r');
+      const prL = readSig('sig-pr-l');
+      const prR = readSig('sig-pr-r');
 
       const codebook = {};
       for (const c of STAFF_ATTENDANCE_CODE_ORDER) {
@@ -5387,16 +5316,19 @@ export async function renderOpsSettingsView(host, ctx) {
             ...s.stationery.prConfig,
             prTitle: host.querySelector('#set-stk-pr-title')?.value || 'PURCHASE REQUISITION',
             attachmentTitle: host.querySelector('#set-stk-pr-att-title')?.value || 'LAMPIRAN PURCHASE REQUISITION',
+            defaultDraftTitle: host.querySelector('#set-stk-pr-draft-title')?.value || 'Purchase Requisition ATK',
             draftPrefix: host.querySelector('#set-stk-pr-prefix')?.value || 'PR',
             locationLabel: host.querySelector('#set-stk-pr-loc')?.value || 'Pasuruan',
-            preparedLabel: host.querySelector('#set-stk-pr-prep-lbl')?.value || 'Dibuat oleh,',
-            approvedLabel: host.querySelector('#set-stk-pr-app-lbl')?.value || 'Menyetujui,',
-            signatureLayout: host.querySelector('#set-stk-pr-sig-layout')?.value || 'stacked',
+            preparedLabel: prL.label || 'Dibuat oleh,',
+            approvedLabel: prR.label || 'Menyetujui,',
+            signatureLayout: 'columns',
             qtyPrintMode: host.querySelector('#set-stk-pr-qty-mode')?.value || 'purchase_unit',
-            defaultPreparedName: host.querySelector('#set-stk-pr-prep-name')?.value || 'AYUK NUR KHOTIFAH',
-            defaultPreparedTitle: host.querySelector('#set-stk-pr-prep-title')?.value || 'STAFF HR & GA',
-            defaultApprovedName: host.querySelector('#set-stk-pr-app-name')?.value || 'SAMSUL HARIYADI',
-            defaultApprovedTitle: host.querySelector('#set-stk-pr-app-title')?.value || 'HR & GA MANAGER'
+            defaultPreparedNik: prL.nik || '',
+            defaultPreparedName: prL.name || 'AYUK NUR KHOTIFAH',
+            defaultPreparedTitle: prL.title || 'STAFF HR & GA',
+            defaultApprovedNik: prR.nik || '',
+            defaultApprovedName: prR.name || 'SAMSUL HARIYADI',
+            defaultApprovedTitle: prR.title || 'HR & GA MANAGER'
           }
         }
       });
