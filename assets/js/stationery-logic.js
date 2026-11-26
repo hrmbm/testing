@@ -593,6 +593,18 @@ export function computeNextPurchasePlanWindow(purchasePeriod = '1w', referenceDa
   };
 }
 
+export function classifyPurchasePlanFrequency(rank = 1, stationerySettings = DEFAULT_OPS_SETTINGS.stationery) {
+  const r = Math.max(1, Number(rank) || 999);
+  const ft = stationerySettings?.frequencyTiers || DEFAULT_OPS_SETTINGS.stationery.frequencyTiers;
+  const veryFastMax = Number(ft.veryFastMaxRank) || 10;
+  const fastMax = Number(ft.fastMaxRank) || 30;
+  const slowMax = Number(ft.slowMaxRank) || 50;
+  if (r <= veryFastMax) return ft.veryFastLabel || 'Very Fast Moving';
+  if (r <= fastMax) return ft.fastLabel || 'Fast Moving';
+  if (r <= slowMax) return ft.slowLabel || 'Slow Moving';
+  return ft.verySlowLabel || 'Very Slow Moving';
+}
+
 export function buildPurchasePlanSuggestions({
   items = [],
   ledger = [],
@@ -601,12 +613,14 @@ export function buildPurchasePlanSuggestions({
   manualOverrides = {},
   settings = DEFAULT_OPS_SETTINGS
 }) {
+  const normalizedSettings = normalizeOpsSettings(settings);
+  const stkCfg = normalizedSettings.stationery;
   const normalizedItems = normalizeStationeryItems(items);
   const globalReport = buildStationeryReports({
     items: normalizedItems,
     ledger,
     monthKey: '',
-    settings
+    settings: normalizedSettings
   });
   const planWindow = computeNextPurchasePlanWindow(purchasePeriod, referenceDate);
 
@@ -653,7 +667,8 @@ export function buildPurchasePlanSuggestions({
       minPurchase,
       purchaseUnit: fav.purchase_unit,
       decisionQty,
-      convertedDecisionQty
+      convertedDecisionQty,
+      note: String(ov.note || '')
     };
   });
 
@@ -663,15 +678,136 @@ export function buildPurchasePlanSuggestions({
     return a.favRank - b.favRank;
   });
 
-  const rows = mappedRows.map((r, idx) => ({
-    ...r,
-    rank: idx + 1
-  }));
+  const rows = mappedRows.map((r, idx) => {
+    const rank = idx + 1;
+    return {
+      ...r,
+      rank,
+      frequency: classifyPurchasePlanFrequency(rank, stkCfg)
+    };
+  });
 
   return {
     window: planWindow,
     observedMonths: Math.max(1, outMonths.size),
     rows
+  };
+}
+
+export function buildPurchaseRequisitionWorkspaceRows({
+  planRows = [],
+  manualItemIds = [],
+  rowOverrides = {},
+  stationerySettings = DEFAULT_OPS_SETTINGS.stationery
+}) {
+  const manualSet = new Set((manualItemIds || []).map(id => String(id)));
+  const activeRows = [];
+  const availableToAdd = [];
+
+  for (const r of planRows || []) {
+    const isNonZeroSuggestion = Number(r.periodRequirement || 0) > 0 || Number(r.deficit || 0) > 0;
+    const isManualAdded = manualSet.has(String(r.id));
+    if (!isNonZeroSuggestion && !isManualAdded) {
+      availableToAdd.push(r);
+      continue;
+    }
+
+    const ov = rowOverrides?.[r.id] || {};
+    const minPurchase = ov.minPurchase !== undefined && ov.minPurchase !== ''
+      ? Math.max(1, Number(ov.minPurchase) || 1)
+      : Math.max(1, Number(r.minPurchase) || 1);
+    const decisionQty = ov.decisionQty !== undefined && ov.decisionQty !== null
+      ? String(ov.decisionQty)
+      : String(r.decisionQty || '');
+    const decisionNum = Number(decisionQty);
+    const convQty = Math.max(1, Number(r.conversionQty) || 1);
+    const convertedDecisionQty = decisionQty !== '' && Number.isFinite(decisionNum)
+      ? Math.round(decisionNum * convQty * 100) / 100
+      : '';
+    const note = ov.note !== undefined ? String(ov.note) : String(r.note || '');
+
+    activeRows.push({
+      ...r,
+      minPurchase,
+      decisionQty,
+      convertedDecisionQty,
+      frequency: r.frequency || classifyPurchasePlanFrequency(r.rank, stationerySettings),
+      note,
+      isNonZeroSuggestion,
+      isManualAdded: !isNonZeroSuggestion && isManualAdded
+    });
+  }
+
+  return { rows: activeRows, availableToAdd };
+}
+
+export function buildNextPrDraftCode(existingDrafts = [], prefix = 'PR', docDate = '') {
+  const cleanPrefix = String(prefix || 'PR').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'PR';
+  const yyyymm = (/^\d{4}-\d{2}/.test(String(docDate || '')) ? String(docDate).slice(0, 7) : new Date().toISOString().slice(0, 7)).replace('-', '');
+  const base = `${cleanPrefix}-${yyyymm}-`;
+  let maxSeq = 0;
+  for (const d of existingDrafts || []) {
+    const code = String(d?.draftCode || '').trim().toUpperCase();
+    if (code.startsWith(base)) {
+      const seq = Number(code.slice(base.length).replace(/\D/g, ''));
+      if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
+    }
+  }
+  return `${base}${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+export function buildPurchaseRequisitionPrintData({
+  draft = {},
+  reqRows = [],
+  stationerySettings = DEFAULT_OPS_SETTINGS.stationery
+}) {
+  const prCfg = stationerySettings?.prConfig || DEFAULT_OPS_SETTINGS.stationery.prConfig;
+  const useConvertedUnit = prCfg.qtyPrintMode === 'converted_unit';
+
+  const purchaseItems = (reqRows || [])
+    .filter(r => r.decisionQty !== '' && Number.isFinite(Number(r.decisionQty)) && Number(r.decisionQty) > 0)
+    .map((r, idx) => {
+      const qtyVal = useConvertedUnit && r.convertedDecisionQty !== ''
+        ? Number(r.convertedDecisionQty)
+        : Number(r.decisionQty);
+      const unitLbl = useConvertedUnit ? r.unit : r.purchaseUnit;
+      return {
+        no: idx + 1,
+        item_code: normalizeMaterialCode(r.item_code),
+        item_name: r.item_name,
+        purchaseQty: qtyVal,
+        unit: unitLbl
+      };
+    });
+
+  const attachmentItems = [...(reqRows || [])];
+
+  return {
+    meta: {
+      draftCode: String(draft.draftCode || '').trim() || 'PR-DRAFT',
+      title: String(draft.title || 'Purchase Requisition ATK').trim(),
+      periodLabel: String(draft.periodLabel || '').trim(),
+      dateRangeLabel: String(draft.dateRangeLabel || '').trim(),
+      docDate: String(draft.docDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      locationLabel: String(draft.locationLabel || prCfg.locationLabel || 'Pasuruan').trim(),
+      preparedLabel: String(prCfg.preparedLabel || 'Dibuat oleh,').trim(),
+      approvedLabel: String(prCfg.approvedLabel || 'Menyetujui,').trim(),
+      signatureLayout: prCfg.signatureLayout === 'columns' ? 'columns' : 'stacked',
+      preparedBy: {
+        nik: String(draft.preparedBy?.nik || '').trim(),
+        name: String(draft.preparedBy?.name || prCfg.defaultPreparedName || '').trim(),
+        title: String(draft.preparedBy?.title || prCfg.defaultPreparedTitle || '').trim()
+      },
+      approvedBy: {
+        nik: String(draft.approvedBy?.nik || '').trim(),
+        name: String(draft.approvedBy?.name || prCfg.defaultApprovedName || '').trim(),
+        title: String(draft.approvedBy?.title || prCfg.defaultApprovedTitle || '').trim()
+      },
+      prTitle: String(prCfg.prTitle || 'PURCHASE REQUISITION').trim(),
+      attachmentTitle: String(prCfg.attachmentTitle || 'LAMPIRAN PURCHASE REQUISITION').trim()
+    },
+    purchaseItems,
+    attachmentItems
   };
 }
 

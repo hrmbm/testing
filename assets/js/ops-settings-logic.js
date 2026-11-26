@@ -350,6 +350,7 @@ export const DEFAULT_OPS_SETTINGS = {
       O: 'OUTDOOR',
       R: 'RADIN'
     },
+    sectionHighlightColor: '#ffff00',
     signatories: structuredClone(DEFAULT_SIGNATORIES),
     weekdayOvertimeTariff: structuredClone(DEFAULT_WEEKDAY_OVERTIME_TARIFF),
     holidayOvertimeTariff: structuredClone(DEFAULT_HOLIDAY_OVERTIME_TARIFF)
@@ -367,7 +368,32 @@ export const DEFAULT_OPS_SETTINGS = {
     mediumMovingMinOutQty: 5,
     scoringMode: 'legacy_excel',
     scoringWeightQty: 0.6,
-    scoringWeightFreq: 0.4
+    scoringWeightFreq: 0.4,
+    frequencyTiers: {
+      veryFastMaxRank: 10,
+      veryFastLabel: 'Very Fast Moving',
+      fastMaxRank: 30,
+      fastLabel: 'Fast Moving',
+      slowMaxRank: 50,
+      slowLabel: 'Slow Moving',
+      verySlowLabel: 'Very Slow Moving'
+    },
+    prConfig: {
+      prTitle: 'PURCHASE REQUISITION',
+      attachmentTitle: 'LAMPIRAN PURCHASE REQUISITION',
+      draftPrefix: 'PR',
+      locationLabel: 'Pasuruan',
+      preparedLabel: 'Dibuat oleh,',
+      approvedLabel: 'Menyetujui,',
+      signatureLayout: 'stacked',
+      defaultPreparedNik: 'ST 260501',
+      defaultPreparedName: 'AYUK NUR KHOTIFAH',
+      defaultPreparedTitle: 'STAFF HR & GA',
+      defaultApprovedNik: '',
+      defaultApprovedName: 'SAMSUL HARIYADI',
+      defaultApprovedTitle: 'HR & GA MANAGER',
+      qtyPrintMode: 'purchase_unit'
+    }
   }
 };
 
@@ -648,6 +674,9 @@ export function normalizeOpsSettings(raw = {}) {
         ...defDrv.checksheetCodes,
         ...(drv.checksheetCodes && typeof drv.checksheetCodes === 'object' ? drv.checksheetCodes : {})
       },
+      sectionHighlightColor: /^#[0-9a-fA-F]{3,8}$/.test(String(drv.sectionHighlightColor || '').trim())
+        ? String(drv.sectionHighlightColor).trim()
+        : (drv.sectionHighlightColor === '' ? '' : defDrv.sectionHighlightColor),
       signatories: normalizeSignatories(drv.signatories),
       weekdayOvertimeTariff: normalizeTariffRows(drv.weekdayOvertimeTariff, DEFAULT_WEEKDAY_OVERTIME_TARIFF),
       holidayOvertimeTariff: normalizeTariffRows(drv.holidayOvertimeTariff, DEFAULT_HOLIDAY_OVERTIME_TARIFF)
@@ -670,7 +699,43 @@ export function normalizeOpsSettings(raw = {}) {
       mediumMovingMinOutQty: sanitizeNum(stk.mediumMovingMinOutQty, defStk.mediumMovingMinOutQty, 1),
       scoringMode: stk.scoringMode === 'weighted' ? 'weighted' : 'legacy_excel',
       scoringWeightQty: sanitizeNum(stk.scoringWeightQty, defStk.scoringWeightQty, 0, 1),
-      scoringWeightFreq: sanitizeNum(stk.scoringWeightFreq, defStk.scoringWeightFreq, 0, 1)
+      scoringWeightFreq: sanitizeNum(stk.scoringWeightFreq, defStk.scoringWeightFreq, 0, 1),
+      frequencyTiers: (() => {
+        const ft = stk.frequencyTiers && typeof stk.frequencyTiers === 'object' ? stk.frequencyTiers : {};
+        const dft = defStk.frequencyTiers;
+        const veryFastMaxRank = Math.round(sanitizeNum(ft.veryFastMaxRank, dft.veryFastMaxRank, 1, 500));
+        const fastMaxRank = Math.round(sanitizeNum(ft.fastMaxRank, dft.fastMaxRank, veryFastMaxRank + 1, 1000));
+        const slowMaxRank = Math.round(sanitizeNum(ft.slowMaxRank, dft.slowMaxRank, fastMaxRank + 1, 2000));
+        return {
+          veryFastMaxRank,
+          veryFastLabel: String(ft.veryFastLabel || dft.veryFastLabel).trim() || dft.veryFastLabel,
+          fastMaxRank,
+          fastLabel: String(ft.fastLabel || dft.fastLabel).trim() || dft.fastLabel,
+          slowMaxRank,
+          slowLabel: String(ft.slowLabel || dft.slowLabel).trim() || dft.slowLabel,
+          verySlowLabel: String(ft.verySlowLabel || dft.verySlowLabel).trim() || dft.verySlowLabel
+        };
+      })(),
+      prConfig: (() => {
+        const pr = stk.prConfig && typeof stk.prConfig === 'object' ? stk.prConfig : {};
+        const dpr = defStk.prConfig;
+        return {
+          prTitle: String(pr.prTitle || dpr.prTitle).trim() || dpr.prTitle,
+          attachmentTitle: String(pr.attachmentTitle || dpr.attachmentTitle).trim() || dpr.attachmentTitle,
+          draftPrefix: String(pr.draftPrefix || dpr.draftPrefix).trim().toUpperCase() || dpr.draftPrefix,
+          locationLabel: String(pr.locationLabel || dpr.locationLabel).trim() || dpr.locationLabel,
+          preparedLabel: String(pr.preparedLabel || dpr.preparedLabel).trim() || dpr.preparedLabel,
+          approvedLabel: String(pr.approvedLabel || dpr.approvedLabel).trim() || dpr.approvedLabel,
+          signatureLayout: pr.signatureLayout === 'columns' ? 'columns' : 'stacked',
+          defaultPreparedNik: String(pr.defaultPreparedNik ?? dpr.defaultPreparedNik).trim(),
+          defaultPreparedName: String(pr.defaultPreparedName || dpr.defaultPreparedName).trim() || dpr.defaultPreparedName,
+          defaultPreparedTitle: String(pr.defaultPreparedTitle || dpr.defaultPreparedTitle).trim() || dpr.defaultPreparedTitle,
+          defaultApprovedNik: String(pr.defaultApprovedNik ?? dpr.defaultApprovedNik).trim(),
+          defaultApprovedName: String(pr.defaultApprovedName || dpr.defaultApprovedName).trim() || dpr.defaultApprovedName,
+          defaultApprovedTitle: String(pr.defaultApprovedTitle || dpr.defaultApprovedTitle).trim() || dpr.defaultApprovedTitle,
+          qtyPrintMode: pr.qtyPrintMode === 'converted_unit' ? 'converted_unit' : 'purchase_unit'
+        };
+      })()
     }
   };
 }

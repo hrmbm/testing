@@ -179,6 +179,46 @@ const STANDALONE_PRINT_CSS = `
   .drv-pdf-sig-space { height: 90px; }
   .drv-pdf-sig-name { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; color: #000000; }
   .drv-pdf-sig-title { font-weight: 400; margin-top: 1px; color: #000000; }
+  .drv-section-highlight {
+    display: inline-block;
+    background: #ffff00 !important;
+    color: #000000 !important;
+    padding: 1px 6px;
+    font-weight: 700;
+    border-radius: 2px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .atk-pr-sheet .drv-pdf-table { font-size: 9.5px; }
+  .atk-pr-sheet .drv-pdf-table th, .atk-pr-sheet .drv-pdf-table td { padding: 5px 7px; }
+  .atk-pr-sig-stacked {
+    margin-top: 22px;
+    font-size: 9.5px;
+    color: #000000;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 280px;
+  }
+  .atk-pr-sig-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .atk-pr-sig-gap { height: 64px; }
+  .atk-pr-attach-sheet {
+    width: 297mm;
+    min-height: 210mm;
+    max-width: calc(100vw - 32px);
+    padding: 10mm 9mm;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(0,0,0,.38);
+    font-size: 9px;
+    line-height: 1.25;
+    color: #000000;
+  }
+  .atk-pr-attach-sheet .drv-pdf-table thead { display: table-header-group; }
+  .atk-pr-attach-sheet .drv-pdf-table tr { page-break-inside: avoid; break-inside: avoid; }
 
   .cs-landscape-page {
     width: 297mm;
@@ -370,7 +410,7 @@ const STANDALONE_PRINT_CSS = `
       page-break-after: always;
       break-after: page;
     }
-    .stf-pdf-sheet {
+    .stf-pdf-sheet, .atk-pr-attach-sheet {
       page: drvLandscape;
       width: 100% !important;
       min-height: 0 !important;
@@ -381,7 +421,7 @@ const STANDALONE_PRINT_CSS = `
       page-break-after: always;
       break-after: page;
     }
-    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child, .stf-pdf-sheet:last-child {
+    .drv-pdf-sheet:last-child, .cs-landscape-page:last-child, .stf-pdf-sheet:last-child, .atk-pr-attach-sheet:last-child {
       page-break-after: auto;
       break-after: auto;
     }
@@ -472,7 +512,7 @@ export function openDomPrintPreview({ title = 'Cetak Laporan', pagesHtml = '', l
         @page drvPortrait { size: A4 portrait; margin: 10mm 8mm; }
         @page drvLandscape { size: A4 landscape; margin: 7mm 7mm; }
         #pkwt-print-stage .drv-pdf-sheet { page: drvPortrait; }
-        #pkwt-print-stage .cs-landscape-page { page: drvLandscape; }
+        #pkwt-print-stage .cs-landscape-page, #pkwt-print-stage .atk-pr-attach-sheet { page: drvLandscape; }
       }`
     : `@media print { @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${landscape ? '7mm 7mm' : '10mm 8mm'}; } }`;
 
@@ -616,15 +656,19 @@ function buildSummaryTableHtml(payroll, { includeFillerRows = true } = {}) {
   `;
 }
 
-function buildSummaryPdfSheetHtml(payroll, settings) {
+export function buildSummaryPdfSheetHtml(payroll, settings) {
   const drvCfg = settings.driver;
   const win = payroll.window;
+  const hlBg = drvCfg.sectionHighlightColor !== '' ? (drvCfg.sectionHighlightColor || '#ffff00') : '';
+  const summaryLabel = hlBg
+    ? `<span class="drv-section-highlight" style="background:${esc(hlBg)} !important">SUMMARY</span>`
+    : 'SUMMARY';
   return `
     <div class="drv-pdf-sheet pkwt-print-sheet">
       <div class="drv-pdf-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
         <div>LAPORAN GAJI DRIVER</div>
-        <div>SUMMARY</div>
+        <div>${summaryLabel}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(win.headerLabel)}</div>
       </div>
       ${buildSummaryTableHtml(payroll, { includeFillerRows: true })}
@@ -705,12 +749,16 @@ export function buildDeptPdfSheetHtml(sectionName, payroll, settings) {
   const key = String(sectionName || '').trim().toLowerCase();
   const sigKey = ['support', 'indoor', 'outdoor', 'radin'].includes(key) ? key : 'support';
   const sectionSig = drvCfg.signatories?.[sigKey] || drvCfg.signatories?.department || drvCfg.signatories?.radin;
+  const hlBg = drvCfg.sectionHighlightColor !== '' ? (drvCfg.sectionHighlightColor || '#ffff00') : '';
+  const secLabel = hlBg
+    ? `<span class="drv-section-highlight" style="background:${esc(hlBg)} !important">${esc(sectionName.toUpperCase())}</span>`
+    : esc(sectionName.toUpperCase());
   return `
     <div class="drv-pdf-sheet pkwt-print-sheet">
       <div class="drv-pdf-header">
         <div>PT. MITRA BINAMANDIRI MAKMUR</div>
         <div>LAPORAN GAJI DRIVER</div>
-        <div>${esc(sectionName.toUpperCase())}</div>
+        <div>${secLabel}</div>
         <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(win.headerLabel)}</div>
       </div>
       ${buildDeptTableHtml(sectionName, payroll, { includeFillerRows: true })}

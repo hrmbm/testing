@@ -1051,6 +1051,12 @@ async function renderDashboard(opsCtx = null) {
     isRootAdmin: isRootAdminAccount(currentAdminProfile)
   });
 
+  const contractQueue = buildContractWorkspaceQueue({
+    employees,
+    interviews,
+    applicants
+  });
+
   let opsSummary = {
     staffCount: employees.filter(e => !/SOPIR/i.test(String(e.position || '')) && !/ADMIN/i.test(String(e.employee_no || ''))).length,
     staffPendingSelectedDate: 0,
@@ -1058,7 +1064,10 @@ async function renderDashboard(opsCtx = null) {
     driverCount: employees.filter(e => /SOPIR/i.test(String(e.position || '')) && !/SIKUS/i.test(String(e.full_name || ''))).length,
     driverAnomalyCount: 0,
     vehicleCount: 0,
-    vehicleScheduleCount: 0
+    vehicleScheduleCount: 0,
+    atkItemCount: 0,
+    atkNeedBuyCount: 0,
+    atkDraftCount: 0
   };
   try {
     const opsMod = await loadOpsViewsModule();
@@ -1102,8 +1111,10 @@ async function renderDashboard(opsCtx = null) {
   const totalAttentionCount = allAttentionItems.reduce((sum, item) => sum + item.count, 0);
 
   const recruitmentAttentionCount = baseAttention
-    .filter(it => ['leads-recommended', 'candidates-awaiting-disc', 'candidates-awaiting-interview', 'invited-sync', 'pkwt-final-interview', 'pkwt-expiring'].includes(it.id))
+    .filter(it => ['leads-recommended', 'candidates-awaiting-disc', 'candidates-awaiting-interview', 'invited-sync'].includes(it.id))
     .reduce((sum, it) => sum + it.count, 0);
+
+  const pkwtAttentionCount = contractQueue.rows.length;
 
   const moduleCards = [
     {
@@ -1111,19 +1122,30 @@ async function renderDashboard(opsCtx = null) {
       title: 'Recruitment',
       reportLabel: 'Tracking & Report',
       targetView: 'tracking',
-      imgSrc: 'assets/img/dashboard_recruitment_1795563728630.jpg',
-      imgAlt: 'Modern corporate talent and interview studio',
+      imgSrc: 'assets/img/dash_recruitment_grads_1795673203042.jpg',
+      imgAlt: 'University graduates celebrating career readiness in bright glass atrium',
       statLine: `${total} candidates · ${stage1} leads · ${submitted} forms`,
       attentionCount: recruitmentAttentionCount,
       attentionNote: recruitmentAttentionCount > 0 ? `${recruitmentAttentionCount} items need follow-up` : ''
+    },
+    {
+      key: 'pkwt-contracts',
+      title: 'PKWT & Contracts',
+      reportLabel: 'Contracts',
+      targetView: 'contracts',
+      imgSrc: 'assets/img/dash_pkwt_contracts_1795673205288.jpg',
+      imgAlt: 'Clean sunlit oak contract desk with legal agreements and fountain pen',
+      statLine: `${contractQueue.expiringCount} expiring · ${contractQueue.finalInterviewCount} pass interview`,
+      attentionCount: pkwtAttentionCount,
+      attentionNote: pkwtAttentionCount > 0 ? `${pkwtAttentionCount} PKWT need setup/renewal` : ''
     },
     {
       key: 'staff-attendance',
       title: 'Attendance Suite Staff',
       reportLabel: 'Staff Reports',
       targetView: 'attendanceStaffReports',
-      imgSrc: 'assets/img/dashboard_staff_attendance_1795563729222.jpg',
-      imgAlt: 'Operations command workspace for staff scheduling',
+      imgSrc: 'assets/img/dash_staff_bright_1795673204438.jpg',
+      imgAlt: 'Sunlit modern bright corporate workspace desk',
       statLine: `${opsSummary.staffCount} active staff non-driver`,
       attentionCount: opsSummary.staffPendingSelectedDate,
       attentionNote: opsSummary.staffPendingSelectedDate > 0
@@ -1135,8 +1157,8 @@ async function renderDashboard(opsCtx = null) {
       title: 'Drivers Command Center',
       reportLabel: 'Driver Reports',
       targetView: 'attendanceDriverReports',
-      imgSrc: 'assets/img/dashboard_drivers_command_1795563729673.jpg',
-      imgAlt: 'Commercial logistics delivery fleet at dispatch yard',
+      imgSrc: 'assets/img/dash_drivers_bus_park_1795673204702.jpg',
+      imgAlt: 'Luxury white executive charter buses parked neatly in sunlit depot',
       statLine: `${opsSummary.driverCount} active drivers · Payroll & Checksheet`,
       attentionCount: opsSummary.driverAnomalyCount,
       attentionNote: opsSummary.driverAnomalyCount > 0
@@ -1148,11 +1170,24 @@ async function renderDashboard(opsCtx = null) {
       title: 'Vehicle Management',
       reportLabel: 'Vehicle Reports',
       targetView: 'vehicleReports',
-      imgSrc: 'assets/img/dashboard_vehicle_management_1795563729593.jpg',
-      imgAlt: 'Corporate fleet inspection bay and transport vehicles',
+      imgSrc: 'assets/img/dash_vehicle_supercar_1795673204825.jpg',
+      imgAlt: 'Pearl white modern supercar parked at sunlit travertine architectural pavilion',
       statLine: `${opsSummary.vehicleCount} active fleet units · ${opsSummary.vehicleScheduleCount} trips`,
       attentionCount: 0,
       attentionNote: ''
+    },
+    {
+      key: 'stationery-atk',
+      title: 'ATK / Stationery',
+      reportLabel: 'Purchase Plan',
+      targetView: 'stationeryReports',
+      imgSrc: 'assets/img/dash_atk_stationery_1795673206455.jpg',
+      imgAlt: 'Bright sunlit organized office stationery supplies and paper reams',
+      statLine: `${opsSummary.atkItemCount || 0} ATK items · ${opsSummary.atkDraftCount || 0} PR drafts`,
+      attentionCount: opsSummary.atkNeedBuyCount || 0,
+      attentionNote: (opsSummary.atkNeedBuyCount || 0) > 0
+        ? `${opsSummary.atkNeedBuyCount} items need restock`
+        : ''
     }
   ];
 
@@ -1177,7 +1212,7 @@ async function renderDashboard(opsCtx = null) {
 
   content.innerHTML = `
     <section class="dashboard-atelier-hero" aria-label="Workspace overview">
-      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio">
+      <img class="atelier-hero-img" src="assets/img/interior-atelier-banner.jpg" alt="PT. Mitra Binamandiri Makmur showroom and interior studio" referrerpolicy="no-referrer">
       <div class="atelier-hero-scrim" aria-hidden="true"></div>
       <div class="atelier-hero-content">
         <p class="atelier-hero-kicker">PT. Mitra Binamandiri Makmur</p>
@@ -1204,7 +1239,7 @@ async function renderDashboard(opsCtx = null) {
     <section class="dashboard-menu-grid" aria-label="Operational Modules">
       ${moduleCards.map(card => `
         <button type="button" class="dash-module-box ${card.attentionCount > 0 ? 'has-attention' : ''}" data-view="${esc(card.targetView)}" data-module-key="${esc(card.key)}">
-          <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}">
+          <img class="dash-module-bg" src="${esc(card.imgSrc)}" alt="${esc(card.imgAlt)}" referrerpolicy="no-referrer">
           <div class="dash-module-scrim" aria-hidden="true"></div>
           <div class="dash-module-inner">
             <div class="dash-module-top">

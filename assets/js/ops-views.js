@@ -74,6 +74,10 @@ import {
   sliceTopFavoriteItems,
   buildDepartmentUsageChartData,
   buildPurchasePlanSuggestions,
+  classifyPurchasePlanFrequency,
+  buildPurchaseRequisitionWorkspaceRows,
+  buildNextPrDraftCode,
+  buildPurchaseRequisitionPrintData,
   deriveDefaultPurchaseUnit,
   parseStationeryMasterImportRows,
   importStationeryMasterDataset,
@@ -95,6 +99,7 @@ const DEMO_OPS_STORAGE_KEY = 'hrga_demo_ops_v3';
 const OPS_SETTINGS_KEY = 'hrga_ops_settings_v1';
 const DRIVER_ADJUSTMENTS_KEY = 'hrga_driver_adjustments_v1';
 const STATIONERY_PLAN_MANUAL_KEY = 'hrga_atk_purchase_plan_manual_v1';
+const STATIONERY_PR_DRAFTS_KEY = 'hrga_atk_pr_drafts_v1';
 const STATIONERY_DEPTS_KEY = 'hrga_atk_departments_v1';
 const STATIONERY_MATERIAL_META_KEY = 'hrga_atk_material_meta_v1';
 const ATK_STOCK_CLEANUP_KEY = 'hrga_atk_stock_reset_v22';
@@ -218,6 +223,21 @@ function saveStoredPlanManual(map) {
   } catch {}
 }
 
+function readStoredPrDrafts() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STATIONERY_PR_DRAFTS_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredPrDrafts(drafts) {
+  try {
+    localStorage.setItem(STATIONERY_PR_DRAFTS_KEY, JSON.stringify(Array.isArray(drafts) ? drafts : []));
+  } catch {}
+}
+
 function readStoredDepartments() {
   try {
     const raw = JSON.parse(localStorage.getItem(STATIONERY_DEPTS_KEY) || 'null');
@@ -311,7 +331,8 @@ function buildInitialDemoOpsState() {
     stationeryItems: normalizeStationeryItems(structuredClone(SEED_STATIONERY_ITEMS)),
     stationeryDepartments,
     stationeryMovements: structuredClone(SEED_STATIONERY_MOVEMENTS),
-    stationeryPlanManual: readStoredPlanManual()
+    stationeryPlanManual: readStoredPlanManual(),
+    stationeryPrDrafts: readStoredPrDrafts()
   };
 }
 
@@ -355,7 +376,10 @@ export function readDemoOpsState() {
         stationeryMovements: atkMovements,
         stationeryPlanManual: raw.stationeryPlanManual && typeof raw.stationeryPlanManual === 'object'
           ? raw.stationeryPlanManual
-          : readStoredPlanManual()
+          : readStoredPlanManual(),
+        stationeryPrDrafts: Array.isArray(raw.stationeryPrDrafts)
+          ? raw.stationeryPrDrafts
+          : readStoredPrDrafts()
       };
       if (!localStorage.getItem(ATK_STOCK_CLEANUP_KEY)) {
         localStorage.setItem(ATK_STOCK_CLEANUP_KEY, '1');
@@ -397,7 +421,7 @@ async function loadOpsState(ctx, force = false) {
     const state = buildInitialDemoOpsState();
     try {
       const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
-        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY, STATIONERY_MATERIAL_META_KEY]),
+        sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY, STATIONERY_PR_DRAFTS_KEY, STATIONERY_MATERIAL_META_KEY]),
         sb.from('attendance_calendar_days').select('*').order('cal_date', { ascending: true }),
         sb.from('attendance_upload_batches').select('*').order('created_at', { ascending: false }).limit(30),
         sb.from('attendance_raw_events').select('*').order('work_date', { ascending: false }).limit(2500),
@@ -415,11 +439,13 @@ async function loadOpsState(ctx, force = false) {
         const adjRow = setRes.data.find(r => r.key === DRIVER_ADJUSTMENTS_KEY);
         const deptRow = setRes.data.find(r => r.key === STATIONERY_DEPTS_KEY);
         const planRow = setRes.data.find(r => r.key === STATIONERY_PLAN_MANUAL_KEY);
+        const draftsRow = setRes.data.find(r => r.key === STATIONERY_PR_DRAFTS_KEY);
         const matMetaRow = setRes.data.find(r => r.key === STATIONERY_MATERIAL_META_KEY);
         if (opsRow?.value) state.settings = normalizeOpsSettings(opsRow.value);
         if (adjRow?.value && typeof adjRow.value === 'object') state.driverAdjustments = adjRow.value;
         if (Array.isArray(deptRow?.value)) deptRows = deptRow.value;
         if (planRow?.value && typeof planRow.value === 'object') state.stationeryPlanManual = planRow.value;
+        if (Array.isArray(draftsRow?.value)) state.stationeryPrDrafts = draftsRow.value;
         if (matMetaRow?.value && typeof matMetaRow.value === 'object') {
           materialMeta = { ...materialMeta, ...matMetaRow.value };
         }
@@ -3092,125 +3118,538 @@ export async function renderStationeryStockView(host, ctx) {
   });
 }
 
+function formatIndoLongDate(iso = '') {
+  const s = String(iso || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s;
+  const months = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+  const monthLabel = months[Math.max(0, Math.min(11, Number(m[2]) - 1))] || m[2];
+  return `${Number(m[3])} ${monthLabel} ${m[1]}`;
+}
+
+function buildPurchaseRequisitionPrintPagesHtml({ draft, reqRows, periodWindow, stationerySettings }) {
+  const { meta, purchaseItems, attachmentItems } = buildPurchaseRequisitionPrintData({
+    draft: {
+      ...draft,
+      periodLabel: periodWindow.periodLabel,
+      dateRangeLabel: periodWindow.dateRangeLabel
+    },
+    reqRows,
+    stationerySettings
+  });
+
+  const buyBodyHtml = purchaseItems.length
+    ? purchaseItems.map(item => `
+        <tr>
+          <td class="c">${item.no}</td>
+          <td class="c nowrap"><code>${esc(item.item_code)}</code></td>
+          <td>${esc(item.item_name)}</td>
+          <td class="num"><b>${esc(item.purchaseQty)}</b></td>
+          <td class="c nowrap">${esc(item.unit)}</td>
+        </tr>
+      `).join('')
+    : '<tr><td colspan="5" class="c">Belum ada item dengan Purchase Qty &gt; 0.</td></tr>';
+
+  const dateLine = `${esc(meta.locationLabel)}, ${esc(formatIndoLongDate(meta.docDate))}`;
+  const sigHtml = meta.signatureLayout === 'columns'
+    ? `
+      <div class="drv-pdf-footer">
+        <div class="drv-pdf-sig-col">
+          <div class="drv-pdf-loc">${dateLine}</div>
+          <div class="drv-pdf-sig-role">${esc(meta.preparedLabel)}</div>
+          <div class="drv-pdf-sig-space"></div>
+          <div class="drv-pdf-sig-name">${esc(meta.preparedBy.name || '-')}</div>
+          <div class="drv-pdf-sig-title">${esc(meta.preparedBy.title || '')}</div>
+        </div>
+        <div class="drv-pdf-sig-col drv-pdf-sig-right">
+          <div class="drv-pdf-loc">&nbsp;</div>
+          <div class="drv-pdf-sig-role">${esc(meta.approvedLabel)}</div>
+          <div class="drv-pdf-sig-space"></div>
+          <div class="drv-pdf-sig-name">${esc(meta.approvedBy.name || '-')}</div>
+          <div class="drv-pdf-sig-title">${esc(meta.approvedBy.title || '')}</div>
+        </div>
+      </div>
+    `
+    : `
+      <div class="atk-pr-sig-stacked">
+        <div class="atk-pr-sig-block">
+          <div class="drv-pdf-loc">${dateLine}</div>
+          <div class="drv-pdf-sig-role">${esc(meta.preparedLabel)}</div>
+          <div class="atk-pr-sig-gap"></div>
+          <div class="drv-pdf-sig-name">${esc(meta.preparedBy.name || '-')}</div>
+          <div class="drv-pdf-sig-title">${esc(meta.preparedBy.title || '')}</div>
+        </div>
+        <div class="atk-pr-sig-block">
+          <div class="drv-pdf-sig-role">${esc(meta.approvedLabel)}</div>
+          <div class="atk-pr-sig-gap"></div>
+          <div class="drv-pdf-sig-name">${esc(meta.approvedBy.name || '-')}</div>
+          <div class="drv-pdf-sig-title">${esc(meta.approvedBy.title || '')}</div>
+        </div>
+      </div>
+    `;
+
+  const page1Html = `
+    <div class="drv-pdf-sheet atk-pr-sheet pkwt-print-sheet">
+      <div class="drv-pdf-header">
+        <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+        <div><span class="drv-section-highlight">${esc(meta.prTitle)}</span></div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">NO. DRAFT</span>: ${esc(meta.draftCode)}</div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">JUDUL</span>: ${esc(meta.title)}</div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(periodWindow.periodLabel)} (${esc(periodWindow.dateRangeLabel)})</div>
+      </div>
+      <table class="drv-pdf-table">
+        <thead>
+          <tr>
+            <th style="width:34px">No</th>
+            <th style="width:86px">Kode Material</th>
+            <th>Item</th>
+            <th style="width:92px">Purchase Qty</th>
+            <th style="width:74px">Unit</th>
+          </tr>
+        </thead>
+        <tbody>${buyBodyHtml}</tbody>
+      </table>
+      ${sigHtml}
+    </div>
+  `;
+
+  const attachRowsHtml = attachmentItems.length
+    ? attachmentItems.map(r => {
+        const converted = r.convertedDecisionQty !== '' && Number.isFinite(Number(r.convertedDecisionQty))
+          ? `${r.convertedDecisionQty} ${esc(r.unit)}`
+          : '—';
+        return `
+          <tr>
+            <td class="c">#${r.rank}</td>
+            <td>${esc(r.item_name)}</td>
+            <td class="num">${r.currentStock}</td>
+            <td class="num">${r.periodRequirement}</td>
+            <td class="num">${r.minStock}</td>
+            <td class="c">${esc(r.unit)}</td>
+            <td class="num">${esc(r.minPurchase)}</td>
+            <td class="c">${esc(r.purchaseUnit)}</td>
+            <td class="num"><b>${r.decisionQty !== '' ? esc(r.decisionQty) : ''}</b></td>
+            <td class="c">${esc(r.purchaseUnit)}</td>
+            <td class="num">${converted}</td>
+            <td class="nowrap">${esc(r.frequency)}</td>
+            <td>${esc(r.note || '')}</td>
+          </tr>
+        `;
+      }).join('')
+    : '<tr><td colspan="13" class="c">Tidak ada barang dengan suggestion &gt; 0 pada lampiran ini.</td></tr>';
+
+  const page2Html = `
+    <div class="atk-pr-attach-sheet pkwt-print-sheet">
+      <div class="drv-pdf-header">
+        <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+        <div><span class="drv-section-highlight">${esc(meta.attachmentTitle)}</span></div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">NO. DRAFT</span>: ${esc(meta.draftCode)} — ${esc(meta.title)}</div>
+        <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(periodWindow.periodLabel)} (${esc(periodWindow.dateRangeLabel)})</div>
+      </div>
+      <table class="drv-pdf-table">
+        <thead>
+          <tr>
+            <th style="width:48px">Priority</th>
+            <th>Item</th>
+            <th style="width:52px">Current Stock</th>
+            <th style="width:68px">${esc(periodWindow.requirementColumnLabel)}</th>
+            <th style="width:52px">Min Stock</th>
+            <th style="width:42px">Unit</th>
+            <th style="width:56px">Min Purchase</th>
+            <th style="width:58px">Purchase Unit</th>
+            <th style="width:66px">Purchase Qty Decision</th>
+            <th style="width:58px">Purchase Unit</th>
+            <th style="width:78px">Convert to Unit</th>
+            <th style="width:102px">Frequency</th>
+            <th style="width:120px">Note</th>
+          </tr>
+        </thead>
+        <tbody>${attachRowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+
+  return {
+    title: `${meta.prTitle} — ${meta.draftCode}`,
+    pagesHtml: `${page1Html}${page2Html}`
+  };
+}
+
 export async function renderStationeryReportsView(host, ctx) {
   const state = await loadOpsState(ctx);
-  const purchasePeriod = host.dataset.atkPlanPeriod || '1w';
+  const allEmployees = getAllKnownEmployees(ctx);
+  const stkCfg = state.settings.stationery;
+  const prCfg = stkCfg.prConfig || DEFAULT_OPS_SETTINGS.stationery.prConfig;
+  const purchasePeriod = host.dataset.atkPlanPeriod || stkCfg.purchaseHorizon || '1w';
   const topNVal = host.dataset.atkPlanTopN || 'all';
   const searchQ = (host.dataset.atkPlanSearch || '').trim().toLowerCase();
+  const mode = host.dataset.atkPlanMode === 'requisition' ? 'requisition' : 'suggestion';
+  const drafts = Array.isArray(state.stationeryPrDrafts) ? state.stationeryPrDrafts : [];
+
+  const resolveEmpDefault = (nikCandidate, nameCandidate, fallbackTitle) => {
+    const found = allEmployees.find(e =>
+      (nikCandidate && compactNik(e.employee_no) === compactNik(nikCandidate)) ||
+      (nameCandidate && String(e.full_name || '').trim().toUpperCase().includes(String(nameCandidate).trim().toUpperCase()))
+    );
+    return {
+      nik: found?.employee_no || nikCandidate || '',
+      name: found?.full_name || nameCandidate || '',
+      title: found?.position || fallbackTitle || ''
+    };
+  };
+
+  if (!host._prWorkingDraft) {
+    const prepDef = resolveEmpDefault(prCfg.defaultPreparedNik, prCfg.defaultPreparedName, prCfg.defaultPreparedTitle);
+    const appDef = resolveEmpDefault(prCfg.defaultApprovedNik, prCfg.defaultApprovedName, prCfg.defaultApprovedTitle);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    host._prWorkingDraft = {
+      id: '',
+      draftCode: buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', todayIso),
+      title: `Purchase Requisition ATK`,
+      docDate: todayIso,
+      locationLabel: prCfg.locationLabel || 'Pasuruan',
+      preparedBy: prepDef,
+      approvedBy: appDef,
+      manualItemIds: [],
+      rowOverrides: structuredClone(state.stationeryPlanManual || {})
+    };
+  }
 
   const plan = buildPurchasePlanSuggestions({
     items: state.stationeryItems,
     ledger: state.stationeryMovements,
     purchasePeriod,
     referenceDate: new Date(),
-    manualOverrides: state.stationeryPlanManual || {},
+    manualOverrides: mode === 'requisition'
+      ? (host._prWorkingDraft.rowOverrides || {})
+      : (state.stationeryPlanManual || {}),
     settings: state.settings
   });
 
   const sliced = sliceTopFavoriteItems(plan.rows, topNVal);
-  const visibleRows = searchQ
+  const visibleSuggestionRows = searchQ
     ? sliced.filter(r => r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ))
     : sliced;
 
-  const persistPlanManual = async nextMap => {
-    state.stationeryPlanManual = nextMap;
-    saveStoredPlanManual(nextMap);
+  const reqData = buildPurchaseRequisitionWorkspaceRows({
+    planRows: plan.rows,
+    manualItemIds: host._prWorkingDraft.manualItemIds || [],
+    rowOverrides: host._prWorkingDraft.rowOverrides || {},
+    stationerySettings: stkCfg
+  });
+  const visibleReqRows = searchQ
+    ? reqData.rows.filter(r => r.item_name.toLowerCase().includes(searchQ) || r.item_code.toLowerCase().includes(searchQ))
+    : reqData.rows;
+
+  const persistPrDrafts = async nextDrafts => {
+    state.stationeryPrDrafts = nextDrafts;
+    saveStoredPrDrafts(nextDrafts);
     if (ctx.isDemoMode) {
       saveDemoOpsState(state);
     } else if (ctx.supabase) {
-      await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_PLAN_MANUAL_KEY, value: nextMap }]);
+      const { error } = await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_PR_DRAFTS_KEY, value: nextDrafts }]);
+      if (error) throw error;
+      invalidateOpsStateCache();
     }
   };
 
-  host.innerHTML = `
-    <div class="ops-stack">
-      <div class="card ops-card">
-        <div class="ops-head">
-          <div>
-            <h2>Purchase Plan Suggestion</h2>
-          </div>
-          <div class="ops-actions">
-            <button type="button" class="btn btn-secondary" id="ops-srep-atk-print">Print Plan</button>
-            <button type="button" class="btn btn-primary" id="ops-srep-atk-xlsx">Export Excel</button>
-          </div>
-        </div>
-        <div class="ops-form-grid" style="margin-top:10px">
-          <label class="ops-field">
-            <span>Purchase Period</span>
-            <select id="ops-plan-period" class="input">
-              <option value="1w" ${purchasePeriod === '1w' ? 'selected' : ''}>Weekly</option>
-              <option value="2w" ${purchasePeriod === '2w' ? 'selected' : ''}>Bi-Weekly (2 Weeks)</option>
-              <option value="1m" ${purchasePeriod === '1m' ? 'selected' : ''}>Monthly</option>
-            </select>
-          </label>
-          <label class="ops-field atk-plan-window-field">
-            <span>Next Planning Window (Auto)</span>
-            <input type="text" class="input atk-plan-window-input" id="ops-plan-window" value="${esc(plan.window.dateRangeLabel)}" readonly>
-          </label>
-          <label class="ops-field">
-            <span>Show Top Items (Global Favorite Rank)</span>
-            <select id="ops-plan-topn" class="input">
-              <option value="all" ${topNVal === 'all' ? 'selected' : ''}>All Items (Rank 1–${plan.rows.length})</option>
-              <option value="15" ${topNVal === '15' ? 'selected' : ''}>Top 15</option>
-              <option value="25" ${topNVal === '25' ? 'selected' : ''}>Top 25</option>
-              <option value="50" ${topNVal === '50' ? 'selected' : ''}>Top 50</option>
-            </select>
-          </label>
-          <label class="ops-field">
-            <span>Search Item</span>
-            <input type="search" id="ops-plan-search" class="input" value="${esc(host.dataset.atkPlanSearch || '')}" placeholder="Filter item name...">
-          </label>
+  const empSelectOptions = (selectedNik, selectedName) => {
+    const cleanSelNik = compactNik(selectedNik || '');
+    const cleanSelName = String(selectedName || '').trim().toUpperCase();
+    return '<option value="">-- Pilih Karyawan --</option>' + allEmployees.map(e => {
+      const match = (cleanSelNik && compactNik(e.employee_no) === cleanSelNik) ||
+        (!cleanSelNik && cleanSelName && String(e.full_name || '').trim().toUpperCase() === cleanSelName);
+      return `<option value="${esc(e.employee_no)}" data-name="${esc(e.full_name)}" data-pos="${esc(e.position || '')}" ${match ? 'selected' : ''}>${esc(e.full_name)} (${esc(e.employee_no)})</option>`;
+    }).join('');
+  };
+
+  const draftsListHtml = drafts.length ? `
+    <div class="card ops-card atk-pr-drafts-card">
+      <div class="ops-head" style="margin-bottom:10px">
+        <div>
+          <h3 style="margin:0">Draft Purchase Requisition Tersimpan</h3>
+          <p class="ops-sub-note" style="margin:2px 0 0">Akses kembali, edit, atau cetak ulang draft PR yang sudah disimpan.</p>
         </div>
       </div>
-
-      <div class="card ops-card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:72px">Priority</th>
-                <th>Item</th>
-                <th class="num">Current Stock</th>
-                <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
-                <th class="num">Min Stock</th>
-                <th>Unit</th>
-                <th class="num" style="width:110px">Min Purchase</th>
-                <th>Purchase Unit</th>
-                <th class="num" style="width:130px">Purchase Qty Decision</th>
-                <th>Purchase Unit</th>
-                <th class="num" style="width:155px">Convert to Unit</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${visibleRows.length ? visibleRows.map(r => `
-                <tr data-plan-id="${esc(r.id)}">
-                  <td><b>#${r.rank}</b></td>
-                  <td><b>${esc(r.item_name)}</b></td>
-                  <td class="num">${r.currentStock}</td>
-                  <td class="num"><b>${r.periodRequirement}</b></td>
-                  <td class="num">${r.minStock}</td>
-                  <td>${esc(r.unit)}</td>
-                  <td class="num">
-                    <input type="number" min="1" step="1" class="input atk-plan-input ops-plan-min-inp" data-item-id="${esc(r.id)}" value="${r.minPurchase}" aria-label="Min purchase for ${esc(r.item_name)}">
-                  </td>
-                  <td>${esc(r.purchaseUnit)}</td>
-                  <td class="num">
-                    <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" data-conv="${r.conversionQty}" data-unit="${esc(r.unit)}" data-punit="${esc(r.purchaseUnit)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
-                  </td>
-                  <td>${esc(r.purchaseUnit)}</td>
-                  <td class="num atk-convert-cell" data-conv-cell="${esc(r.id)}">
-                    ${r.convertedDecisionQty !== ''
-                      ? `<b>${r.convertedDecisionQty} ${esc(r.unit)}</b><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`
-                      : `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`}
-                  </td>
-                </tr>
-              `).join('') : '<tr><td colspan="11" class="empty">No items match the current filter.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+      <div class="atk-pr-draft-list">
+        ${drafts.map(d => {
+          const isCurrent = host._prWorkingDraft?.id === d.id && mode === 'requisition';
+          return `
+            <div class="atk-pr-draft-item ${isCurrent ? 'is-active' : ''}" data-draft-id="${esc(d.id)}">
+              <div class="atk-pr-draft-main">
+                <div class="atk-pr-draft-header-line">
+                  <code class="atk-pr-draft-code">${esc(d.draftCode)}</code>
+                  <b class="atk-pr-draft-title">${esc(d.title)}</b>
+                </div>
+                <div class="atk-pr-draft-meta">
+                  <span>Periode: <b>${esc(d.periodLabel || d.purchasePeriod || '-')}</b></span>
+                  <span>·</span>
+                  <span>Tanggal: <b>${esc(d.docDate || '-')}</b></span>
+                  <span>·</span>
+                  <span>Item dibeli: <b>${Number(d.buyItemCount || 0)}</b></span>
+                  <span>·</span>
+                  <span>Lampiran: <b>${Number(d.attachedItemCount || 0)} item</b></span>
+                </div>
+              </div>
+              <div class="ops-actions">
+                <button type="button" class="btn btn-sm btn-secondary atk-draft-open" data-id="${esc(d.id)}">Buka Draft</button>
+                <button type="button" class="btn btn-sm btn-secondary atk-draft-print" data-id="${esc(d.id)}">Print PR</button>
+                <button type="button" class="btn btn-sm btn-secondary atk-draft-delete" data-id="${esc(d.id)}">Hapus</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
       </div>
     </div>
-  `;
+  ` : '';
+
+  if (mode === 'requisition') {
+    const wd = host._prWorkingDraft;
+    const freqClass = f => {
+      if (f === (stkCfg.frequencyTiers?.veryFastLabel || 'Very Fast Moving')) return 'green';
+      if (f === (stkCfg.frequencyTiers?.fastLabel || 'Fast Moving')) return 'teal';
+      if (f === (stkCfg.frequencyTiers?.slowLabel || 'Slow Moving')) return 'gold';
+      return 'muted';
+    };
+
+    host.innerHTML = `
+      <div class="ops-stack">
+        <div class="card ops-card">
+          <div class="ops-head">
+            <div>
+              <h2>Plan Purchase Requisition</h2>
+              <p class="ops-sub-note" style="margin:2px 0 0">Menampilkan semua item dengan suggestion tidak nol ditambah item manual. Simpan menjadi draft kapan saja atau cetak PR + Lampiran.</p>
+            </div>
+            <div class="ops-actions">
+              <button type="button" class="btn btn-secondary" id="ops-pr-back">&larr; Kembali ke Suggestion</button>
+              <button type="button" class="btn btn-secondary" id="ops-pr-save-draft">Simpan Draft</button>
+              <button type="button" class="btn btn-primary" id="ops-pr-print">Print Purchase Requisition</button>
+            </div>
+          </div>
+
+          <div class="ops-form-grid" style="margin-top:12px">
+            <label class="ops-field">
+              <span>Kode Draft / No. PR</span>
+              <input type="text" id="pr-draft-code" class="input" value="${esc(wd.draftCode)}">
+            </label>
+            <label class="ops-field">
+              <span>Judul Draft</span>
+              <input type="text" id="pr-draft-title" class="input" value="${esc(wd.title)}" placeholder="Contoh: Pengadaan ATK Mingguan">
+            </label>
+            <label class="ops-field">
+              <span>Purchase Period</span>
+              <select id="ops-plan-period" class="input">
+                <option value="1w" ${purchasePeriod === '1w' ? 'selected' : ''}>Weekly</option>
+                <option value="2w" ${purchasePeriod === '2w' ? 'selected' : ''}>Bi-Weekly (2 Weeks)</option>
+                <option value="1m" ${purchasePeriod === '1m' ? 'selected' : ''}>Monthly</option>
+              </select>
+            </label>
+            <label class="ops-field">
+              <span>Planning Window</span>
+              <input type="text" class="input atk-plan-window-input" value="${esc(plan.window.dateRangeLabel)}" readonly>
+            </label>
+            <label class="ops-field">
+              <span>Lokasi Dokumen</span>
+              <input type="text" id="pr-doc-location" class="input" value="${esc(wd.locationLabel || 'Pasuruan')}">
+            </label>
+            <label class="ops-field">
+              <span>Tanggal PR</span>
+              <input type="date" id="pr-doc-date" class="input" value="${esc(wd.docDate)}">
+            </label>
+            <label class="ops-field">
+              <span>Search Item</span>
+              <input type="search" id="ops-plan-search" class="input" value="${esc(host.dataset.atkPlanSearch || '')}" placeholder="Filter item...">
+            </label>
+            <div class="ops-field">
+              <span>Tambah Item Manual (Suggestion 0)</span>
+              <div class="atk-pr-add-manual">
+                <select id="pr-manual-item-sel" class="input" ${reqData.availableToAdd.length ? '' : 'disabled'}>
+                  ${reqData.availableToAdd.length
+                    ? '<option value="">-- Pilih item untuk ditambah --</option>' + reqData.availableToAdd.map(r => `<option value="${esc(r.id)}">#${r.rank} · ${esc(r.item_name)} (${esc(r.unit)})</option>`).join('')
+                    : '<option value="">Semua item sudah masuk daftar</option>'}
+                </select>
+                <button type="button" class="btn btn-secondary" id="pr-manual-item-add" ${reqData.availableToAdd.length ? '' : 'disabled'}>+ Tambah</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="ops-schedule-blocks" style="margin-top:12px">
+            <div class="ops-sig-box">
+              <b>${esc(prCfg.preparedLabel || 'Dibuat oleh,')}</b>
+              <div class="ops-form-grid" style="margin-top:8px">
+                <label class="ops-field">
+                  <span>Pilih Karyawan</span>
+                  <select id="pr-prep-emp" class="input">${empSelectOptions(wd.preparedBy?.nik, wd.preparedBy?.name)}</select>
+                </label>
+                <label class="ops-field">
+                  <span>Nama Tercetak</span>
+                  <input type="text" id="pr-prep-name" class="input" value="${esc(wd.preparedBy?.name || '')}">
+                </label>
+                <label class="ops-field">
+                  <span>Jabatan</span>
+                  <input type="text" id="pr-prep-title" class="input" value="${esc(wd.preparedBy?.title || '')}">
+                </label>
+              </div>
+            </div>
+            <div class="ops-sig-box">
+              <b>${esc(prCfg.approvedLabel || 'Menyetujui,')}</b>
+              <div class="ops-form-grid" style="margin-top:8px">
+                <label class="ops-field">
+                  <span>Pilih Karyawan</span>
+                  <select id="pr-app-emp" class="input">${empSelectOptions(wd.approvedBy?.nik, wd.approvedBy?.name)}</select>
+                </label>
+                <label class="ops-field">
+                  <span>Nama Tercetak</span>
+                  <input type="text" id="pr-app-name" class="input" value="${esc(wd.approvedBy?.name || '')}">
+                </label>
+                <label class="ops-field">
+                  <span>Jabatan</span>
+                  <input type="text" id="pr-app-title" class="input" value="${esc(wd.approvedBy?.title || '')}">
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        ${draftsListHtml}
+
+        <div class="card ops-card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:72px">Priority</th>
+                  <th>Item</th>
+                  <th class="num">Current Stock</th>
+                  <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
+                  <th class="num">Min Stock</th>
+                  <th>Unit</th>
+                  <th class="num" style="width:102px">Min Purchase</th>
+                  <th>Purchase Unit</th>
+                  <th class="num" style="width:124px">Purchase Qty Decision</th>
+                  <th>Purchase Unit</th>
+                  <th class="num" style="width:142px">Convert to Unit</th>
+                  <th style="width:136px">Frequency</th>
+                  <th style="min-width:170px">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${visibleReqRows.length ? visibleReqRows.map(r => `
+                  <tr data-plan-id="${esc(r.id)}">
+                    <td class="nowrap">
+                      <b>#${r.rank}</b>
+                      ${r.isManualAdded ? `<button type="button" class="btn btn-xs btn-secondary pr-manual-remove" data-item-id="${esc(r.id)}" title="Keluarkan item manual" style="margin-left:4px;padding:1px 6px">×</button>` : ''}
+                    </td>
+                    <td>
+                      <b>${esc(r.item_name)}</b>
+                      ${r.isManualAdded ? '<div class="ops-sub-note">Ditambahkan manual</div>' : ''}
+                    </td>
+                    <td class="num">${r.currentStock}</td>
+                    <td class="num"><b>${r.periodRequirement}</b></td>
+                    <td class="num">${r.minStock}</td>
+                    <td>${esc(r.unit)}</td>
+                    <td class="num">
+                      <input type="number" min="1" step="1" class="input atk-plan-input ops-plan-min-inp" data-item-id="${esc(r.id)}" value="${r.minPurchase}" aria-label="Min purchase for ${esc(r.item_name)}">
+                    </td>
+                    <td>${esc(r.purchaseUnit)}</td>
+                    <td class="num">
+                      <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" data-conv="${r.conversionQty}" data-unit="${esc(r.unit)}" data-punit="${esc(r.purchaseUnit)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
+                    </td>
+                    <td>${esc(r.purchaseUnit)}</td>
+                    <td class="num atk-convert-cell" data-conv-cell="${esc(r.id)}">
+                      ${r.convertedDecisionQty !== ''
+                        ? `<b>${r.convertedDecisionQty} ${esc(r.unit)}</b><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`
+                        : `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`}
+                    </td>
+                    <td><span class="status-pill ${freqClass(r.frequency)}">${esc(r.frequency)}</span></td>
+                    <td>
+                      <input type="text" class="input ops-plan-note-inp" data-item-id="${esc(r.id)}" value="${esc(r.note)}" placeholder="Catatan..." aria-label="Note for ${esc(r.item_name)}">
+                    </td>
+                  </tr>
+                `).join('') : '<tr><td colspan="13" class="empty">Belum ada barang dengan suggestion tidak nol. Catat barang keluar atau tambahkan item manual di atas.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    host.innerHTML = `
+      <div class="ops-stack">
+        <div class="card ops-card">
+          <div class="ops-head">
+            <div>
+              <h2>Purchase Plan Suggestion</h2>
+            </div>
+            <div class="ops-actions">
+              <button type="button" class="btn btn-secondary" id="ops-srep-atk-print">Print Plan</button>
+              <button type="button" class="btn btn-secondary" id="ops-srep-atk-xlsx">Export Excel</button>
+              <button type="button" class="btn btn-primary" id="ops-pr-create-btn">+ Buat Plan Purchase Requisition</button>
+            </div>
+          </div>
+          <div class="ops-form-grid" style="margin-top:10px">
+            <label class="ops-field">
+              <span>Purchase Period</span>
+              <select id="ops-plan-period" class="input">
+                <option value="1w" ${purchasePeriod === '1w' ? 'selected' : ''}>Weekly</option>
+                <option value="2w" ${purchasePeriod === '2w' ? 'selected' : ''}>Bi-Weekly (2 Weeks)</option>
+                <option value="1m" ${purchasePeriod === '1m' ? 'selected' : ''}>Monthly</option>
+              </select>
+            </label>
+            <label class="ops-field atk-plan-window-field">
+              <span>Next Planning Window (Auto)</span>
+              <input type="text" class="input atk-plan-window-input" id="ops-plan-window" value="${esc(plan.window.dateRangeLabel)}" readonly>
+            </label>
+            <label class="ops-field">
+              <span>Show Top Items (Global Favorite Rank)</span>
+              <select id="ops-plan-topn" class="input">
+                <option value="all" ${topNVal === 'all' ? 'selected' : ''}>All Items (Rank 1–${plan.rows.length})</option>
+                <option value="15" ${topNVal === '15' ? 'selected' : ''}>Top 15</option>
+                <option value="25" ${topNVal === '25' ? 'selected' : ''}>Top 25</option>
+                <option value="50" ${topNVal === '50' ? 'selected' : ''}>Top 50</option>
+              </select>
+            </label>
+            <label class="ops-field">
+              <span>Search Item</span>
+              <input type="search" id="ops-plan-search" class="input" value="${esc(host.dataset.atkPlanSearch || '')}" placeholder="Filter item name...">
+            </label>
+          </div>
+        </div>
+
+        ${draftsListHtml}
+
+        <div class="card ops-card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:80px">Priority</th>
+                  <th>Item</th>
+                  <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
+                  <th class="num">Min Stock</th>
+                  <th style="width:90px">Unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${visibleSuggestionRows.length ? visibleSuggestionRows.map(r => `
+                  <tr data-plan-id="${esc(r.id)}">
+                    <td><b>#${r.rank}</b></td>
+                    <td><b>${esc(r.item_name)}</b></td>
+                    <td class="num"><b>${r.periodRequirement}</b></td>
+                    <td class="num">${r.minStock}</td>
+                    <td>${esc(r.unit)}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5" class="empty">No items match the current filter.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   host.querySelector('#ops-plan-period')?.addEventListener('change', e => {
     host.dataset.atkPlanPeriod = e.target.value || '1w';
@@ -3229,20 +3668,101 @@ export async function renderStationeryReportsView(host, ctx) {
     planSearchTimer = setTimeout(() => renderStationeryReportsView(host, ctx), 160);
   });
 
-  const handleManualChange = async (itemId, field, value) => {
-    const current = { ...(state.stationeryPlanManual || {}) };
-    const prevRow = { ...(current[itemId] || {}) };
+  host.querySelector('#ops-pr-create-btn')?.addEventListener('click', () => {
+    const prepDef = resolveEmpDefault(prCfg.defaultPreparedNik, prCfg.defaultPreparedName, prCfg.defaultPreparedTitle);
+    const appDef = resolveEmpDefault(prCfg.defaultApprovedNik, prCfg.defaultApprovedName, prCfg.defaultApprovedTitle);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    host._prWorkingDraft = {
+      id: '',
+      draftCode: buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', todayIso),
+      title: `Purchase Requisition ${plan.window.periodLabel}`,
+      docDate: todayIso,
+      locationLabel: prCfg.locationLabel || 'Pasuruan',
+      preparedBy: prepDef,
+      approvedBy: appDef,
+      manualItemIds: [],
+      rowOverrides: {}
+    };
+    host.dataset.atkPlanMode = 'requisition';
+    renderStationeryReportsView(host, ctx);
+  });
+
+  host.querySelector('#ops-pr-back')?.addEventListener('click', () => {
+    host.dataset.atkPlanMode = 'suggestion';
+    renderStationeryReportsView(host, ctx);
+  });
+
+  // Draft Header bindings in Requisition mode
+  const wdRef = host._prWorkingDraft;
+  host.querySelector('#pr-draft-code')?.addEventListener('input', e => { wdRef.draftCode = e.target.value; });
+  host.querySelector('#pr-draft-title')?.addEventListener('input', e => { wdRef.title = e.target.value; });
+  host.querySelector('#pr-doc-location')?.addEventListener('input', e => { wdRef.locationLabel = e.target.value; });
+  host.querySelector('#pr-doc-date')?.addEventListener('change', e => { wdRef.docDate = e.target.value; });
+
+  host.querySelector('#pr-prep-emp')?.addEventListener('change', e => {
+    const opt = e.target.selectedOptions?.[0];
+    if (!opt || !opt.value) return;
+    wdRef.preparedBy = {
+      nik: opt.value,
+      name: opt.dataset.name || '',
+      title: opt.dataset.pos || ''
+    };
+    const nameEl = host.querySelector('#pr-prep-name');
+    const titleEl = host.querySelector('#pr-prep-title');
+    if (nameEl) nameEl.value = wdRef.preparedBy.name;
+    if (titleEl) titleEl.value = wdRef.preparedBy.title;
+  });
+  host.querySelector('#pr-prep-name')?.addEventListener('input', e => { wdRef.preparedBy.name = e.target.value; });
+  host.querySelector('#pr-prep-title')?.addEventListener('input', e => { wdRef.preparedBy.title = e.target.value; });
+
+  host.querySelector('#pr-app-emp')?.addEventListener('change', e => {
+    const opt = e.target.selectedOptions?.[0];
+    if (!opt || !opt.value) return;
+    wdRef.approvedBy = {
+      nik: opt.value,
+      name: opt.dataset.name || '',
+      title: opt.dataset.pos || ''
+    };
+    const nameEl = host.querySelector('#pr-app-name');
+    const titleEl = host.querySelector('#pr-app-title');
+    if (nameEl) nameEl.value = wdRef.approvedBy.name;
+    if (titleEl) titleEl.value = wdRef.approvedBy.title;
+  });
+  host.querySelector('#pr-app-name')?.addEventListener('input', e => { wdRef.approvedBy.name = e.target.value; });
+  host.querySelector('#pr-app-title')?.addEventListener('input', e => { wdRef.approvedBy.title = e.target.value; });
+
+  host.querySelector('#pr-manual-item-add')?.addEventListener('click', () => {
+    const itemId = host.querySelector('#pr-manual-item-sel')?.value;
+    if (!itemId) return;
+    if (!Array.isArray(wdRef.manualItemIds)) wdRef.manualItemIds = [];
+    if (!wdRef.manualItemIds.includes(itemId)) wdRef.manualItemIds.push(itemId);
+    renderStationeryReportsView(host, ctx);
+  });
+
+  host.querySelectorAll('.pr-manual-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.itemId;
+      wdRef.manualItemIds = (wdRef.manualItemIds || []).filter(x => x !== id);
+      renderStationeryReportsView(host, ctx);
+    });
+  });
+
+  // Row input bindings in Requisition mode
+  const updateWorkingRow = (itemId, field, value) => {
+    if (!wdRef.rowOverrides) wdRef.rowOverrides = {};
+    const prevRow = { ...(wdRef.rowOverrides[itemId] || {}) };
     if (field === 'minPurchase') {
       prevRow.minPurchase = Math.max(1, Number(value) || 1);
-    } else {
+    } else if (field === 'decisionQty') {
       prevRow.decisionQty = value === '' ? '' : String(Math.max(0, Number(value) || 0));
+    } else if (field === 'note') {
+      prevRow.note = String(value || '');
     }
-    current[itemId] = prevRow;
-    await persistPlanManual(current);
+    wdRef.rowOverrides[itemId] = prevRow;
   };
 
   host.querySelectorAll('.ops-plan-min-inp').forEach(inp => {
-    inp.addEventListener('change', () => handleManualChange(inp.dataset.itemId, 'minPurchase', inp.value));
+    inp.addEventListener('change', () => updateWorkingRow(inp.dataset.itemId, 'minPurchase', inp.value));
   });
   host.querySelectorAll('.ops-plan-dec-inp').forEach(inp => {
     inp.addEventListener('input', () => {
@@ -3259,61 +3779,156 @@ export async function renderStationeryReportsView(host, ctx) {
           cell.innerHTML = `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>`;
         }
       }
-      handleManualChange(itemId, 'decisionQty', inp.value);
+      updateWorkingRow(itemId, 'decisionQty', inp.value);
+    });
+  });
+  host.querySelectorAll('.ops-plan-note-inp').forEach(inp => {
+    inp.addEventListener('input', () => updateWorkingRow(inp.dataset.itemId, 'note', inp.value));
+  });
+
+  // Save Draft
+  host.querySelector('#ops-pr-save-draft')?.addEventListener('click', async () => {
+    const code = String(wdRef.draftCode || '').trim() || buildNextPrDraftCode(drafts, prCfg.draftPrefix || 'PR', wdRef.docDate);
+    const title = String(wdRef.title || '').trim() || `Purchase Requisition ${plan.window.periodLabel}`;
+    const liveReqData = buildPurchaseRequisitionWorkspaceRows({
+      planRows: plan.rows,
+      manualItemIds: wdRef.manualItemIds || [],
+      rowOverrides: wdRef.rowOverrides || {},
+      stationerySettings: stkCfg
+    });
+    const buyItemCount = liveReqData.rows.filter(r => r.decisionQty !== '' && Number(r.decisionQty) > 0).length;
+    const nowIso = new Date().toISOString();
+    const draftId = wdRef.id || `pr-draft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const existing = drafts.find(d => d.id === draftId);
+
+    const record = {
+      id: draftId,
+      draftCode: code,
+      title,
+      purchasePeriod,
+      periodLabel: plan.window.periodLabel,
+      docDate: wdRef.docDate || nowIso.slice(0, 10),
+      locationLabel: wdRef.locationLabel || prCfg.locationLabel || 'Pasuruan',
+      preparedBy: { ...(wdRef.preparedBy || {}) },
+      approvedBy: { ...(wdRef.approvedBy || {}) },
+      manualItemIds: [...(wdRef.manualItemIds || [])],
+      rowOverrides: structuredClone(wdRef.rowOverrides || {}),
+      buyItemCount,
+      attachedItemCount: liveReqData.rows.length,
+      createdAt: existing?.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+    wdRef.id = draftId;
+    wdRef.draftCode = code;
+    wdRef.title = title;
+
+    const nextDrafts = [record, ...drafts.filter(d => d.id !== draftId)];
+    try {
+      await persistPrDrafts(nextDrafts);
+      await renderStationeryReportsView(host, ctx);
+      showInlineBanner(host, `Draft "${code} — ${title}" berhasil disimpan dan dapat diakses kapan saja.`, 'ok');
+    } catch (err) {
+      showInlineBanner(host, `Gagal menyimpan draft PR: ${formatAppError(err)}`, 'error');
+    }
+  });
+
+  // Print 2-part Purchase Requisition + Lampiran
+  host.querySelector('#ops-pr-print')?.addEventListener('click', () => {
+    const liveReqData = buildPurchaseRequisitionWorkspaceRows({
+      planRows: plan.rows,
+      manualItemIds: wdRef.manualItemIds || [],
+      rowOverrides: wdRef.rowOverrides || {},
+      stationerySettings: stkCfg
+    });
+    const { title, pagesHtml } = buildPurchaseRequisitionPrintPagesHtml({
+      draft: wdRef,
+      reqRows: liveReqData.rows,
+      periodWindow: plan.window,
+      stationerySettings: stkCfg
+    });
+    openDomPrintPreview({
+      title,
+      pagesHtml,
+      landscape: true,
+      mixed: true
     });
   });
 
+  // Draft Library item actions
+  host.querySelectorAll('.atk-draft-open').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = drafts.find(d => d.id === btn.dataset.id);
+      if (!target) return;
+      host._prWorkingDraft = structuredClone(target);
+      host.dataset.atkPlanPeriod = target.purchasePeriod || '1w';
+      host.dataset.atkPlanMode = 'requisition';
+      renderStationeryReportsView(host, ctx);
+    });
+  });
+
+  host.querySelectorAll('.atk-draft-print').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = drafts.find(d => d.id === btn.dataset.id);
+      if (!target) return;
+      const dPlan = buildPurchasePlanSuggestions({
+        items: state.stationeryItems,
+        ledger: state.stationeryMovements,
+        purchasePeriod: target.purchasePeriod || '1w',
+        referenceDate: new Date(),
+        manualOverrides: target.rowOverrides || {},
+        settings: state.settings
+      });
+      const dReq = buildPurchaseRequisitionWorkspaceRows({
+        planRows: dPlan.rows,
+        manualItemIds: target.manualItemIds || [],
+        rowOverrides: target.rowOverrides || {},
+        stationerySettings: stkCfg
+      });
+      const { title, pagesHtml } = buildPurchaseRequisitionPrintPagesHtml({
+        draft: target,
+        reqRows: dReq.rows,
+        periodWindow: dPlan.window,
+        stationerySettings: stkCfg
+      });
+      openDomPrintPreview({ title, pagesHtml, landscape: true, mixed: true });
+    });
+  });
+
+  host.querySelectorAll('.atk-draft-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const nextDrafts = drafts.filter(d => d.id !== id);
+      if (host._prWorkingDraft?.id === id) host._prWorkingDraft.id = '';
+      try {
+        await persistPrDrafts(nextDrafts);
+        await renderStationeryReportsView(host, ctx);
+        showInlineBanner(host, 'Draft Purchase Requisition dihapus.', 'ok');
+      } catch (err) {
+        showInlineBanner(host, `Gagal menghapus draft PR: ${formatAppError(err)}`, 'error');
+      }
+    });
+  });
+
+  // Simplified 5-col Export & Print Plan in Suggestion mode
   host.querySelector('#ops-srep-atk-xlsx')?.addEventListener('click', async () => {
-    const manual = state.stationeryPlanManual || {};
     const aoa = [
       ['Purchase Period', plan.window.periodLabel, 'Planning Window', plan.window.dateRangeLabel],
-      ['Priority', 'Item', 'Current Stock', plan.window.requirementColumnLabel, 'Min Stock', 'Unit', 'Min Purchase', 'Purchase Unit', 'Purchase Qty Decision', 'Purchase Unit', 'Convert to Unit', 'Unit'],
-      ...visibleRows.map(r => {
-        const ov = manual[r.id] || {};
-        const dq = ov.decisionQty ?? r.decisionQty;
-        const converted = dq !== '' && Number.isFinite(Number(dq)) ? Math.round(Number(dq) * r.conversionQty * 100) / 100 : '';
-        return [
-          r.rank,
-          r.item_name,
-          r.currentStock,
-          r.periodRequirement,
-          r.minStock,
-          r.unit,
-          ov.minPurchase ?? r.minPurchase,
-          r.purchaseUnit,
-          dq,
-          r.purchaseUnit,
-          converted,
-          r.unit
-        ];
-      })
+      ['Priority', 'Item', plan.window.requirementColumnLabel, 'Min Stock', 'Unit'],
+      ...visibleSuggestionRows.map(r => [r.rank, r.item_name, r.periodRequirement, r.minStock, r.unit])
     ];
     await exportSheetXlsx(`Purchase_Plan_Suggestion_${plan.window.startDate}.xlsx`, 'Purchase Plan', aoa);
   });
 
   host.querySelector('#ops-srep-atk-print')?.addEventListener('click', () => {
-    const manual = state.stationeryPlanManual || {};
-    const rowsHtml = visibleRows.map(r => {
-      const ov = manual[r.id] || {};
-      const mp = ov.minPurchase ?? r.minPurchase;
-      const dq = ov.decisionQty ?? r.decisionQty;
-      const converted = dq !== '' && Number.isFinite(Number(dq)) ? `${Math.round(Number(dq) * r.conversionQty * 100) / 100} ${esc(r.unit)}` : '—';
-      return `
-        <tr>
-          <td class="c">${r.rank}</td>
-          <td>${esc(r.item_name)}</td>
-          <td class="num">${r.currentStock}</td>
-          <td class="num">${r.periodRequirement}</td>
-          <td class="num">${r.minStock}</td>
-          <td class="c">${esc(r.unit)}</td>
-          <td class="num">${esc(mp)}</td>
-          <td class="c">${esc(r.purchaseUnit)}</td>
-          <td class="num">${dq !== '' ? esc(dq) : ''}</td>
-          <td class="c">${esc(r.purchaseUnit)}</td>
-          <td class="num">${converted}</td>
-        </tr>
-      `;
-    }).join('');
+    const rowsHtml = visibleSuggestionRows.map(r => `
+      <tr>
+        <td class="c">${r.rank}</td>
+        <td>${esc(r.item_name)}</td>
+        <td class="num">${r.periodRequirement}</td>
+        <td class="num">${r.minStock}</td>
+        <td class="c">${esc(r.unit)}</td>
+      </tr>
+    `).join('');
     openPrintHtml(
       `Purchase Plan Suggestion (${plan.window.periodLabel})`,
       `
@@ -3326,21 +3941,15 @@ export async function renderStationeryReportsView(host, ctx) {
             <tr>
               <th>Priority</th>
               <th>Item</th>
-              <th>Current Stock</th>
               <th>${esc(plan.window.requirementColumnLabel)}</th>
               <th>Min Stock</th>
               <th>Unit</th>
-              <th>Min Purchase</th>
-              <th>Purchase Unit</th>
-              <th>Purchase Qty Decision</th>
-              <th>Purchase Unit</th>
-              <th>Convert to Unit</th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
         </table>
       `,
-      true
+      false
     );
   });
 }
@@ -3765,6 +4374,14 @@ export async function getDashboardModuleSummary(ctx) {
       .filter(Boolean)
   );
 
+  const atkPlan = buildPurchasePlanSuggestions({
+    items: state.stationeryItems,
+    ledger: state.stationeryMovements,
+    purchasePeriod: state.settings.stationery.purchaseHorizon || '1w',
+    settings: state.settings
+  });
+  const atkNeedBuyCount = atkPlan.rows.filter(r => r.deficit > 0).length;
+
   return {
     staffCount: staffEmployees.length,
     staffPendingSelectedDate,
@@ -3772,7 +4389,10 @@ export async function getDashboardModuleSummary(ctx) {
     driverCount: eligibleDrivers.length,
     driverAnomalyCount: recDrivers.anomalies.length,
     vehicleCount: vehicleUnits.size,
-    vehicleScheduleCount: (state.driverSchedules || []).length
+    vehicleScheduleCount: (state.driverSchedules || []).length,
+    atkItemCount: (state.stationeryItems || []).length,
+    atkNeedBuyCount,
+    atkDraftCount: (state.stationeryPrDrafts || []).length
   };
 }
 
@@ -4163,6 +4783,7 @@ export async function renderOpsSettingsView(host, ctx) {
             <label class="ops-field"><span>Potong Istirahat jika OT &gt; (jam)</span><input id="set-drv-brk-thr" type="number" step="0.5" class="input" value="${s.driver.overtimeBreakThresholdHours}"></label>
             <label class="ops-field"><span>Durasi Potongan Istirahat (jam)</span><input id="set-drv-brk-ded" type="number" step="0.5" class="input" value="${s.driver.overtimeBreakDeductionHours}"></label>
             <label class="ops-field"><span>Lokasi Cetak Laporan</span><input id="set-drv-loc" type="text" class="input" value="${esc(s.driver.reportLocationLabel)}"></label>
+            <label class="ops-field"><span>Warna Stabilo Label Section (Summary/Indoor/dll)</span><input id="set-drv-sec-hl" type="color" class="input" value="${esc(s.driver.sectionHighlightColor || '#ffff00')}" style="padding:3px 6px;height:38px"></label>
             <label class="ops-field"><span>Ekstra / 0.5j OT Hari Biasa (&gt;15j)</span><input id="set-drv-wk-ext" type="number" class="input" value="${s.driver.extraWeekdayHalfHourIncrement}"></label>
             <label class="ops-field"><span>Ekstra / 0.5j OT Hari Besar (&gt;12j)</span><input id="set-drv-hol-ext" type="number" class="input" value="${s.driver.extraHolidayHalfHourIncrement}"></label>
             <label class="ops-check"><input id="set-drv-confirmed" type="checkbox" ${s.driver.payrollRulesConfirmed ? 'checked' : ''}> <span>Aturan Payroll Driver Aktif</span></label>
@@ -4283,29 +4904,72 @@ export async function renderOpsSettingsView(host, ctx) {
       </div>
 
       <!-- TAB 5: STATIONERY & DEPARTEMEN -->
-      <div class="card ops-card ${activeTab === 'stationery' ? '' : 'hidden'}" data-panel="stationery">
-        <h3>Pengaturan Stationery / ATK, Departemen &amp; Purchase Plan</h3>
-        <div class="ops-flash-banner ops-flash-info" style="margin-bottom:12px">
-          <b>Logika Minimum Stock (Otomatis):</b> Minimum Stock pada Purchase Plan dihitung otomatis dengan rumus <code>2 &times; Kebutuhan Rata-Rata Periode</code> (bukan input manual).
+      <div class="ops-stack ${activeTab === 'stationery' ? '' : 'hidden'}" data-panel="stationery">
+        <div class="card ops-card">
+          <h3>Pengaturan Stationery / ATK, Departemen &amp; Purchase Plan</h3>
+          <div class="ops-flash-banner ops-flash-info" style="margin-bottom:12px">
+            <b>Logika Minimum Stock (Otomatis):</b> Minimum Stock pada Purchase Plan dihitung otomatis dengan rumus <code>2 &times; Kebutuhan Rata-Rata Periode</code> (bukan input manual).
+          </div>
+          <div class="ops-form-grid">
+            <label class="ops-field"><span>Horizon Rencana Pembelian</span>
+              <select id="set-stk-horizon" class="input">
+                <option value="1w" ${s.stationery.purchaseHorizon === '1w' ? 'selected' : ''}>1 Minggu (7 hari)</option>
+                <option value="2w" ${s.stationery.purchaseHorizon === '2w' ? 'selected' : ''}>2 Minggu (14 hari)</option>
+                <option value="1m" ${s.stationery.purchaseHorizon === '1m' ? 'selected' : ''}>1 Bulan (30 hari)</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Faktor Pengaman (Safety Multiplier)</span><input id="set-stk-safety" type="number" step="0.1" class="input" value="${s.stationery.safetyStockMultiplier}"></label>
+            <label class="ops-field"><span>Min Qty Fast Moving</span><input id="set-stk-fast-qty" type="number" class="input" value="${s.stationery.fastMovingMinOutQty}"></label>
+            <label class="ops-field"><span>Min Frekuensi Fast Moving</span><input id="set-stk-fast-freq" type="number" class="input" value="${s.stationery.fastMovingMinFreq}"></label>
+            <label class="ops-field"><span>Mode Skor ATK</span>
+              <select id="set-stk-score" class="input">
+                <option value="legacy_excel" ${s.stationery.scoringMode === 'legacy_excel' ? 'selected' : ''}>Legacy Excel (Qty + Freq)</option>
+                <option value="weighted" ${s.stationery.scoringMode === 'weighted' ? 'selected' : ''}>Weighted (0.6 Qty + 0.4 Freq)</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Daftar Departemen (Pisah koma)</span><input id="set-stk-slocs" type="text" class="input" value="${esc(s.stationery.canonicalSlocs.join(', '))}"></label>
+          </div>
         </div>
-        <div class="ops-form-grid">
-          <label class="ops-field"><span>Horizon Rencana Pembelian</span>
-            <select id="set-stk-horizon" class="input">
-              <option value="1w" ${s.stationery.purchaseHorizon === '1w' ? 'selected' : ''}>1 Minggu (7 hari)</option>
-              <option value="2w" ${s.stationery.purchaseHorizon === '2w' ? 'selected' : ''}>2 Minggu (14 hari)</option>
-              <option value="1m" ${s.stationery.purchaseHorizon === '1m' ? 'selected' : ''}>1 Bulan (30 hari)</option>
-            </select>
-          </label>
-          <label class="ops-field"><span>Faktor Pengaman (Safety Multiplier)</span><input id="set-stk-safety" type="number" step="0.1" class="input" value="${s.stationery.safetyStockMultiplier}"></label>
-          <label class="ops-field"><span>Min Qty Fast Moving</span><input id="set-stk-fast-qty" type="number" class="input" value="${s.stationery.fastMovingMinOutQty}"></label>
-          <label class="ops-field"><span>Min Frekuensi Fast Moving</span><input id="set-stk-fast-freq" type="number" class="input" value="${s.stationery.fastMovingMinFreq}"></label>
-          <label class="ops-field"><span>Mode Skor ATK</span>
-            <select id="set-stk-score" class="input">
-              <option value="legacy_excel" ${s.stationery.scoringMode === 'legacy_excel' ? 'selected' : ''}>Legacy Excel (Qty + Freq)</option>
-              <option value="weighted" ${s.stationery.scoringMode === 'weighted' ? 'selected' : ''}>Weighted (0.6 Qty + 0.4 Freq)</option>
-            </select>
-          </label>
-          <label class="ops-field"><span>Daftar Departemen (Pisah koma)</span><input id="set-stk-slocs" type="text" class="input" value="${esc(s.stationery.canonicalSlocs.join(', '))}"></label>
+
+        <div class="card ops-card">
+          <h3>Aturan Ranking Frequency Otomatis (Purchase Requisition)</h3>
+          <div class="ops-form-grid" style="margin-top:10px">
+            <label class="ops-field"><span>Batas Maks. Rank 1</span><input id="set-stk-ft-vf-max" type="number" min="1" class="input" value="${s.stationery.frequencyTiers.veryFastMaxRank}"></label>
+            <label class="ops-field"><span>Label Rank 1 – Batas 1</span><input id="set-stk-ft-vf-lbl" type="text" class="input" value="${esc(s.stationery.frequencyTiers.veryFastLabel)}"></label>
+            <label class="ops-field"><span>Batas Maks. Rank 2</span><input id="set-stk-ft-f-max" type="number" min="2" class="input" value="${s.stationery.frequencyTiers.fastMaxRank}"></label>
+            <label class="ops-field"><span>Label Rank Berikutnya (2)</span><input id="set-stk-ft-f-lbl" type="text" class="input" value="${esc(s.stationery.frequencyTiers.fastLabel)}"></label>
+            <label class="ops-field"><span>Batas Maks. Rank 3</span><input id="set-stk-ft-s-max" type="number" min="3" class="input" value="${s.stationery.frequencyTiers.slowMaxRank}"></label>
+            <label class="ops-field"><span>Label Rank Berikutnya (3)</span><input id="set-stk-ft-s-lbl" type="text" class="input" value="${esc(s.stationery.frequencyTiers.slowLabel)}"></label>
+            <label class="ops-field"><span>Label Sisa Rank (&gt; Batas 3)</span><input id="set-stk-ft-vs-lbl" type="text" class="input" value="${esc(s.stationery.frequencyTiers.verySlowLabel)}"></label>
+          </div>
+        </div>
+
+        <div class="card ops-card">
+          <h3>Komponen Dokumen &amp; Cetak Purchase Requisition (PR)</h3>
+          <div class="ops-form-grid" style="margin-top:10px">
+            <label class="ops-field"><span>Judul Dokumen Halaman 1</span><input id="set-stk-pr-title" type="text" class="input" value="${esc(s.stationery.prConfig.prTitle)}"></label>
+            <label class="ops-field"><span>Judul Dokumen Lampiran (Hal 2+)</span><input id="set-stk-pr-att-title" type="text" class="input" value="${esc(s.stationery.prConfig.attachmentTitle)}"></label>
+            <label class="ops-field"><span>Prefix Kode Draft PR</span><input id="set-stk-pr-prefix" type="text" class="input" value="${esc(s.stationery.prConfig.draftPrefix)}"></label>
+            <label class="ops-field"><span>Lokasi Default Dokumen</span><input id="set-stk-pr-loc" type="text" class="input" value="${esc(s.stationery.prConfig.locationLabel)}"></label>
+            <label class="ops-field"><span>Label Pembuat</span><input id="set-stk-pr-prep-lbl" type="text" class="input" value="${esc(s.stationery.prConfig.preparedLabel)}"></label>
+            <label class="ops-field"><span>Label Penyetuju</span><input id="set-stk-pr-app-lbl" type="text" class="input" value="${esc(s.stationery.prConfig.approvedLabel)}"></label>
+            <label class="ops-field"><span>Susunan Tanda Tangan PR</span>
+              <select id="set-stk-pr-sig-layout" class="input">
+                <option value="stacked" ${s.stationery.prConfig.signatureLayout === 'stacked' ? 'selected' : ''}>Vertikal (Dibuat oleh di atas Menyetujui)</option>
+                <option value="columns" ${s.stationery.prConfig.signatureLayout === 'columns' ? 'selected' : ''}>2 Kolom Kiri &amp; Kanan</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Satuan Qty pada Hal 1 PR</span>
+              <select id="set-stk-pr-qty-mode" class="input">
+                <option value="purchase_unit" ${s.stationery.prConfig.qtyPrintMode === 'purchase_unit' ? 'selected' : ''}>Purchase Unit (PACK / RIM / dll)</option>
+                <option value="converted_unit" ${s.stationery.prConfig.qtyPrintMode === 'converted_unit' ? 'selected' : ''}>Converted Unit (PCS / Stok Dasar)</option>
+              </select>
+            </label>
+            <label class="ops-field"><span>Default Pembuat (Nama)</span><input id="set-stk-pr-prep-name" type="text" class="input" value="${esc(s.stationery.prConfig.defaultPreparedName)}"></label>
+            <label class="ops-field"><span>Default Pembuat (Jabatan)</span><input id="set-stk-pr-prep-title" type="text" class="input" value="${esc(s.stationery.prConfig.defaultPreparedTitle)}"></label>
+            <label class="ops-field"><span>Default Penyetuju (Nama)</span><input id="set-stk-pr-app-name" type="text" class="input" value="${esc(s.stationery.prConfig.defaultApprovedName)}"></label>
+            <label class="ops-field"><span>Default Penyetuju (Jabatan)</span><input id="set-stk-pr-app-title" type="text" class="input" value="${esc(s.stationery.prConfig.defaultApprovedTitle)}"></label>
+          </div>
         </div>
       </div>
     </div>
@@ -4676,6 +5340,7 @@ export async function renderOpsSettingsView(host, ctx) {
           overtimeBreakThresholdHours: host.querySelector('#set-drv-brk-thr').value,
           overtimeBreakDeductionHours: host.querySelector('#set-drv-brk-ded').value,
           reportLocationLabel: host.querySelector('#set-drv-loc').value,
+          sectionHighlightColor: host.querySelector('#set-drv-sec-hl')?.value || '#ffff00',
           extraWeekdayHalfHourIncrement: host.querySelector('#set-drv-wk-ext').value,
           extraHolidayHalfHourIncrement: host.querySelector('#set-drv-hol-ext').value,
           payrollRulesConfirmed: host.querySelector('#set-drv-confirmed').checked,
@@ -4708,7 +5373,31 @@ export async function renderOpsSettingsView(host, ctx) {
           fastMovingMinOutQty: host.querySelector('#set-stk-fast-qty').value,
           fastMovingMinFreq: host.querySelector('#set-stk-fast-freq').value,
           scoringMode: host.querySelector('#set-stk-score').value,
-          canonicalSlocs: slocArr
+          canonicalSlocs: slocArr,
+          frequencyTiers: {
+            veryFastMaxRank: host.querySelector('#set-stk-ft-vf-max')?.value ?? 10,
+            veryFastLabel: host.querySelector('#set-stk-ft-vf-lbl')?.value || 'Very Fast Moving',
+            fastMaxRank: host.querySelector('#set-stk-ft-f-max')?.value ?? 30,
+            fastLabel: host.querySelector('#set-stk-ft-f-lbl')?.value || 'Fast Moving',
+            slowMaxRank: host.querySelector('#set-stk-ft-s-max')?.value ?? 50,
+            slowLabel: host.querySelector('#set-stk-ft-s-lbl')?.value || 'Slow Moving',
+            verySlowLabel: host.querySelector('#set-stk-ft-vs-lbl')?.value || 'Very Slow Moving'
+          },
+          prConfig: {
+            ...s.stationery.prConfig,
+            prTitle: host.querySelector('#set-stk-pr-title')?.value || 'PURCHASE REQUISITION',
+            attachmentTitle: host.querySelector('#set-stk-pr-att-title')?.value || 'LAMPIRAN PURCHASE REQUISITION',
+            draftPrefix: host.querySelector('#set-stk-pr-prefix')?.value || 'PR',
+            locationLabel: host.querySelector('#set-stk-pr-loc')?.value || 'Pasuruan',
+            preparedLabel: host.querySelector('#set-stk-pr-prep-lbl')?.value || 'Dibuat oleh,',
+            approvedLabel: host.querySelector('#set-stk-pr-app-lbl')?.value || 'Menyetujui,',
+            signatureLayout: host.querySelector('#set-stk-pr-sig-layout')?.value || 'stacked',
+            qtyPrintMode: host.querySelector('#set-stk-pr-qty-mode')?.value || 'purchase_unit',
+            defaultPreparedName: host.querySelector('#set-stk-pr-prep-name')?.value || 'AYUK NUR KHOTIFAH',
+            defaultPreparedTitle: host.querySelector('#set-stk-pr-prep-title')?.value || 'STAFF HR & GA',
+            defaultApprovedName: host.querySelector('#set-stk-pr-app-name')?.value || 'SAMSUL HARIYADI',
+            defaultApprovedTitle: host.querySelector('#set-stk-pr-app-title')?.value || 'HR & GA MANAGER'
+          }
         }
       });
 

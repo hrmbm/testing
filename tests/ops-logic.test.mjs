@@ -51,7 +51,7 @@ import {
   resolveDefaultStaffFocusDate,
   countPendingStaffForSelectedDate
 } from '../assets/js/attendance-logic.js';
-import { buildDeptPdfSheetHtml } from '../assets/js/driver-reports.js';
+import { buildDeptPdfSheetHtml, buildSummaryPdfSheetHtml } from '../assets/js/driver-reports.js';
 import {
   isEligibleDriver,
   getEligibleDrivers,
@@ -80,6 +80,10 @@ import {
   buildDepartmentUsageChartData,
   computeNextPurchasePlanWindow,
   buildPurchasePlanSuggestions,
+  classifyPurchasePlanFrequency,
+  buildPurchaseRequisitionWorkspaceRows,
+  buildNextPrDraftCode,
+  buildPurchaseRequisitionPrintData,
   STATIONERY_MASTER_IMPORT_HEADERS,
   STATIONERY_MASTER_SAMPLE_ROW,
   parseStationeryMasterImportRows,
@@ -1124,6 +1128,112 @@ test('Flexible Uang Makan rules and per-person standing exceptions work accurate
   assert.equal(calculateEkstraMeal(2.5, { ekstraMealMinHours: 3 }), 0);
   assert.equal(calculateEkstraMeal(3, { ekstraMealMinHours: 3 }), 6000);
   assert.equal(calculateEkstraMeal(4, { ekstraMealEnabled: false }), 0);
+});
+
+test('Driver Salary Report printout wraps SUMMARY and section labels in yellow stabilo highlight', () => {
+  const payroll = calculateDriverPayrollPeriod({
+    monthKey: '2026-11',
+    halfPeriod: 'P1',
+    drivers: getEligibleDrivers(SEED_DRIVERS, DEFAULT_OPS_SETTINGS),
+    schedules: [],
+    rawEvents: [],
+    settings: DEFAULT_OPS_SETTINGS
+  });
+
+  const deptHtml = buildDeptPdfSheetHtml('Indoor', payroll, DEFAULT_OPS_SETTINGS);
+  assert.ok(deptHtml.includes('<span class="drv-section-highlight" style="background:#ffff00 !important">INDOOR</span>'));
+
+  const sumHtml = buildSummaryPdfSheetHtml(payroll, DEFAULT_OPS_SETTINGS);
+  assert.ok(sumHtml.includes('<span class="drv-section-highlight" style="background:#ffff00 !important">SUMMARY</span>'));
+
+  const customHighlightSettings = normalizeOpsSettings({ driver: { sectionHighlightColor: '#fde047' } });
+  const customHtml = buildDeptPdfSheetHtml('Support', payroll, customHighlightSettings);
+  assert.ok(customHtml.includes('<span class="drv-section-highlight" style="background:#fde047 !important">SUPPORT</span>'));
+});
+
+test('ATK Plan Purchase Requisition frequency classification, non-zero + manual rows, draft headers, and 2-part print split', () => {
+  // Default rank frequency tiers: 1-10 Very Fast, 11-30 Fast, 31-50 Slow, 51+ Very Slow
+  assert.equal(classifyPurchasePlanFrequency(1), 'Very Fast Moving');
+  assert.equal(classifyPurchasePlanFrequency(10), 'Very Fast Moving');
+  assert.equal(classifyPurchasePlanFrequency(11), 'Fast Moving');
+  assert.equal(classifyPurchasePlanFrequency(30), 'Fast Moving');
+  assert.equal(classifyPurchasePlanFrequency(31), 'Slow Moving');
+  assert.equal(classifyPurchasePlanFrequency(50), 'Slow Moving');
+  assert.equal(classifyPurchasePlanFrequency(51), 'Very Slow Moving');
+
+  // Configurable rank cutoffs and labels
+  const customStk = normalizeOpsSettings({
+    stationery: {
+      frequencyTiers: {
+        veryFastMaxRank: 5,
+        veryFastLabel: 'Ultra Fast',
+        fastMaxRank: 15,
+        fastLabel: 'Regular Fast'
+      }
+    }
+  }).stationery;
+  assert.equal(classifyPurchasePlanFrequency(5, customStk), 'Ultra Fast');
+  assert.equal(classifyPurchasePlanFrequency(6, customStk), 'Regular Fast');
+
+  // Non-zero suggestion filtering + manual item addition
+  const baseRows = [
+    { id: 'i1', rank: 1, item_code: '10001', item_name: 'KERTAS A4', unit: 'RIM', purchase_unit: 'RIM', conversion_qty: 1, current_stock: 2, periodRequirement: 8, minStock: 16, deficit: 14, minPurchase: 1, decisionQty: '14', convertedDecisionQty: 14 },
+    { id: 'i2', rank: 14, item_code: '10002', item_name: 'BOLPOINT HITAM', unit: 'PCS', purchase_unit: 'PACK', conversion_qty: 12, current_stock: 24, periodRequirement: 6, minStock: 12, deficit: 0, minPurchase: 1, decisionQty: '', convertedDecisionQty: 0 },
+    { id: 'i3', rank: 52, item_code: '10003', item_name: 'MAP PLASTIK', unit: 'PCS', purchase_unit: 'PCS', conversion_qty: 1, current_stock: 20, periodRequirement: 0, minStock: 0, deficit: 0, minPurchase: 1, decisionQty: '', convertedDecisionQty: 0 }
+  ];
+
+  const reqOnlyNonZero = buildPurchaseRequisitionWorkspaceRows({ planRows: baseRows, manualItemIds: [] });
+  assert.deepEqual(reqOnlyNonZero.rows.map(r => r.id), ['i1', 'i2']);
+  assert.deepEqual(reqOnlyNonZero.availableToAdd.map(r => r.id), ['i3']);
+
+  const reqWithManual = buildPurchaseRequisitionWorkspaceRows({ planRows: baseRows, manualItemIds: ['i3'] });
+  assert.deepEqual(reqWithManual.rows.map(r => r.id), ['i1', 'i2', 'i3']);
+  assert.equal(reqWithManual.rows[2].isManualAdded, true);
+
+  // Draft code sequence increment
+  assert.equal(buildNextPrDraftCode([], 'PR-ATK', '2026-11-25'), 'PR-ATK-202611-001');
+  assert.equal(
+    buildNextPrDraftCode([{ draftCode: 'PR-ATK-202611-001' }, { draftCode: 'PR-ATK-202611-004' }], 'PR-ATK', '2026-11-25'),
+    'PR-ATK-202611-005'
+  );
+
+  // Print dataset splits Page 1 (strictly Purchase Qty Decision > 0) vs Lampiran (all non-zero + manual rows)
+  const annotatedRows = reqWithManual.rows.map((r, idx) => ({
+    ...r,
+    purchaseUnit: r.purchase_unit,
+    frequency: classifyPurchasePlanFrequency(r.rank),
+    note: idx === 0 ? 'Stok habis awal bulan' : ''
+  }));
+  const printData = buildPurchaseRequisitionPrintData({
+    reqRows: annotatedRows,
+    stationerySettings: DEFAULT_OPS_SETTINGS.stationery,
+    draft: {
+      draftCode: 'PR-ATK-202611-001',
+      title: 'Pengadaan Mingguan',
+      docDate: '2026-11-25',
+      preparedBy: { name: 'Ayuk Nur Khotifah', title: 'HR & GA Admin' },
+      approvedBy: { name: 'Samsul Hariyadi', title: 'HR & GA Manager' }
+    }
+  });
+  assert.equal(printData.purchaseItems.length, 1);
+  assert.equal(printData.purchaseItems[0].item_code, '10001');
+  assert.equal(printData.purchaseItems[0].purchaseQty, 14);
+  assert.equal(printData.attachmentItems.length, 3);
+  assert.equal(printData.attachmentItems[0].note, 'Stok habis awal bulan');
+  assert.equal(printData.meta.preparedBy.name, 'Ayuk Nur Khotifah');
+  assert.equal(printData.meta.approvedBy.name, 'Samsul Hariyadi');
+});
+
+test('Dashboard renders 6 luminous module boxes including Recruitment grads, PKWT, Staff, Drivers luxury bus, Vehicle supercar, and ATK Stationery', () => {
+  const adminText = fs.readFileSync('assets/js/admin.js', 'utf8');
+  assert.ok(adminText.includes('dash_recruitment_grads_1795673203042.jpg'));
+  assert.ok(adminText.includes('dash_pkwt_contracts_1795673205288.jpg'));
+  assert.ok(adminText.includes('dash_staff_bright_1795673204438.jpg'));
+  assert.ok(adminText.includes('dash_drivers_bus_park_1795673204702.jpg'));
+  assert.ok(adminText.includes('dash_vehicle_supercar_1795673204825.jpg'));
+  assert.ok(adminText.includes('dash_atk_stationery_1795673206455.jpg'));
+  assert.ok(adminText.includes("targetView: 'contracts'"));
+  assert.ok(adminText.includes("targetView: 'stationeryReports'"));
 });
 
 
