@@ -820,8 +820,9 @@ export function resolveLeadUnifiedStatus(lead, { applicants = [], interviews = [
   return { ...progress, linkedApplicant };
 }
 
-export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [], stage1Leads = [], indexes = null } = {}) {
+export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants = [], stage1Leads = [], indexes = null, dismissedKeys = [] } = {}) {
   const idx = indexes || buildWorkspaceIndexes({ applicants, invitedCandidates: manualInvites, stage1Leads });
+  const dismissedSet = dismissedKeys instanceof Set ? dismissedKeys : new Set(Array.isArray(dismissedKeys) ? dismissedKeys : []);
   const linkedIds = new Set();
   const linkedStage1Ids = new Set();
   (manualInvites || []).forEach(inv => {
@@ -878,9 +879,11 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
   for (const app of (applicants || [])) {
     if (app.stage === 'stage1_pending') continue;
     if (linkedIds.has(app.id)) continue;
+    const rowKey = `app:${app.id}`;
+    if (dismissedSet.has(rowKey)) continue;
     const leadSource = String(matchedLeadByApplicantId.get(app.id)?.source || '').trim();
     rows.push({
-      rowKey: `app:${app.id}`,
+      rowKey,
       manualId: null,
       linkedApplicantId: app.id,
       linkedStage1Id: matchedLeadByApplicantId.get(app.id)?.id || null,
@@ -899,9 +902,11 @@ export function buildInvitedCandidatesViewRows({ manualInvites = [], applicants 
 
   for (const lead of (stage1Leads || [])) {
     if (linkedStage1Ids.has(lead.id) || matchedStage1Ids.has(lead.id)) continue;
+    const rowKey = `stage1:${lead.id}`;
+    if (dismissedSet.has(rowKey)) continue;
     const leadSource = String(lead.source || '').trim();
     rows.push({
-      rowKey: `stage1:${lead.id}`,
+      rowKey,
       manualId: null,
       linkedApplicantId: null,
       linkedStage1Id: lead.id,

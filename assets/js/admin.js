@@ -61,6 +61,7 @@ import {
   openDuplicateCandidateModal,
   openInterviewModal,
   openInvitedCandidateModal,
+  openStage1LeadModal,
   openCvScreeningModal,
   openFullEmployeeModal,
   openEmployeeUploadModal,
@@ -211,6 +212,7 @@ let stage1Leads = [];
 let employees = [];
 let interviews = [];
 let invitedCandidates = [];
+let dismissedInvitedKeys = [];
 let cvScreenings = [];
 let portalUsers = [];
 let contractSettings = readSavedContractSettings();
@@ -259,6 +261,7 @@ const PRINTED_CONTRACTS_KEY = 'hrga_printed_contracts_v1';
 const DEMO_CONTRACT_HISTORY_KEY = 'hrga_contract_history_demo_v1';
 const DEMO_RECRUITMENT_SETTINGS_KEY = 'hrga_demo_recruitment_v1';
 const DEMO_STAGE1_LEADS_KEY = 'hrga_demo_stage1_leads_v1';
+const DEMO_DISMISSED_INVITED_KEY = 'hrga_dismissed_invited_v1';
 const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'opsSettings', 'systemImport']);
 let employeeSubTab = 'directory';
 let lastEmployeeDelta = null;
@@ -344,6 +347,12 @@ function seedDemoWorkspaceData() {
     const parsed = JSON.parse(localStorage.getItem(DEMO_STAGE1_LEADS_KEY) || '[]');
     if (Array.isArray(parsed)) storedLeads = parsed;
   } catch {}
+  let storedDismissed = [];
+  try {
+    const parsedDismissed = JSON.parse(localStorage.getItem(DEMO_DISMISSED_INVITED_KEY) || '[]');
+    if (Array.isArray(parsedDismissed)) storedDismissed = parsedDismissed;
+  } catch {}
+  dismissedInvitedKeys = storedDismissed.map(k => String(k || '').trim()).filter(Boolean);
 
   stage1Leads = [
     ...storedLeads,
@@ -861,6 +870,32 @@ async function fetchCvScreeningsSafe() {
   return res.data || [];
 }
 
+async function fetchDismissedInvitedSafe() {
+  try {
+    const { data, error } = await supabase.from('portal_settings').select('value').eq('key', 'invited_dismissed_keys').maybeSingle();
+    if (error) return [];
+    return Array.isArray(data?.value) ? data.value.map(v => String(v || '').trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function persistDismissedInvitedKeys(nextKeys = []) {
+  const clean = [...new Set((nextKeys || []).map(v => String(v || '').trim()).filter(Boolean))];
+  dismissedInvitedKeys = clean;
+  if (isDemoMode || !supabase) {
+    try {
+      localStorage.setItem(DEMO_DISMISSED_INVITED_KEY, JSON.stringify(clean));
+    } catch {}
+    return;
+  }
+  try {
+    await savePortalSettingsBatch(supabase, { key: 'invited_dismissed_keys', value: clean });
+  } catch (err) {
+    console.warn('Unable to persist dismissed invited keys:', err);
+  }
+}
+
 function stripEmbeddedKtpPhoto(rows = []) {
   return (rows || []).map(row => {
     if (row?.application_data && row.application_data.ktp_foto) {
@@ -920,6 +955,7 @@ function hydrateSnapshotIntoMemory(snapshot, savedAt) {
   stage1Leads = Array.isArray(snapshot.stage1Leads) ? snapshot.stage1Leads : [];
   interviews = Array.isArray(snapshot.interviews) ? snapshot.interviews : [];
   invitedCandidates = Array.isArray(snapshot.invitedCandidates) ? snapshot.invitedCandidates : [];
+  dismissedInvitedKeys = Array.isArray(snapshot.dismissedInvitedKeys) ? snapshot.dismissedInvitedKeys : [];
   cvScreenings = Array.isArray(snapshot.cvScreenings) ? snapshot.cvScreenings : [];
   interviewsTableMissing = Boolean(snapshot.interviewsTableMissing);
   invitedTableMissing = Boolean(snapshot.invitedTableMissing);
@@ -935,19 +971,21 @@ async function fetchAndCacheFreshSnapshot() {
   if (inflightRefreshPromise) return inflightRefreshPromise;
   const prevSignature = computeSnapshotSignature();
   inflightRefreshPromise = (async () => {
-    const [appRows, empRows, leadRows, intRows, invRows, scrRows] = await Promise.all([
+    const [appRows, empRows, leadRows, intRows, invRows, scrRows, dismissedKeys] = await Promise.all([
       fetchApplicantsLean(),
       fetchEmployeesSafe(),
       fetchStage1Safe(),
       fetchInterviewsSafe(),
       fetchInvitedSafe(),
-      fetchCvScreeningsSafe()
+      fetchCvScreeningsSafe(),
+      fetchDismissedInvitedSafe()
     ]);
     applicants = appRows;
     employees = empRows;
     stage1Leads = leadRows;
     interviews = intRows;
     invitedCandidates = invRows;
+    dismissedInvitedKeys = dismissedKeys;
     cvScreenings = scrRows;
     workspaceIndexesCache = null;
     lastDataFetchedAt = Date.now();
@@ -958,6 +996,7 @@ async function fetchAndCacheFreshSnapshot() {
       stage1Leads,
       interviews,
       invitedCandidates,
+      dismissedInvitedKeys,
       cvScreenings,
       interviewsTableMissing,
       invitedTableMissing,
@@ -1320,7 +1359,7 @@ function renderStage1() {
   });
 
   const renderLeadRows = list => {
-    if (!list.length) return emptyRow(7, 'No lead records yet');
+    if (!list.length) return emptyRow(8, 'No lead records yet');
     return list.map(({ row, unified, scoreDisplay }) => `<tr>
       <td><b>${esc(row.full_name)}</b></td>
       <td>${esc(row.position || '-')}</td>
@@ -1329,6 +1368,10 @@ function renderStage1() {
       <td data-stage1-score="${esc(row.id)}">${scoreDisplay.html}</td>
       <td>${row.cv_path ? `<button class="icon-btn" data-stage1-cv="${esc(row.id)}">Open CV</button>` : '-'}</td>
       <td data-stage1-status="${esc(row.id)}"><span class="status-pill ${unified.tone}">${esc(unified.label)}</span></td>
+      <td><div class="row-actions">
+        <button type="button" class="icon-btn" data-stage1-edit="${esc(row.id)}">Edit</button>
+        <button type="button" class="icon-btn danger" data-stage1-delete="${esc(row.id)}">Delete</button>
+      </div></td>
     </tr>`).join('');
   };
 
@@ -1352,7 +1395,7 @@ function renderStage1() {
   content.innerHTML = header('Lead Register', '', '<button class="btn btn-secondary" id="refresh-stage1">Refresh ↻</button>') +
     `<section class="panel table-panel">${tableToolbar('Search name / position / source / score / status…', 'Lead Register')}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>SCORE</th><th>CV</th><th>STATUS</th></tr></thead>
+        <thead><tr><th>APPLICANT NAME</th><th>POSITION</th><th>SOURCE</th><th>WHATSAPP NO.</th><th>SCORE</th><th>CV</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
         <tbody id="stage1-rows"></tbody>
       </table></div><div id="stage1-pager"></div></section>`;
   $('#refresh-stage1')?.addEventListener('click', () => loadView('stage1', true));
@@ -1364,11 +1407,109 @@ function renderStage1() {
   });
 }
 
+function syncDemoStage1LeadStorage() {
+  if (!isDemoMode) return;
+  try {
+    const customOnly = stage1Leads.filter(item => item.id !== 'lead-demo-1');
+    localStorage.setItem(DEMO_STAGE1_LEADS_KEY, JSON.stringify(customOnly));
+  } catch {}
+}
+
 function bindStage1Actions(rows) {
   $$('[data-stage1-cv]').forEach(button => button.addEventListener('click', () => {
     const record = rows.find(item => item.id === button.dataset.stage1Cv);
     if (!record?.cv_path) { say('CV file path not found.'); return; }
     openSignedDocumentInNewTab('candidate-stage1-cv', record.cv_path, 'CV', button);
+  }));
+
+  $$('[data-stage1-edit]').forEach(button => button.addEventListener('click', async () => {
+    const record = rows.find(item => item.id === button.dataset.stage1Edit);
+    if (!record) return;
+    const positions = await loadPositionList().catch(() => stage2PositionsCache);
+    openStage1LeadModal({
+      lead: record,
+      positions,
+      onSave: async payload => {
+        if (isDemoMode || !supabase) {
+          stage1Leads = stage1Leads.map(item => (item.id === record.id
+            ? {
+                ...item,
+                full_name: payload.full_name,
+                position: payload.position,
+                source: payload.source,
+                whatsapp: payload.whatsapp,
+                recommendation: payload.recommendation
+              }
+            : item));
+          syncDemoStage1LeadStorage();
+          workspaceIndexesCache = null;
+          say(`Updated lead record for ${payload.full_name}.`);
+          renderStage1();
+          return;
+        }
+        const updatePayload = {
+          full_name: payload.full_name,
+          position: payload.position,
+          whatsapp: payload.whatsapp,
+          ...(stage1HasSourceCol ? { source: payload.source } : {}),
+          ...(stage1HasRecommendationCol ? { recommendation: payload.recommendation } : {})
+        };
+        let { error } = await supabase.from('candidate_stage1_applications').update(updatePayload).eq('id', record.id);
+        if (error && isMissingSchemaError(error)) {
+          const msg = String(error.message || '').toLowerCase();
+          if (msg.includes('source')) stage1HasSourceCol = false;
+          if (msg.includes('recommendation')) stage1HasRecommendationCol = false;
+          const fallbackPayload = {
+            full_name: payload.full_name,
+            position: payload.position,
+            whatsapp: payload.whatsapp,
+            ...(stage1HasSourceCol ? { source: payload.source } : {}),
+            ...(stage1HasRecommendationCol ? { recommendation: payload.recommendation } : {})
+          };
+          ({ error } = await supabase.from('candidate_stage1_applications').update(fallbackPayload).eq('id', record.id));
+        }
+        if (error) throw error;
+        invalidateDataCache();
+        workspaceIndexesCache = null;
+        say(`Updated lead record for ${payload.full_name}.`);
+        await loadView('stage1', true);
+      }
+    });
+  }));
+
+  $$('[data-stage1-delete]').forEach(button => button.addEventListener('click', async () => {
+    const record = rows.find(item => item.id === button.dataset.stage1Delete);
+    if (!record) return;
+    const confirmed = await openConfirmDialog({
+      title: 'Delete Lead Record',
+      message: `Delete lead ${record.full_name}${record.position ? ` (${record.position})` : ''} from Lead Register?`,
+      confirmLabel: 'Delete',
+      danger: true
+    });
+    if (!confirmed) return;
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    try {
+      if (isDemoMode || !supabase) {
+        stage1Leads = stage1Leads.filter(item => item.id !== record.id);
+        syncDemoStage1LeadStorage();
+        workspaceIndexesCache = null;
+        say(`Deleted lead ${record.full_name}.`);
+        renderStage1();
+        return;
+      }
+      const { error } = await supabase.from('candidate_stage1_applications').delete().eq('id', record.id);
+      if (error) throw error;
+      invalidateDataCache();
+      stage1Leads = stage1Leads.filter(item => item.id !== record.id);
+      workspaceIndexesCache = null;
+      say(`Deleted lead ${record.full_name}.`);
+      await loadView('stage1', true);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Delete';
+      say(formatAppError(error, 'Failed to delete lead record.'));
+    }
   }));
 }
 
@@ -1528,6 +1669,10 @@ function bindStage2DocumentActions() {
 
 async function loadPositionList() {
   if (stage2PositionsCache.length) return stage2PositionsCache;
+  if (isDemoMode || !supabase) {
+    stage2PositionsCache = [...new Set(DEFAULT_VACANCIES.map(v => String(v.name || '').trim()).filter(Boolean))];
+    return stage2PositionsCache;
+  }
   const cached = await cacheGet('positions_list', { maxAgeMs: 10 * 60 * 1000 });
   if (cached?.value?.length && !cached.stale) {
     stage2PositionsCache = cached.value;
@@ -1897,7 +2042,7 @@ function invitedCandidateRowHtml(row) {
     <td><span class="status-pill ${statusTone}">${esc(row.status)}</span></td>
     <td><div class="row-actions">
       <button type="button" class="icon-btn" data-inv-edit="${esc(row.rowKey)}">Edit</button>
-      ${row.isManual ? `<button type="button" class="icon-btn danger" data-inv-delete="${esc(row.manualId)}">Delete</button>` : ''}
+      <button type="button" class="icon-btn danger" data-inv-delete="${esc(row.rowKey)}">Delete</button>
     </div></td>
   </tr>`;
 }
@@ -1907,7 +2052,8 @@ function renderInvitedView() {
     manualInvites: invitedCandidates,
     applicants,
     stage1Leads,
-    indexes: getWorkspaceIndexes()
+    indexes: getWorkspaceIndexes(),
+    dismissedKeys: dismissedInvitedKeys
   });
   const indexedInviteRows = allRows.map(r => ({
     row: r,
@@ -1916,7 +2062,7 @@ function renderInvitedView() {
   const screeningSummary = aggregateCvScreeningBySource(cvScreenings);
   const linkedApplicantIds = new Set(invitedCandidates.map(i => i.linked_applicant_id).filter(Boolean));
 
-  const migrationBanner = (invitedTableMissing || cvScreeningsTableMissing)
+  const migrationBanner = (!isDemoMode && (invitedTableMissing || cvScreeningsTableMissing))
     ? `<div class="upload-preview-box" style="margin-bottom:14px;border-color:#fca5a5;background:#fef2f2;color:#991b1b">Supabase tables <code>invited_candidates</code> / <code>cv_screenings</code> are not created yet. Run <code>database/migrations/20261121_hrga_workspace_v3.sql</code> and <code>v4</code> in Supabase SQL Editor.</div>`
     : '';
 
@@ -1976,9 +2122,7 @@ function renderInvitedView() {
       applicants,
       linkedApplicantIds,
       onSave: async payload => {
-        if (invitedTableMissing) {
-          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
-        }
+        const nowIso = new Date().toISOString();
         const recordPayload = {
           invite_date: payload.invite_date,
           candidate_name: payload.candidate_name,
@@ -1988,8 +2132,34 @@ function renderInvitedView() {
           linked_applicant_id: payload.linked_applicant_id,
           linked_stage1_id: payload.linked_stage1_id || null,
           notes: payload.notes,
-          updated_at: new Date().toISOString()
+          updated_at: nowIso
         };
+        if (isDemoMode || !supabase) {
+          if (payload.id) {
+            invitedCandidates = invitedCandidates.map(item => (item.id === payload.id ? { ...item, ...recordPayload } : item));
+            say(`Updated invite record for ${payload.candidate_name}.`);
+          } else {
+            invitedCandidates = [{
+              id: `inv-demo-${Date.now()}`,
+              ...recordPayload,
+              created_at: nowIso
+            }, ...invitedCandidates];
+            const cleanDismissed = dismissedInvitedKeys.filter(k =>
+              k !== (payload.linked_applicant_id ? `app:${payload.linked_applicant_id}` : '') &&
+              k !== (payload.linked_stage1_id ? `stage1:${payload.linked_stage1_id}` : '')
+            );
+            if (cleanDismissed.length !== dismissedInvitedKeys.length) {
+              await persistDismissedInvitedKeys(cleanDismissed);
+            }
+            say(`Added ${payload.candidate_name} to Invited Candidates.`);
+          }
+          workspaceIndexesCache = null;
+          renderInvitedView();
+          return;
+        }
+        if (invitedTableMissing) {
+          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql in Supabase SQL Editor first.');
+        }
         if (payload.id) {
           const { error } = await supabase.from('invited_candidates').update(recordPayload).eq('id', payload.id);
           if (error) throw error;
@@ -2000,6 +2170,13 @@ function renderInvitedView() {
             created_by: currentUserId
           });
           if (error) throw error;
+          const cleanDismissed = dismissedInvitedKeys.filter(k =>
+            k !== (payload.linked_applicant_id ? `app:${payload.linked_applicant_id}` : '') &&
+            k !== (payload.linked_stage1_id ? `stage1:${payload.linked_stage1_id}` : '')
+          );
+          if (cleanDismissed.length !== dismissedInvitedKeys.length) {
+            await persistDismissedInvitedKeys(cleanDismissed);
+          }
           say(`Added ${payload.candidate_name} to Invited Candidates.`);
         }
         invalidateDataCache();
@@ -2014,20 +2191,48 @@ function renderInvitedView() {
       if (target) openInviteEditor(target);
     }));
     $$('[data-inv-delete]').forEach(btn => btn.addEventListener('click', async () => {
-      const manualId = btn.dataset.invDelete;
-      const target = invitedCandidates.find(i => i.id === manualId);
+      const rowKey = btn.dataset.invDelete;
+      const target = currentRows.find(r => r.rowKey === rowKey);
+      if (!target) return;
+      const confirmMsg = target.isManual
+        ? `Delete invited record for ${target.candidateName}?`
+        : `Remove ${target.candidateName} from Invited Candidates list? (The candidate profile in Candidate List / Lead Register will remain intact.)`;
       const ok = await openConfirmDialog({
         title: 'Delete Invited Candidate',
-        message: `Delete invited record for ${target?.candidate_name || 'this candidate'}?`,
+        message: confirmMsg,
         confirmLabel: 'Delete',
         danger: true
       });
       if (!ok) return;
       try {
-        const { error } = await supabase.from('invited_candidates').delete().eq('id', manualId);
-        if (error) throw error;
+        const extraDismissed = [];
+        if (!target.isManual) extraDismissed.push(target.rowKey);
+        if (target.linkedApplicantId) extraDismissed.push(`app:${target.linkedApplicantId}`);
+        if (target.linkedStage1Id) extraDismissed.push(`stage1:${target.linkedStage1Id}`);
+
+        if (isDemoMode || !supabase) {
+          if (target.isManual && target.manualId) {
+            invitedCandidates = invitedCandidates.filter(i => i.id !== target.manualId);
+          }
+          if (extraDismissed.length) {
+            await persistDismissedInvitedKeys([...dismissedInvitedKeys, ...extraDismissed]);
+          }
+          workspaceIndexesCache = null;
+          say(`Removed ${target.candidateName} from Invited Candidates.`);
+          renderInvitedView();
+          return;
+        }
+        if (target.isManual && target.manualId) {
+          const { error } = await supabase.from('invited_candidates').delete().eq('id', target.manualId);
+          if (error) throw error;
+          invitedCandidates = invitedCandidates.filter(i => i.id !== target.manualId);
+        }
+        if (extraDismissed.length) {
+          await persistDismissedInvitedKeys([...dismissedInvitedKeys, ...extraDismissed]);
+        }
         invalidateDataCache();
-        say('Invited candidate deleted.');
+        workspaceIndexesCache = null;
+        say(`Removed ${target.candidateName} from Invited Candidates.`);
         await loadView('invited', true);
       } catch (err) {
         say(formatAppError(err, 'Failed to delete invited candidate.'));
@@ -2041,9 +2246,6 @@ function renderInvitedView() {
       existing,
       positions,
       onSave: async payload => {
-        if (cvScreeningsTableMissing) {
-          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql & v4 in Supabase SQL Editor first.');
-        }
         const matchedExisting = payload.id
           ? cvScreenings.find(s => s.id === payload.id)
           : cvScreenings.find(s =>
@@ -2058,6 +2260,19 @@ function renderInvitedView() {
           updated_by: currentUserId,
           updated_at: new Date().toISOString()
         };
+        if (isDemoMode || !supabase) {
+          if (matchedExisting?.id) {
+            cvScreenings = cvScreenings.map(s => (s.id === matchedExisting.id ? { ...s, ...recordPayload } : s));
+          } else {
+            cvScreenings = [...cvScreenings, { id: `scr-demo-${Date.now()}`, ...recordPayload }];
+          }
+          say(`CV screening count saved for ${payload.position} (${payload.source}).`);
+          renderInvitedView();
+          return;
+        }
+        if (cvScreeningsTableMissing) {
+          throw new Error('Run database/migrations/20261121_hrga_workspace_v3.sql & v4 in Supabase SQL Editor first.');
+        }
         if (matchedExisting?.id) {
           let { error } = await supabase.from('cv_screenings').update(recordPayload).eq('id', matchedExisting.id);
           if (error && isMissingSchemaError(error) && String(error.message || '').toLowerCase().includes('position')) {
@@ -2100,6 +2315,12 @@ function renderInvitedView() {
     });
     if (!ok) return;
     try {
+      if (isDemoMode || !supabase) {
+        cvScreenings = cvScreenings.filter(s => s.id !== id);
+        say('CV screening entry removed.');
+        renderInvitedView();
+        return;
+      }
       const { error } = await supabase.from('cv_screenings').delete().eq('id', id);
       if (error) throw error;
       invalidateDataCache();
@@ -7078,7 +7299,7 @@ function renderPrintRows(rows) {
     return `<tr><td><b>${esc(applicant.full_name)}</b><small class="table-subline">${esc(applicant.nik)}</small></td>
       <td>${esc(applicant.position || '—')}</td>
       <td><span class="status-pill ${progress.tone}">${esc(progress.label)}</span></td>
-      <td><button class="icon-btn" data-print="${esc(applicant.id)}">Print Application · CV · DISC</button></td></tr>`;
+      <td><button class="icon-btn print-doc-btn-lit ${esc(progress.tone || 'blue')}" data-print="${esc(applicant.id)}">Print Application · CV · DISC</button></td></tr>`;
   }).join('');
 }
 

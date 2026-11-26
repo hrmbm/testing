@@ -1274,14 +1274,15 @@ test('PR Frequency uses global Rank (favRank) rather than deficit urgency Priori
   assert.ok(topUsageRow.priority > 1);
   assert.equal(topUsageRow.frequency, 'Very Fast Moving');
 
-  // Verify Dashboard removes Needs Attention panel & darkens theme in CSS without affecting white print sheets
+  // Verify Dashboard removes Needs Attention panel while restoring crisp light workspace and keeping Dashboard hero/cards non-bright with eye-catching attention indicators
   const adminText = fs.readFileSync('assets/js/admin.js', 'utf8');
   assert.ok(!adminText.includes('dashboard-attention-panel'), 'Needs Attention panel must be removed from Dashboard');
   assert.ok(!adminText.includes('Needs Attention'), 'Needs Attention heading must be removed from Dashboard');
 
   const cssText = fs.readFileSync('assets/css/workspace.css', 'utf8');
-  assert.ok(cssText.includes('.admin-shell {') && cssText.includes('color-scheme: dark;'), 'Admin workspace must use dimmed low-glare slate theme');
-  assert.ok(cssText.includes('.admin-shell .drv-pdf-sheet') && cssText.includes('background: #ffffff;'), 'Print sheets must remain strict white-on-black');
+  assert.ok(!cssText.includes('color-scheme: dark;'), 'Workspace shell must keep crisp light theme');
+  assert.ok(cssText.includes('.dash-module-box.has-attention') && cssText.includes('.dash-module-att-badge'), 'Dashboard cards must style high-visibility attention indicators');
+  assert.ok(cssText.includes('.icon-btn.print-doc-btn-lit'), 'Application Print buttons must include illuminated styling');
 
   // Verify Plan PR UI has only 3 streamlined controls, Current Stock after Nama Item, and 2-column signatures
   const opsViewsText = fs.readFileSync('assets/js/ops-views.js', 'utf8');
@@ -1293,7 +1294,7 @@ test('PR Frequency uses global Rank (favRank) rather than deficit urgency Priori
   assert.ok(!opsViewsText.includes('atk-pr-sig-stacked'), 'PR print signatures must always sit side-by-side (Left Dibuat oleh, Right Menyetujui)');
 });
 
-test('Dashboard renders 6 luminous module boxes including Recruitment grads, PKWT, Staff, Drivers luxury bus, Vehicle supercar, and ATK Stationery', () => {
+test('Dashboard renders 6 module boxes and supports Lead Register & Invited Edit/Delete plus lit Application Print buttons', async () => {
   const adminText = fs.readFileSync('assets/js/admin.js', 'utf8');
   assert.ok(adminText.includes('dash_recruitment_grads_1795673203042.jpg'));
   assert.ok(adminText.includes('dash_pkwt_contracts_1795673205288.jpg'));
@@ -1303,7 +1304,34 @@ test('Dashboard renders 6 luminous module boxes including Recruitment grads, PKW
   assert.ok(adminText.includes('dash_atk_stationery_1795673206455.jpg'));
   assert.ok(adminText.includes("targetView: 'contracts'"));
   assert.ok(adminText.includes("targetView: 'stationeryReports'"));
+
+  // Lead Register must include Actions column with Edit & Delete controls (and never Remarks)
+  assert.ok(adminText.includes('data-stage1-edit=') && adminText.includes('data-stage1-delete='), 'Lead Register must render Edit and Delete actions');
+  assert.ok(adminText.includes('openStage1LeadModal'), 'Lead Register Edit must open openStage1LeadModal');
+
+  // Invited must render Edit & Delete for every row (manual and auto-derived)
+  assert.ok(adminText.includes('data-inv-edit="${esc(row.rowKey)}"') && adminText.includes('data-inv-delete="${esc(row.rowKey)}"'), 'Invited rows must always provide Edit and Delete actions');
+
+  // Application Print Documents button must carry illuminated class synced with Stage pill tone
+  assert.ok(adminText.includes('class="icon-btn print-doc-btn-lit ${esc(progress.tone || \'blue\')}"'), 'Application Print Documents button must carry lit stage-matched class');
+
+  // Verify buildInvitedCandidatesViewRows honors dismissedKeys cleanly
+  const { buildInvitedCandidatesViewRows } = await import('../assets/js/workspace-logic.js');
+  const rows = buildInvitedCandidatesViewRows({
+    manualInvites: [],
+    applicants: [
+      { id: 'a1', full_name: 'Candidate One', position: 'CNC', stage: 'hired', created_at: '2026-11-20T00:00:00Z' },
+      { id: 'a2', full_name: 'Candidate Two', position: 'Spray', stage: 'application_submitted', created_at: '2026-11-21T00:00:00Z' }
+    ],
+    stage1Leads: [
+      { id: 's1', full_name: 'Lead One', position: 'Las', source: 'Jobstreet', created_at: '2026-11-22T00:00:00Z' }
+    ],
+    dismissedKeys: ['app:a1', 'stage1:s1']
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].rowKey, 'app:a2');
 });
+
 
 
 

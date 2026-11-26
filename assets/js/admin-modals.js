@@ -723,6 +723,128 @@ export function openInvitedCandidateModal({
   form.elements.candidate_name.focus();
 }
 
+export function openStage1LeadModal({ lead, positions = [], onSave }) {
+  if (!lead) return;
+  let modal = $('#stage1-lead-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'stage1-lead-modal';
+    modal.className = 'modal-backdrop hidden';
+    modal.innerHTML = `<section class="employee-modal-card" style="width:min(540px,100%)" role="dialog" aria-modal="true" aria-labelledby="s1-modal-title">
+      <div class="employee-modal-head">
+        <div>
+          <small>LEAD REGISTER</small>
+          <h2 id="s1-modal-title">Edit Lead Record</h2>
+        </div>
+        <button type="button" class="modal-close" id="s1-modal-close" aria-label="Close">×</button>
+      </div>
+      <form id="s1-modal-form">
+        <div class="employee-form-grid">
+          <label class="employee-notes">Applicant Name
+            <input class="input" type="text" name="full_name" required maxlength="120" placeholder="Full name">
+          </label>
+          <label>Applied Position
+            <select class="select" name="position" required></select>
+          </label>
+          <label>Source
+            <select class="select" name="source" required></select>
+          </label>
+          <label>WhatsApp No.
+            <input class="input" type="text" name="whatsapp" maxlength="40" placeholder="08xxxxxxxxxx">
+          </label>
+          <label>Lead Recommendation
+            <select class="select" name="recommendation">
+              <option value="Pending">Pending</option>
+              <option value="Recommended">Recommended</option>
+              <option value="Not Recommended">Not Recommended</option>
+            </select>
+          </label>
+        </div>
+        <div id="s1-modal-error" class="form-error" role="alert"></div>
+        <div class="employee-modal-actions">
+          <button type="button" class="btn btn-secondary" id="s1-modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="s1-modal-save">Save Changes</button>
+        </div>
+      </form>
+    </section>`;
+    document.body.append(modal);
+    const close = () => modal.classList.add('hidden');
+    $('#s1-modal-close', modal).addEventListener('click', close);
+    $('#s1-modal-cancel', modal).addEventListener('click', close);
+    bindSafeModalClose(modal, close, { closeOnBackdrop: false });
+  }
+
+  const form = $('#s1-modal-form', modal);
+  const errorBox = $('#s1-modal-error', modal);
+  const posSelect = form.elements.position;
+  const srcSelect = form.elements.source;
+  const recSelect = form.elements.recommendation;
+
+  form.reset();
+  errorBox.textContent = '';
+
+  const currentPos = String(lead.position || '').trim();
+  const posOptions = [...new Set([...(positions || []), currentPos].filter(pos => pos && pos !== '—' && pos !== '-'))];
+  posSelect.innerHTML = `<option value="">Select position…</option>` +
+    posOptions.map(pos => `<option value="${esc(pos)}">${esc(pos)}</option>`).join('');
+
+  const currentSource = String(lead.source || '').trim();
+  const srcOptions = [...new Set([...INVITE_SOURCES, ...(currentSource && currentSource !== '-' ? [currentSource] : [])])];
+  srcSelect.innerHTML = srcOptions.map(src => `<option value="${esc(src)}">${esc(src)}</option>`).join('');
+
+  form.elements.full_name.value = lead.full_name || '';
+  posSelect.value = currentPos || '';
+  srcSelect.value = srcOptions.includes(currentSource) ? currentSource : (srcOptions[0] || 'Jobstreet');
+  form.elements.whatsapp.value = lead.whatsapp || '';
+  const recVal = ['Pending', 'Recommended', 'Not Recommended'].includes(lead.recommendation) ? lead.recommendation : 'Pending';
+  recSelect.value = recVal;
+  $('#s1-modal-title', modal).textContent = `Edit Lead · ${lead.full_name || 'Candidate'}`;
+
+  form.onsubmit = async event => {
+    event.preventDefault();
+    errorBox.textContent = '';
+    const saveBtn = $('#s1-modal-save', modal);
+    const fullName = form.elements.full_name.value.trim();
+    const position = posSelect.value.trim();
+    const source = srcSelect.value;
+    const whatsapp = form.elements.whatsapp.value.trim();
+    const recommendation = recSelect.value;
+
+    if (fullName.length < 2) {
+      errorBox.textContent = 'Applicant name must be at least 2 characters.';
+      form.elements.full_name.focus();
+      return;
+    }
+    if (!position) {
+      errorBox.textContent = 'Please select an applied position.';
+      posSelect.focus();
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      await onSave({
+        id: lead.id,
+        full_name: fullName,
+        position,
+        source,
+        whatsapp,
+        recommendation
+      });
+      modal.classList.add('hidden');
+    } catch (err) {
+      errorBox.textContent = formatAppError(err, 'Failed to update lead record.');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+  };
+
+  modal.classList.remove('hidden');
+  form.elements.full_name.focus();
+}
+
 export function openCvScreeningModal({ existing = null, positions = [], onSave }) {
   let modal = $('#cv-screening-modal');
   if (!modal) {
