@@ -46,7 +46,8 @@ import {
   buildWorkspaceIndexes,
   getMemoizedDiscResult,
   paginateRows,
-  preserveCaretCurrencyValue
+  preserveCaretCurrencyValue,
+  stripAddressTypePrefix
 } from './workspace-logic.js?v=20261124-hrga-workspace-22';
 import {
   bindSafeModalClose,
@@ -61,17 +62,24 @@ import {
   openConfirmDialog
 } from './admin-modals.js?v=20261124-hrga-workspace-22';
 import {
+  CONTRACT_DOCUMENTS,
+  CONTRACT_TEMPLATE_PLACEHOLDERS,
   DEFAULT_CONTRACT_SETTINGS,
+  adjustSignatureSpacingInHtml,
   buildContractWorkspaceQueue,
   buildDashboardAttentionItems,
   determineRequiredContractDocuments,
+  extractContractTemplateParts,
+  normalizeContractTemplateOverrides,
   normalizeSalaryTier,
   getContractPackageInfo,
   parseNumericCurrency,
   computeNextDocSequence,
   buildDirectContractSyncPayloads,
   applyContractCancellationRollback,
-  formatContractCode
+  formatContractCode,
+  rebuildContractTemplateHtml,
+  scopeMasterEditorCss
 } from './contract-logic.js?v=20261124-hrga-workspace-22';
 import {
   DISTRICTS_BY_CITY,
@@ -1341,7 +1349,7 @@ async function renderSettings() {
  * ============================================================================ */
 const STAGE2_FIELD_ORDER = [
   'tempat_lahir', 'tanggal_lahir', 'gender', 'gol_darah', 'agama', 'warga_negara',
-  'alamat_provinsi', 'alamat_kota_nama', 'alamat_kecamatan', 'alamat_desa', 'alamat_tipe', 'alamat_jalan', 'alamat_rt', 'alamat_rw', 'alamat_kodepos', 'domisili_berbeda', 'domisili',
+  'alamat_provinsi', 'alamat_kota_nama', 'alamat_kecamatan', 'alamat_desa', 'alamat_jalan', 'alamat_rt', 'alamat_rw', 'alamat_kodepos', 'domisili_berbeda', 'domisili',
   'telepon', 'email', 'tinggi', 'berat',
   'ayah_nama', 'ayah_umur', 'ayah_pendidikan', 'ayah_pekerjaan', 'ibu_nama', 'ibu_umur', 'ibu_pendidikan', 'ibu_pekerjaan',
   'saudara_count', 'saudara2_nama', 'saudara2_lp', 'saudara2_umur', 'saudara2_pendidikan', 'saudara2_pekerjaan',
@@ -1367,7 +1375,7 @@ const STAGE2_FIELD_RANK = new Map(STAGE2_FIELD_ORDER.map((key, index) => [key, i
 
 function stage2FieldKeys(rows) {
   const excluded = new Set([
-    'nama', 'nik', 'posisi', 'ktp_foto', 'ktp_path', 'cv_path', 'alamat_asal',
+    'nama', 'nik', 'posisi', 'ktp_foto', 'ktp_path', 'cv_path', 'alamat_asal', 'alamat_tipe',
     'alamat_provinsi_id', 'alamat_kota_id', 'alamat_kecamatan_id', 'alamat_desa_id',
     'alamat_kota_jenis', 'alamat_wilayah_type', 'umur', 'nama_terang',
     'saudara1_nama', 'saudara1_lp', 'saudara1_umur', 'saudara1_pendidikan', 'saudara1_pekerjaan',
@@ -1405,7 +1413,10 @@ function stage2RowHtml(row, keys, idx = getWorkspaceIndexes()) {
   return `<tr><td><b class="cell-clamp-2" title="${esc(row.full_name)}">${esc(row.full_name)}</b><small class="table-subline">${esc(row.nik)}</small></td>
     <td><div class="cell-clamp-2" title="${esc(pos)}">${esc(pos)}</div></td>
     ${keys.map(key => {
-      const val = displayApplicationValue(data[key]);
+      const rawVal = key === 'alamat_jalan'
+        ? stripAddressTypePrefix(data.alamat_jalan, data.alamat_tipe)
+        : data[key];
+      const val = displayApplicationValue(rawVal);
       const cls = stage2CellClass(key);
       return `<td${cls ? ` class="${cls}"` : ''}><div class="cell-clamp-2" title="${esc(val)}">${esc(val)}</div></td>`;
     }).join('')}
@@ -1730,7 +1741,7 @@ function renderStage2() {
   const keys = stage2FieldKeys(allRows);
   const indexedRows = allRows.map(row => ({
     row,
-    searchText: `${row.full_name || ''} ${row.nik || ''} ${row.position || ''} ${Object.values(row.application_data || {}).join(' ')}`.toLowerCase()
+    searchText: `${row.full_name || ''} ${row.nik || ''} ${row.position || ''} ${Object.entries(row.application_data || {}).filter(([k]) => k !== 'alamat_tipe').map(([k, v]) => (k === 'alamat_jalan' ? stripAddressTypePrefix(v, row.application_data?.alamat_tipe) : v)).join(' ')}`.toLowerCase()
   }));
   const renderRows = rows => rows.length ? rows.map(row => stage2RowHtml(row, keys, idx)).join('') : emptyRow(6 + keys.length, 'No candidate forms');
   const headerCells = [
@@ -2580,7 +2591,10 @@ function employeeRows(rows) {
       <td>${esc(formatted.Agama || '—')}</td>
       <td>${esc(formatted['Home Base'] || 'PASURUAN')}</td>
       <td><span class="status-pill ${entityCode === 'REHOLZ' ? 'gold' : 'blue'}" title="${esc(formatCompanyEntityName(entityCode))}">${esc(entityCode)}</span></td>
-      <td><button type="button" class="icon-btn" data-edit-employee="${esc(employee.id)}">Edit</button></td>
+      <td><div class="row-actions">
+        <button type="button" class="icon-btn" data-edit-employee="${esc(employee.id)}">Edit</button>
+        <button type="button" class="icon-btn danger" data-delete-employee="${esc(employee.id)}">Delete</button>
+      </div></td>
     </tr>`;
   }).join('');
 }
@@ -2893,6 +2907,39 @@ function bindEmployeeEdit() {
     const employee = employees.find(e => e.id === button.dataset.editEmployee);
     if (employee) openEmployeeEditor(employee);
   }));
+  $$('[data-delete-employee]').forEach(button => button.addEventListener('click', async event => {
+    event.stopPropagation();
+    const employee = employees.find(e => e.id === button.dataset.deleteEmployee);
+    if (!employee) return;
+    const confirmed = await openConfirmDialog({
+      title: 'Delete Employee',
+      message: `Hapus ${employee.full_name || 'karyawan ini'} (${employee.employee_no || 'Tanpa NIK'}) dari Employee Directory? Tindakan ini tidak dapat dibatalkan.`,
+      confirmLabel: 'Delete',
+      danger: true
+    });
+    if (!confirmed) return;
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    try {
+      if (isDemoMode || !supabase) {
+        employees = employees.filter(e => e.id !== employee.id);
+        invalidateDataCache();
+        say(`Deleted employee ${employee.full_name || employee.employee_no || ''}.`);
+        renderEmployees();
+      } else {
+        const { error } = await supabase.from('employees').delete().eq('id', employee.id);
+        if (error) throw error;
+        employees = employees.filter(e => e.id !== employee.id);
+        invalidateDataCache();
+        say(`Deleted employee ${employee.full_name || employee.employee_no || ''}.`);
+        await loadView('employees', true);
+      }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Delete';
+      say(formatAppError(error, 'Failed to delete employee.'));
+    }
+  }));
   $$('#employee-rows tr.emp-row-clickable').forEach(tr => tr.addEventListener('click', event => {
     if (event.target.closest('button, a, input, select, label')) return;
     const employee = employees.find(e => e.id === tr.dataset.employeeId);
@@ -3003,25 +3050,37 @@ function mapDbHistoryToLocal(row = {}) {
 }
 
 async function loadContractWorkspaceState(force = false) {
+  const modalMod = await loadContractModalModule().catch(() => null);
+  const localOverrides = modalMod?.readSavedContractTemplateOverrides
+    ? modalMod.readSavedContractTemplateOverrides()
+    : {};
   if (isDemoMode || !supabase) {
-    contractSettings = readSavedContractSettings();
+    contractSettings = { ...readSavedContractSettings(), templateOverrides: localOverrides };
     const storedHist = readLocalJson(DEMO_CONTRACT_HISTORY_KEY, []);
     if (Array.isArray(storedHist)) contractHistory = storedHist;
     return;
   }
-  if (!force && contractSettings && contractHistory.length) return;
+  if (!force && contractSettings?.templateOverrides && contractHistory.length) return;
   try {
-    const [settingsRes, histSettingRes, histTableRes] = await Promise.all([
+    const [settingsRes, tplOverrideRes, histSettingRes, histTableRes] = await Promise.all([
       supabase.from('portal_settings').select('value').eq('key', 'contract_settings').maybeSingle(),
+      supabase.from('portal_settings').select('value').eq('key', 'contract_template_overrides').maybeSingle(),
       supabase.from('portal_settings').select('value').eq('key', 'contract_history').maybeSingle(),
       supabase.from('contract_history').select('*').order('created_at', { ascending: false }).limit(200)
     ]);
 
+    const remoteOverrides = tplOverrideRes?.data?.value && typeof tplOverrideRes.data.value === 'object'
+      ? normalizeContractTemplateOverrides(tplOverrideRes.data.value)
+      : localOverrides;
+    if (tplOverrideRes?.data?.value && modalMod?.writeSavedContractTemplateOverrides) {
+      modalMod.writeSavedContractTemplateOverrides(remoteOverrides);
+    }
+
     if (settingsRes?.data?.value && typeof settingsRes.data.value === 'object') {
-      contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...settingsRes.data.value };
+      contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...settingsRes.data.value, templateOverrides: remoteOverrides };
       writeSavedContractSettings(contractSettings);
     } else {
-      contractSettings = readSavedContractSettings();
+      contractSettings = { ...readSavedContractSettings(), templateOverrides: remoteOverrides };
     }
 
     if (histTableRes.error) {
@@ -3032,7 +3091,7 @@ async function loadContractWorkspaceState(force = false) {
       contractHistory = (histTableRes.data || []).map(mapDbHistoryToLocal);
     }
   } catch {
-    contractSettings = readSavedContractSettings();
+    contractSettings = { ...readSavedContractSettings(), templateOverrides: localOverrides };
   }
 }
 
@@ -3320,7 +3379,15 @@ async function openPkwtForRecord(record) {
   });
 
   try {
-    const { openPkwtConfigModal } = await loadContractModalModule();
+    const modalMod = await loadContractModalModule();
+    if (!contractSettings?.templateOverrides) {
+      contractSettings = {
+        ...DEFAULT_CONTRACT_SETTINGS,
+        ...contractSettings,
+        templateOverrides: modalMod.readSavedContractTemplateOverrides()
+      };
+    }
+    const { openPkwtConfigModal } = modalMod;
     await openPkwtConfigModal({
       record,
       contractSettings,
@@ -3508,9 +3575,31 @@ function formatDigitsId(n) {
 /* ============================================================================
  * SYSTEM SETTINGS -> CONTRACT SETTINGS (A. PKWT & B. Contract Cancellation)
  * ============================================================================ */
+async function saveContractTemplateOverridesState(nextOverrides) {
+  const clean = normalizeContractTemplateOverrides(nextOverrides);
+  contractSettings = { ...DEFAULT_CONTRACT_SETTINGS, ...contractSettings, templateOverrides: clean };
+  const modalMod = await loadContractModalModule().catch(() => null);
+  if (modalMod?.writeSavedContractTemplateOverrides) {
+    modalMod.writeSavedContractTemplateOverrides(clean);
+  }
+  if (modalMod?.clearContractTemplateCache) {
+    modalMod.clearContractTemplateCache();
+  }
+  if (isDemoMode || !supabase) return;
+  const { error } = await savePortalSettingsBatch(supabase, {
+    key: 'contract_template_overrides',
+    value: clean
+  });
+  if (error) throw error;
+}
+
 async function renderContractSettings() {
   await loadContractWorkspaceState(false);
   const s = { ...DEFAULT_CONTRACT_SETTINGS, ...contractSettings };
+  let activeTemplateOverrides = normalizeContractTemplateOverrides(s.templateOverrides || {});
+  let activeDocKey = CONTRACT_DOCUMENTS[0].key;
+  let editorViewMode = 'visual';
+  const baseHtmlCache = new Map();
 
   const historyRowsHtml = contractHistory.length
     ? contractHistory.map(h => {
@@ -3608,6 +3697,72 @@ async function renderContractSettings() {
         </table>
       </div>
     </section>
+
+    <section class="panel contract-master-editor" style="grid-column:1 / -1">
+      <div class="panel-head">
+        <div>
+          <h3>C. Master Contract Template Editor (PKWT &amp; PB)</h3>
+          <p class="subtle" style="margin:3px 0 0 0;font-size:12px">Edit teks paragraf, tambah atau kurangi Enter, atau perlebar jarak tanda tangan layaknya MS Word. Tag <code>{{...}}</code> otomatis diisi data karyawan saat cetak.</p>
+        </div>
+        <span id="cme-status-pill" class="status-pill gray">Loading…</span>
+      </div>
+      <div class="cme-body">
+        <div class="cme-doc-tabs" id="cme-doc-tabs" role="tablist">
+          ${CONTRACT_DOCUMENTS.map(doc => `
+            <button type="button" role="tab" class="cme-doc-tab ${doc.key === activeDocKey ? 'active' : ''}" data-cme-doc="${esc(doc.key)}">
+              <span>${esc(doc.shortTitle)}</span>
+              ${activeTemplateOverrides[doc.key] ? '<span class="cme-custom-dot" title="Custom Master">●</span>' : ''}
+            </button>
+          `).join('')}
+        </div>
+
+        <div class="cme-toolbar" id="cme-toolbar">
+          <div class="cme-tool-group">
+            <button type="button" class="icon-btn" data-cme-cmd="undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+            <button type="button" class="icon-btn" data-cme-cmd="redo" title="Redo (Ctrl+Y)">↷ Redo</button>
+          </div>
+          <div class="cme-tool-group">
+            <button type="button" class="icon-btn" data-cme-cmd="bold" title="Bold"><b>B</b></button>
+            <button type="button" class="icon-btn" data-cme-cmd="italic" title="Italic"><i>I</i></button>
+            <button type="button" class="icon-btn" data-cme-cmd="underline" title="Underline"><u>U</u></button>
+          </div>
+          <div class="cme-tool-group">
+            <button type="button" class="icon-btn" data-cme-cmd="justifyLeft" title="Rata Kiri">Left</button>
+            <button type="button" class="icon-btn" data-cme-cmd="justifyCenter" title="Rata Tengah">Center</button>
+            <button type="button" class="icon-btn" data-cme-cmd="justifyRight" title="Rata Kanan">Right</button>
+            <button type="button" class="icon-btn" data-cme-cmd="justifyFull" title="Rata Kiri-Kanan">Justify</button>
+          </div>
+          <div class="cme-tool-group">
+            <button type="button" class="icon-btn" data-cme-cmd="insertOrderedList" title="Numbered List">1. List</button>
+            <button type="button" class="icon-btn" data-cme-cmd="insertUnorderedList" title="Bulleted List">• List</button>
+          </div>
+          <div class="cme-tool-group">
+            <button type="button" class="icon-btn" id="cme-insert-enter" title="Tambah Enter / Baris Baru di posisi kursor">+ Enter (Paragraf)</button>
+            <button type="button" class="icon-btn" id="cme-sig-add-enter" title="Tambah Enter sebelum blok tanda tangan">+ Enter (TTD)</button>
+            <button type="button" class="icon-btn" id="cme-sig-rem-enter" title="Kurangi Enter sebelum blok tanda tangan">− Enter (TTD)</button>
+            <button type="button" class="icon-btn" id="cme-sig-box-plus" title="Perlebar tinggi ruang tanda tangan (+18px)">+ Ruang TTD</button>
+            <button type="button" class="icon-btn" id="cme-sig-box-minus" title="Perkecil tinggi ruang tanda tangan (-18px)">− Ruang TTD</button>
+          </div>
+          <div class="cme-tool-group">
+            <select id="cme-placeholder-select" class="select cme-placeholder-select" aria-label="Insert Placeholder">
+              <option value="">+ Sisipkan Placeholder…</option>
+              ${CONTRACT_TEMPLATE_PLACEHOLDERS.map(p => `<option value="${esc(p.token)}">${esc(p.label)} (${esc(p.token)})</option>`).join('')}
+            </select>
+            <button type="button" class="icon-btn" id="cme-toggle-mode">HTML Source</button>
+          </div>
+          <div class="cme-tool-actions">
+            <button type="button" class="btn btn-secondary btn-xs" id="cme-reset-doc">Reset to Default</button>
+            <button type="button" class="btn btn-primary btn-xs" id="cme-save-doc">Save Master Template</button>
+          </div>
+        </div>
+
+        <div class="cme-stage-wrap">
+          <style id="cme-scoped-style"></style>
+          <div id="cme-wysiwyg-stage" class="cme-wysiwyg-stage" contenteditable="true" spellcheck="false"></div>
+          <textarea id="cme-html-source" class="cme-source-textarea hidden" spellcheck="false" aria-label="HTML Template Source"></textarea>
+        </div>
+      </div>
+    </section>
   </div>`;
 
   const form = $('#contract-settings-form');
@@ -3674,6 +3829,215 @@ async function renderContractSettings() {
       say(formatAppError(err, 'Failed to cancel contract.'));
     }
   }));
+
+  const stageEl = $('#cme-wysiwyg-stage');
+  const sourceEl = $('#cme-html-source');
+  const scopedStyleEl = $('#cme-scoped-style');
+  const statusPill = $('#cme-status-pill');
+  const modeBtn = $('#cme-toggle-mode');
+
+  const getActiveDocMeta = () => CONTRACT_DOCUMENTS.find(d => d.key === activeDocKey) || CONTRACT_DOCUMENTS[0];
+
+  const loadBaseTemplate = async docMeta => {
+    if (baseHtmlCache.has(docMeta.key)) return baseHtmlCache.get(docMeta.key);
+    const modalMod = await loadContractModalModule();
+    const html = await modalMod.loadDefaultContractTemplate(docMeta);
+    baseHtmlCache.set(docMeta.key, html);
+    return html;
+  };
+
+  const syncEditorTabsAndStatus = () => {
+    $$('[data-cme-doc]').forEach(btn => {
+      const k = btn.dataset.cmeDoc;
+      const isActive = k === activeDocKey;
+      btn.classList.toggle('active', isActive);
+      const docMeta = CONTRACT_DOCUMENTS.find(d => d.key === k);
+      btn.innerHTML = `<span>${esc(docMeta?.shortTitle || k)}</span>${activeTemplateOverrides[k] ? '<span class="cme-custom-dot" title="Custom Master">●</span>' : ''}`;
+    });
+    const isCustom = Boolean(activeTemplateOverrides[activeDocKey]);
+    if (statusPill) {
+      statusPill.className = `status-pill ${isCustom ? 'blue' : 'gray'}`;
+      statusPill.textContent = isCustom ? 'Custom Master Active' : 'Default Master';
+    }
+  };
+
+  const loadDocIntoEditor = async docKey => {
+    activeDocKey = docKey;
+    syncEditorTabsAndStatus();
+    const docMeta = getActiveDocMeta();
+    try {
+      const baseHtml = await loadBaseTemplate(docMeta);
+      const fullHtml = activeTemplateOverrides[docKey] || baseHtml;
+      const { styleCss, bodyHtml } = extractContractTemplateParts(fullHtml);
+      scopedStyleEl.textContent = `${scopeMasterEditorCss(styleCss, '#cme-wysiwyg-stage')}
+#cme-wysiwyg-stage .contract-sheet { height: auto !important; min-height: 12.40in !important; overflow: visible !important; margin: 0 auto 18px auto !important; }
+#cme-wysiwyg-stage .contract-editor-spacer { margin: 0 0 4px 0 !important; min-height: 14px !important; line-height: 1.35 !important; border-bottom: 1px dashed rgba(13,92,107,0.16); }`;
+      stageEl.innerHTML = bodyHtml.replace(/src="(\{\{logo_reholz_url\}\})"/gi, 'data-tpl-src="$1" src="./assets/img/logo-reholz-green.png"');
+      sourceEl.value = bodyHtml;
+    } catch (err) {
+      say(formatAppError(err, `Gagal memuat template ${docMeta.title}.`));
+    }
+  };
+
+  const getCurrentBodyHtml = () => (editorViewMode === 'source'
+    ? sourceEl.value
+    : stageEl.innerHTML.replace(/<img\b([^>]*?)\sdata-tpl-src="([^"]*)"([^>]*)>/gi, (_, pre, tplSrc, post) => {
+        const cleanedAttrs = `${pre}${post}`.replace(/\s+src="[^"]*"/gi, '');
+        return `<img${cleanedAttrs} src="${tplSrc}">`;
+      }));
+
+  const setCurrentBodyHtml = nextBodyHtml => {
+    stageEl.innerHTML = String(nextBodyHtml || '').replace(/src="(\{\{logo_reholz_url\}\})"/gi, 'data-tpl-src="$1" src="./assets/img/logo-reholz-green.png"');
+    sourceEl.value = nextBodyHtml;
+  };
+
+  await loadDocIntoEditor(activeDocKey);
+
+  $$('[data-cme-doc]').forEach(btn => btn.addEventListener('click', () => {
+    const k = btn.dataset.cmeDoc;
+    if (k && k !== activeDocKey) {
+      editorViewMode = 'visual';
+      stageEl.classList.remove('hidden');
+      sourceEl.classList.add('hidden');
+      if (modeBtn) modeBtn.textContent = 'HTML Source';
+      void loadDocIntoEditor(k);
+    }
+  }));
+
+  $$('[data-cme-cmd]').forEach(btn => btn.addEventListener('click', () => {
+    if (editorViewMode !== 'visual') return;
+    stageEl.focus();
+    try { document.execCommand(btn.dataset.cmeCmd, false, null); } catch {}
+  }));
+
+  $('#cme-insert-enter')?.addEventListener('click', () => {
+    if (editorViewMode === 'source') {
+      const pos = sourceEl.selectionStart ?? sourceEl.value.length;
+      const spacer = '<p class="contract-editor-spacer"><br></p>\n';
+      sourceEl.value = `${sourceEl.value.slice(0, pos)}${spacer}${sourceEl.value.slice(pos)}`;
+      return;
+    }
+    stageEl.focus();
+    try {
+      const ok = document.execCommand('insertHTML', false, '<p class="contract-editor-spacer"><br></p>');
+      if (!ok) document.execCommand('insertParagraph', false, null);
+    } catch {
+      const bodies = stageEl.querySelectorAll('.pkwt-page-body, .pb-page-body');
+      const target = bodies[bodies.length - 1] || stageEl;
+      const p = document.createElement('p');
+      p.className = 'contract-editor-spacer';
+      p.innerHTML = '<br>';
+      target.appendChild(p);
+    }
+  });
+
+  $('#cme-sig-add-enter')?.addEventListener('click', () => {
+    setCurrentBodyHtml(adjustSignatureSpacingInHtml(getCurrentBodyHtml(), 1));
+  });
+
+  $('#cme-sig-rem-enter')?.addEventListener('click', () => {
+    setCurrentBodyHtml(adjustSignatureSpacingInHtml(getCurrentBodyHtml(), -1));
+  });
+
+  const adjustSigBoxHeight = deltaPx => {
+    if (editorViewMode === 'source') {
+      stageEl.innerHTML = sourceEl.value;
+    }
+    const boxes = stageEl.querySelectorAll('.pkwt-sig-space, .pb-sig-space');
+    if (!boxes.length) {
+      say('Blok ruang tanda tangan tidak ditemukan di template ini.');
+      return;
+    }
+    let nextPx = 108;
+    boxes.forEach(box => {
+      const inlineH = parseInt(box.style.height || '', 10);
+      const curH = Number.isFinite(inlineH) ? inlineH : (box.offsetHeight || 108);
+      nextPx = Math.min(280, Math.max(36, curH + deltaPx));
+      box.style.height = `${nextPx}px`;
+    });
+    sourceEl.value = stageEl.innerHTML;
+    say(`Tinggi ruang tanda tangan disesuaikan menjadi ${nextPx}px.`);
+  };
+
+  $('#cme-sig-box-plus')?.addEventListener('click', () => adjustSigBoxHeight(18));
+  $('#cme-sig-box-minus')?.addEventListener('click', () => adjustSigBoxHeight(-18));
+
+  $('#cme-placeholder-select')?.addEventListener('change', e => {
+    const token = e.target.value;
+    if (!token) return;
+    if (editorViewMode === 'source') {
+      const pos = sourceEl.selectionStart ?? sourceEl.value.length;
+      sourceEl.value = `${sourceEl.value.slice(0, pos)}${token}${sourceEl.value.slice(pos)}`;
+    } else {
+      stageEl.focus();
+      try {
+        document.execCommand('insertText', false, token);
+      } catch {}
+    }
+    e.target.value = '';
+  });
+
+  modeBtn?.addEventListener('click', () => {
+    if (editorViewMode === 'visual') {
+      sourceEl.value = stageEl.innerHTML;
+      editorViewMode = 'source';
+      stageEl.classList.add('hidden');
+      sourceEl.classList.remove('hidden');
+      modeBtn.textContent = 'Visual Editor';
+    } else {
+      stageEl.innerHTML = sourceEl.value;
+      editorViewMode = 'visual';
+      sourceEl.classList.add('hidden');
+      stageEl.classList.remove('hidden');
+      modeBtn.textContent = 'HTML Source';
+    }
+  });
+
+  $('#cme-save-doc')?.addEventListener('click', async () => {
+    const saveBtn = $('#cme-save-doc');
+    const docMeta = getActiveDocMeta();
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const baseHtml = await loadBaseTemplate(docMeta);
+      const rebuilt = rebuildContractTemplateHtml(baseHtml, getCurrentBodyHtml());
+      const nextOverrides = { ...activeTemplateOverrides, [docMeta.key]: rebuilt };
+      await saveContractTemplateOverridesState(nextOverrides);
+      activeTemplateOverrides = normalizeContractTemplateOverrides(nextOverrides);
+      syncEditorTabsAndStatus();
+      say(`Master template ${docMeta.title} berhasil disimpan.`);
+    } catch (err) {
+      say(formatAppError(err, `Gagal menyimpan template ${docMeta.title}.`));
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Master Template';
+    }
+  });
+
+  $('#cme-reset-doc')?.addEventListener('click', async () => {
+    const docMeta = getActiveDocMeta();
+    const ok = await openConfirmDialog({
+      title: 'Reset Master Template',
+      message: `Kembalikan template ${docMeta.title} ke format bawaan sistem? Semua perubahan paragraf dan spasi pada dokumen ini akan dihapus.`,
+      confirmLabel: 'Reset to Default',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      const nextOverrides = { ...activeTemplateOverrides };
+      delete nextOverrides[docMeta.key];
+      await saveContractTemplateOverridesState(nextOverrides);
+      activeTemplateOverrides = normalizeContractTemplateOverrides(nextOverrides);
+      editorViewMode = 'visual';
+      stageEl.classList.remove('hidden');
+      sourceEl.classList.add('hidden');
+      if (modeBtn) modeBtn.textContent = 'HTML Source';
+      await loadDocIntoEditor(docMeta.key);
+      say(`Master template ${docMeta.title} dikembalikan ke default.`);
+    } catch (err) {
+      say(formatAppError(err, `Gagal mereset template ${docMeta.title}.`));
+    }
+  });
 }
 
 /* ============================================================================
@@ -5087,28 +5451,45 @@ function renderRecruitApplyFieldsTab(host) {
   });
 }
 
-function renderRecruitQuestionSummary(questions = []) {
+function renderRecruitQuestionListSummary(questions = []) {
   if (!questions.length) {
     return '<span class="loc-empty">No position-specific questions</span>';
   }
   return `<ul class="q-summary-list">${questions.map((q, idx) => {
     const typeLabel = RECRUIT_Q_TYPE_LABELS[q.type] || q.type;
-    let scoreText = '';
-    if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
-      const opts = (q.options || []).map(o => `<span class="vacancy-score-chip">${esc(o.label)} <b>+${esc(o.score)} pts</b></span>`).join('');
-      scoreText = opts ? `<div class="vacancy-score-pill-row">${opts}</div>` : 'No options configured';
-    } else {
-      scoreText = q.filledScore
-        ? `<div class="vacancy-score-pill-row"><span class="vacancy-score-chip">Filled <b>+${esc(q.filledScore)} pts</b></span></div>`
-        : 'Unscored text response (0 pts)';
-    }
+    const opts = ['dropdown', 'radio', 'checkbox'].includes(q.type)
+      ? (q.options || []).map(o => `<span class="vacancy-opt-tag">${esc(o.label)}</span>`).join('')
+      : '<span class="loc-empty">Open response</span>';
     return `
       <li class="q-summary-item">
         <div class="q-summary-head">
           <b>${idx + 1}. ${esc(q.label)}</b>
           <span class="q-summary-type">${esc(typeLabel)}</span>
         </div>
-        <div class="q-summary-scores">${scoreText}</div>
+        <div class="q-summary-opts">${opts}</div>
+      </li>
+    `;
+  }).join('')}</ul>`;
+}
+
+function renderRecruitQuestionScoreSummary(questions = []) {
+  if (!questions.length) {
+    return '<span class="loc-empty">No question scoring</span>';
+  }
+  return `<ul class="q-score-list">${questions.map((q, idx) => {
+    let scoreText = '';
+    if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
+      const opts = (q.options || []).map(o => `<span class="vacancy-score-chip">${esc(o.label)} <b>+${esc(o.score)} pts</b></span>`).join('');
+      scoreText = opts ? `<div class="vacancy-score-pill-row">${opts}</div>` : '<span class="loc-empty">0 pts</span>';
+    } else {
+      scoreText = q.filledScore
+        ? `<div class="vacancy-score-pill-row"><span class="vacancy-score-chip">Filled <b>+${esc(q.filledScore)} pts</b></span></div>`
+        : '<span class="loc-empty">0 pts (unscored)</span>';
+    }
+    return `
+      <li class="q-score-item">
+        <span class="q-score-idx">Q${idx + 1}:</span>
+        ${scoreText}
       </li>
     `;
   }).join('')}</ul>`;
@@ -5141,18 +5522,30 @@ function renderRecruitVacanciesTab(host) {
           <tr data-vacancy-id="${esc(v.id)}">
             <td class="col-pos">
               <div class="pos-name-title">${esc(v.name)}</div>
-              <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'} · Max ${esc(maxScore)} pts · Min ${esc(effMin)}${effMode}</div>
+              <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'}</div>
             </td>
-            <td class="col-loc-score">
+            <td class="col-loc-questions">
+              <div class="vacancy-loc-block">
+                <div class="vacancy-block-label">Primary Districts</div>
+                ${renderRecruitDistrictSummary(v.primaryDistricts)}
+                <div class="vacancy-other-loc-line">Other: ${esc(v.otherLocationLabel)}</div>
+              </div>
+              <div class="vacancy-q-block">
+                <div class="vacancy-block-label">Questions (${v.questions.length})</div>
+                ${renderRecruitQuestionListSummary(v.questions)}
+              </div>
+            </td>
+            <td class="col-score">
               <div class="vacancy-score-block">
+                <div class="vacancy-score-pill-row">
+                  <span class="vacancy-score-chip">Max <b>${esc(maxScore)} pts</b></span>
+                  <span class="vacancy-score-chip">Min <b>${esc(effMin)}${effMode}</b></span>
+                </div>
                 <div class="vacancy-score-pill-row">
                   <span class="vacancy-score-chip">Lokasi Utama <b>+${esc(v.primaryLocationScore)} pts</b></span>
                   <span class="vacancy-score-chip">${esc(v.otherLocationLabel)} <b>+${esc(v.otherLocationScore)} pts</b></span>
                 </div>
-                ${renderRecruitDistrictSummary(v.primaryDistricts)}
-              </div>
-              <div class="vacancy-score-block">
-                ${renderRecruitQuestionSummary(v.questions)}
+                ${renderRecruitQuestionScoreSummary(v.questions)}
               </div>
             </td>
             <td class="col-actions">
@@ -5165,7 +5558,7 @@ function renderRecruitVacanciesTab(host) {
             </td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="3" class="table-empty">No vacancies match your search.</td></tr>';
+      : '<tr><td colspan="4" class="table-empty">No vacancies match your search.</td></tr>';
   };
 
   host.innerHTML = `
@@ -5217,8 +5610,9 @@ function renderRecruitVacanciesTab(host) {
           <thead>
             <tr>
               <th class="col-pos">POSITION</th>
-              <th class="col-loc-score">LOCATION &amp; QUESTION - SCORE</th>
-              <th class="col-actions">ACTIONS</th>
+              <th class="col-loc-questions">LOCATION &amp; QUESTIONS</th>
+              <th class="col-score">SCORE</th>
+              <th class="col-actions">ACTION</th>
             </tr>
           </thead>
           <tbody id="vacancy-tbody"></tbody>

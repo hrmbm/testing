@@ -1473,13 +1473,21 @@ test('Casing rules (Proper Case PKWT body, UPPERCASE signatures/Employee Directo
     department: 'produksi indoor',
     position: 'operator cnc',
     address: 'desa randupitu rt 01/rw 02',
+    birth_place: 'KAB. PASURUAN',
+    gender: 'LAKI-LAKI',
+    religion: 'ISLAM',
+    education: 'sma',
     employment_status: 'kontrak'
   });
   assert.equal(upperEmp.employee_no, 'KT 270101');
   assert.equal(upperEmp.full_name, 'BUDI SANTOSO');
   assert.equal(upperEmp.department, 'PRODUKSI INDOOR');
   assert.equal(upperEmp.position, 'OPERATOR CNC');
-  assert.equal(upperEmp.address, 'DESA RANDUPITU RT 01/RW 02');
+  assert.equal(upperEmp.address, 'Desa Randupitu RT 01/RW 02');
+  assert.equal(upperEmp.birth_place, 'Kab. Pasuruan');
+  assert.equal(upperEmp.gender, 'Laki-laki');
+  assert.equal(upperEmp.religion, 'Islam');
+  assert.equal(upperEmp.education, 'SMA');
   assert.equal(upperEmp.employment_status, 'KONTRAK');
 
   // Req 14 & 15: Salary tier conditional resolution & Contract Package display
@@ -1529,6 +1537,66 @@ test('Casing rules (Proper Case PKWT body, UPPERCASE signatures/Employee Directo
   assert.match(formatAppError({ code: '23505', message: 'duplicate key value' }), /duplikat/i);
   assert.match(formatAppError({ code: 'PGRST204', message: 'Could not find column' }), /migrasi/i);
 });
+
+test('Candidate List strips address type prefix and MS-Word template editor helpers safely rebuild/adjust spacing', async () => {
+  const { stripAddressTypePrefix, formatEmployeeExportRow } = await import('../assets/js/workspace-logic.js');
+  const {
+    normalizeContractTemplateOverrides,
+    extractContractTemplateParts,
+    scopeMasterEditorCss,
+    adjustSignatureSpacingInHtml,
+    rebuildContractTemplateHtml
+  } = await import('../assets/js/contract-logic.js');
+
+  assert.equal(stripAddressTypePrefix('Taman Puspa blok C12', 'Perumahan'), 'Taman Puspa blok C12');
+  assert.equal(stripAddressTypePrefix('Perumahan Taman Puspa blok C12', 'Perumahan'), 'Taman Puspa blok C12');
+  assert.equal(stripAddressTypePrefix('Dusun Krajan Timur', 'Dusun'), 'Krajan Timur');
+  assert.equal(stripAddressTypePrefix('Jl. Gunung Gangsir', 'Jalan'), 'Jl. Gunung Gangsir');
+
+  const exportRow = formatEmployeeExportRow({
+    employee_no: 'kt 270999',
+    full_name: 'siti aminah',
+    department: 'qc packing',
+    position: 'staff qc',
+    address: 'PERUMAHAN TAMAN PUSPA BLOK C12',
+    birth_place: 'SIDOARJO',
+    gender: 'PEREMPUAN',
+    religion: 'ISLAM',
+    education: 's1',
+    employment_status: 'kontrak',
+    home_base: 'pasuruan',
+    company_entity: 'mitra'
+  });
+  assert.equal(exportRow.Nama, 'SITI AMINAH');
+  assert.equal(exportRow.Alamat, 'Perumahan Taman Puspa Blok C12');
+  assert.equal(exportRow['Tempat Lahir'], 'Sidoarjo');
+  assert.equal(exportRow['Jenis Kelamin'], 'Perempuan');
+  assert.equal(exportRow.Agama, 'Islam');
+  assert.equal(exportRow.Pendidikan, 'S1');
+
+  const pkwtHtml = fs.readFileSync('assets/contracts/01-pkwt.html', 'utf8');
+  const parts = extractContractTemplateParts(pkwtHtml);
+  assert.ok(parts.styleCss.includes('.pkwt-signature-section'));
+  assert.ok(parts.bodyHtml.includes('{{nama_karyawan}}'));
+  const scopedCss = scopeMasterEditorCss('html, body { background: #fff; }', '#cme-wysiwyg-stage');
+  assert.ok(scopedCss.includes('#cme-wysiwyg-stage'));
+  assert.ok(!/\bbody\b/.test(scopedCss));
+
+  const added = adjustSignatureSpacingInHtml(parts.bodyHtml, 2);
+  const spacerMatches = added.match(/contract-editor-spacer/g) || [];
+  assert.equal(spacerMatches.length, 2);
+  const removedOne = adjustSignatureSpacingInHtml(added, -1);
+  assert.equal((removedOne.match(/contract-editor-spacer/g) || []).length, 1);
+
+  const rebuilt = rebuildContractTemplateHtml(pkwtHtml, removedOne);
+  assert.ok(rebuilt.includes('<!DOCTYPE html>') && rebuilt.includes('contract-editor-spacer'));
+  const rebuiltWithLogo = rebuildContractTemplateHtml(pkwtHtml, '<img class="kop-reholz-logo" data-tpl-src="{{logo_reholz_url}}" src="./assets/img/logo-reholz-green.png" alt="ReHolz" />');
+  assert.ok(rebuiltWithLogo.includes('src="{{logo_reholz_url}}"') && !rebuiltWithLogo.includes('data-tpl-src'));
+  const normalized = normalizeContractTemplateOverrides({ '01-pkwt': rebuilt, invalid_key: '<div>x</div>' });
+  assert.equal(Object.keys(normalized).length, 1);
+  assert.ok(normalized['01-pkwt'].includes('contract-editor-spacer'));
+});
+
 
 
 

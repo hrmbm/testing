@@ -1019,4 +1019,112 @@ test('Cache worker and HTML entrypoints stay synchronized on build 20261124-hrga
   assert.ok(!swText.includes('isImmutableVersioned'), 'sw.js must not cache-first JS/CSS files');
 });
 
+test('Flexible Uang Makan rules and per-person standing exceptions work accurately across day types and Ekstra Meal OT', () => {
+  const baseAtt = DEFAULT_OPS_SETTINGS.attendance;
+
+  // Master toggle disables all meal allowances
+  const disabledRes = resolveStaffDayMealEligibility({
+    workDate: '2026-11-04',
+    checkIn: '07:20:00',
+    checkOut: '16:30:00',
+    employee: { employee_no: 'ST 1001', full_name: 'BUDI' },
+    settings: { attendance: { ...baseAtt, mealAllowanceEnabled: false } }
+  });
+  assert.equal(disabledRes.eligible, false);
+  assert.equal(disabledRes.amount, 0);
+
+  // Holiday work meal enabled grants configured holiday rate
+  const holMeal = resolveStaffDayMealEligibility({
+    workDate: '2026-11-10',
+    isOffDay: true,
+    checkIn: '07:25:00',
+    checkOut: '15:00:00',
+    employee: { employee_no: 'ST 1001', full_name: 'BUDI' },
+    settings: { attendance: { ...baseAtt, holidayMealEnabled: true, holidayMealAmount: 15000 } }
+  });
+  assert.equal(holMeal.eligible, true);
+  assert.equal(holMeal.amount, 15000);
+
+  // Early leave forfeit can be toggled off flexibly
+  const earlyDepEval = evaluateStaffDepartureStatus({
+    checkOutTime: '15:30:00',
+    scheduleEnd: '16:00',
+    workDate: '2026-11-04',
+    settings: { attendance: { ...baseAtt, earlyLeaveMealForfeitEnabled: false } }
+  });
+  assert.equal(earlyDepEval.isEarlyLeave, true);
+  const earlyAllowed = resolveStaffDayMealEligibility({
+    workDate: '2026-11-04',
+    checkIn: '07:20:00',
+    checkOut: '15:30:00',
+    departureEval: earlyDepEval,
+    employee: { employee_no: 'ST 1001', full_name: 'BUDI' },
+    settings: { attendance: { ...baseAtt, earlyLeaveMealForfeitEnabled: false } }
+  });
+  assert.equal(earlyAllowed.eligible, true);
+  assert.equal(earlyAllowed.amount, 10000);
+
+  // Saturday cutoff requirement can be disabled, OR Saturday meal disabled entirely
+  const satNoCutoff = resolveStaffDayMealEligibility({
+    workDate: '2026-11-07',
+    checkIn: '07:20:00',
+    checkOut: '12:30:00',
+    employee: { employee_no: 'ST 1001', full_name: 'BUDI' },
+    settings: { attendance: { ...baseAtt, saturdayMealRequireCutoff: false } }
+  });
+  assert.equal(satNoCutoff.eligible, true);
+  assert.equal(satNoCutoff.amount, 7500);
+
+  const satOff = resolveStaffDayMealEligibility({
+    workDate: '2026-11-07',
+    checkIn: '07:20:00',
+    checkOut: '15:30:00',
+    employee: { employee_no: 'ST 1001', full_name: 'BUDI' },
+    settings: { attendance: { ...baseAtt, saturdayMealEnabled: false } }
+  });
+  assert.equal(satOff.eligible, false);
+  assert.equal(satOff.amount, 0);
+
+  // Standing per-person exceptions: 'none' (excluded) and 'custom_amount' (different weekday/Saturday rate)
+  const flexSettings = normalizeOpsSettings({
+    attendance: {
+      ekstraMealMinHours: 3,
+      mealExceptions: [
+        { employeeNo: 'ST 9001', fullName: 'NO MEAL PERSON', mode: 'none', includeEkstraMeal: false, reason: 'Catering khusus' },
+        { employeeNo: 'ST 9002', fullName: 'VIP MEAL PERSON', mode: 'custom_amount', weekdayAmount: 25000, saturdayAmount: 20000, includeEkstraMeal: true, reason: 'Tarif lapangan' }
+      ]
+    }
+  });
+
+  const excludedStaff = { id: 'e-exc1', employee_no: 'ST 9001', full_name: 'NO MEAL PERSON', department: 'STAFF', home_base: 'PASURUAN', employment_status: 'TETAP' };
+  const customStaff = { id: 'e-exc2', employee_no: 'ST 9002', full_name: 'VIP MEAL PERSON', department: 'STAFF', home_base: 'PASURUAN', employment_status: 'TETAP' };
+
+  // Friday 2026-11-06 -> Thursday 2026-11-12 weekly window (includes Saturday 2026-11-07)
+  const report = processStaffMealAllowanceReport({
+    anchorDateIso: '2026-11-06',
+    employees: [excludedStaff, customStaff],
+    rawEvents: [
+      { employee_no: 'ST 9001', work_date: '2026-11-06', check_in: '07:20:00', check_out: '19:30:00' },
+      { employee_no: 'ST 9002', work_date: '2026-11-06', check_in: '07:20:00', check_out: '19:30:00' },
+      { employee_no: 'ST 9002', work_date: '2026-11-07', check_in: '07:20:00', check_out: '15:30:00' }
+    ],
+    settings: flexSettings
+  });
+
+  const rowExcluded = report.rows.find(r => r.employee_no === 'ST 9001');
+  const rowCustom = report.rows.find(r => r.employee_no === 'ST 9002');
+  assert.equal(rowExcluded.totalEligibleDays, 0);
+  assert.equal(rowExcluded.totalAmount, 0);
+  assert.equal(rowExcluded.totalEkstraMealAmount, 0);
+  assert.equal(rowCustom.totalEligibleDays, 2);
+  assert.equal(rowCustom.totalAmount, 45000); // 25,000 Friday + 20,000 Saturday
+  assert.equal(rowCustom.totalEkstraMealAmount, 6000); // 16:00 -> 19:30 = 3.5h >= min 3h (default 6,000 / block)
+
+  // Ekstra Meal threshold configurable
+  assert.equal(calculateEkstraMeal(2.5, { ekstraMealMinHours: 3 }), 0);
+  assert.equal(calculateEkstraMeal(3, { ekstraMealMinHours: 3 }), 6000);
+  assert.equal(calculateEkstraMeal(4, { ekstraMealEnabled: false }), 0);
+});
+
+
 

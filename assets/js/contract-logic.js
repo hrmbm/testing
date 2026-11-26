@@ -10,14 +10,16 @@ import {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
-  renderAgreementHtml
+  renderAgreementHtml,
+  toProperCase
 } from './hris-renderer.js?v=20261124-hrga-workspace-22';
 
 export {
   computeEndDate,
   formatDurationParts,
   numberToIndonesianWords,
-  renderAgreementHtml
+  renderAgreementHtml,
+  toProperCase
 };
 
 export const CONTRACT_DOCUMENTS = [
@@ -548,7 +550,7 @@ export function buildContractUpdateRequestPayload({
     ktpNik: String(overrides.ktpNik ?? config.employeeKtp ?? currentEmployee?.ktp_nik ?? record.ktpNik ?? '').trim(),
     department: String(overrides.department ?? config.employeeDepartment ?? currentEmployee?.department ?? record.department ?? '').trim().toUpperCase(),
     position: String(overrides.position ?? config.employeePosition ?? record.position ?? '').trim().toUpperCase(),
-    address: String(overrides.address ?? config.employeeAddress ?? record.address ?? '').trim().toUpperCase(),
+    address: toProperCase(String(overrides.address ?? config.employeeAddress ?? record.address ?? '').trim()),
     phone: String(record.phone || currentEmployee?.phone || '').trim(),
     employmentStatus: String(overrides.employmentStatus || 'KONTRAK').trim().toUpperCase(),
     contractStartDate: startIso,
@@ -1034,6 +1036,130 @@ export function buildDirectContractSyncPayloads({
     historyEntry
   };
 }
+
+export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
+  { token: '{{nama_karyawan}}', label: 'Nama Karyawan (Proper)' },
+  { token: '{{nama_karyawan_ttd}}', label: 'Nama Karyawan TTD (UPPER)' },
+  { token: '{{nik_karyawan}}', label: 'NIK Karyawan' },
+  { token: '{{no_ktp}}', label: 'No. KTP' },
+  { token: '{{jabatan}}', label: 'Jabatan' },
+  { token: '{{departemen}}', label: 'Departemen' },
+  { token: '{{alamat_karyawan}}', label: 'Alamat Karyawan' },
+  { token: '{{no_pkwt}}', label: 'Nomor PKWT' },
+  { token: '{{no_pb}}', label: 'Nomor PB' },
+  { token: '{{tgl_mulai}}', label: 'Tanggal Mulai' },
+  { token: '{{tgl_akhir}}', label: 'Tanggal Berakhir' },
+  { token: '{{durasi_lengkap}}', label: 'Durasi Lengkap' },
+  { token: '{{gaji_tunai}}', label: 'Gaji Tunai (Rp)' },
+  { token: '{{umk_sekarang}}', label: 'UMK Aktif (Rp)' },
+  { token: '{{kota_ttd}}', label: 'Kota TTD' },
+  { token: '{{nama_perusahaan}}', label: 'Nama Perusahaan' },
+  { token: '{{nama_hrd}}', label: 'Nama HRD (Proper)' },
+  { token: '{{nama_hrd_ttd}}', label: 'Nama HRD TTD (UPPER)' },
+  { token: '{{jabatan_ttd_hrd}}', label: 'Jabatan TTD HRD' },
+  { token: '{{catatan_tambahan}}', label: 'Catatan Tambahan' }
+];
+
+const VALID_TEMPLATE_KEYS = new Set(CONTRACT_DOCUMENTS.map(d => d.key));
+
+export function normalizeContractTemplateOverrides(raw = {}) {
+  if (!raw || typeof raw !== 'object') return {};
+  const clean = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!VALID_TEMPLATE_KEYS.has(key)) continue;
+    const html = String(value ?? '').trim();
+    if (html && /<(div|p|table|header|footer|body)/i.test(html)) {
+      clean[key] = html;
+    }
+  }
+  return clean;
+}
+
+export function extractContractTemplateParts(fullHtml = '') {
+  const html = String(fullHtml || '');
+  const styleBlocks = [];
+  const styleRx = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+  let m;
+  while ((m = styleRx.exec(html)) !== null) {
+    if (m[1]) styleBlocks.push(m[1].trim());
+  }
+  const headMatch = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(html);
+  const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);
+  return {
+    headInner: headMatch ? headMatch[1] : '',
+    styleCss: styleBlocks.join('\n'),
+    bodyHtml: (bodyMatch ? bodyMatch[1] : html).trim()
+  };
+}
+
+export function scopeMasterEditorCss(rawCss = '', rootSelector = '#cme-wysiwyg-stage') {
+  return String(rawCss || '')
+    .replace(/@page\s*\{[\s\S]*?\}/gi, '')
+    .replace(/\bhtml\s*,\s*body\b/gi, rootSelector)
+    .replace(/\bhtml\b/gi, rootSelector)
+    .replace(/\bbody\b/gi, rootSelector);
+}
+
+export function sanitizeEditedTemplateBodyHtml(bodyHtml = '') {
+  return String(bodyHtml || '')
+    .replace(/\u200B/g, '')
+    .replace(/\s+contenteditable="[^"]*"/gi, '')
+    .replace(/\s+spellcheck="[^"]*"/gi, '')
+    .replace(/<img\b([^>]*?)\sdata-tpl-src="([^"]*)"([^>]*)>/gi, (_, pre, tplSrc, post) => {
+      const cleanedAttrs = `${pre}${post}`.replace(/\s+src="[^"]*"/gi, '');
+      return `<img${cleanedAttrs} src="${tplSrc}">`;
+    })
+    .replace(/\{\{([^}]*)\}\}/g, (_, inner) => `{{${inner.replace(/&nbsp;/gi, ' ').trim()}}}`)
+    .trim();
+}
+
+export function rebuildContractTemplateHtml(baseFullHtml = '', updatedBodyHtml = '') {
+  const cleanBody = sanitizeEditedTemplateBodyHtml(updatedBodyHtml);
+  const base = String(baseFullHtml || '');
+  if (/<body[^>]*>[\s\S]*?<\/body>/i.test(base)) {
+    return base.replace(/(<body[^>]*>)[\s\S]*?(<\/body>)/i, `$1\n${cleanBody}\n$2`);
+  }
+  return `<!DOCTYPE html>\n<html lang="id">\n<head><meta charset="UTF-8" /></head>\n<body>\n${cleanBody}\n</body>\n</html>`;
+}
+
+export function adjustSignatureSpacingInHtml(bodyHtml = '', deltaLines = 1) {
+  let html = String(bodyHtml || '');
+  const spacerTag = '<p class="contract-editor-spacer"><br></p>';
+  const sigRx = /(<div\s+class="[^"]*\b(?:pkwt-signature-section|pb-signature-section)\b[^"]*"[^>]*>)/i;
+  if (!sigRx.test(html)) {
+    if (deltaLines > 0) {
+      return `${html}\n${spacerTag.repeat(deltaLines)}`;
+    }
+    return html;
+  }
+
+  // Locate the LAST signature section so multi-page contracts target the actual sign-off block.
+  const allMatches = [...html.matchAll(/<div\s+class="[^"]*\b(?:pkwt-signature-section|pb-signature-section)\b[^"]*"[^>]*>/gi)];
+  const lastMatch = allMatches[allMatches.length - 1];
+  if (!lastMatch) return html;
+  const idx = lastMatch.index;
+  const before = html.slice(0, idx);
+  const after = html.slice(idx);
+
+  if (deltaLines > 0) {
+    return `${before}${spacerTag.repeat(deltaLines)}${after}`;
+  }
+  if (deltaLines < 0) {
+    let updatedBefore = before;
+    const removeCount = Math.abs(deltaLines);
+    for (let i = 0; i < removeCount; i++) {
+      const stripped = updatedBefore.replace(/(?:<p[^>]*class="[^"]*contract-editor-spacer[^"]*"[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s)*<\/p>|<p[^>]*>\s*(?:<br\s*\/?>|&nbsp;)\s*<\/p>|<br\s*\/?>)\s*$/i, '');
+      if (stripped !== updatedBefore) {
+        updatedBefore = stripped;
+      } else {
+        break;
+      }
+    }
+    return `${updatedBefore}${after}`;
+  }
+  return html;
+}
+
 
 
 

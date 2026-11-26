@@ -13,15 +13,18 @@ import {
   computeEndDate,
   determineRequiredContractDocuments,
   formatContractCode,
+  normalizeContractTemplateOverrides,
   normalizeSalaryTier,
   parseNumericCurrency,
   renderAgreementHtml,
   resolveDefaultContractStartDate,
   resolveSalaryByTier,
-  toIsoDate
+  toIsoDate,
+  toProperCase
 } from './contract-logic.js?v=20261124-hrga-workspace-22';
 
 export const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
+export const CONTRACT_TEMPLATE_OVERRIDES_STORAGE_KEY = 'hrga_contract_templates_v1';
 
 function formatCurrencyDigits(raw = '') {
   const digits = String(raw ?? '').replace(/[^\d]/g, '');
@@ -87,6 +90,42 @@ export function writeSavedContractSettings(settings = {}) {
   } catch {}
 }
 
+export function readSavedContractTemplateOverrides() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CONTRACT_TEMPLATE_OVERRIDES_STORAGE_KEY) || 'null');
+    return normalizeContractTemplateOverrides(parsed);
+  } catch {
+    return {};
+  }
+}
+
+export function writeSavedContractTemplateOverrides(overrides = {}) {
+  try {
+    const normalized = normalizeContractTemplateOverrides(overrides);
+    localStorage.setItem(CONTRACT_TEMPLATE_OVERRIDES_STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+export function clearContractTemplateCache(docKey = null) {
+  if (docKey) {
+    cachedTemplates.delete(docKey);
+  } else {
+    cachedTemplates.clear();
+  }
+}
+
+export async function loadDefaultContractTemplate(docMeta) {
+  if (cachedTemplates.has(docMeta.key)) return cachedTemplates.get(docMeta.key);
+  const res = await fetch(`./assets/contracts/${docMeta.file}`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Failed to load template ${docMeta.file}.`);
+  const html = await res.text();
+  cachedTemplates.set(docMeta.key, html);
+  return html;
+}
+
 async function loadCompanyMasters() {
   if (cachedMasters) return cachedMasters;
   const res = await fetch('./assets/contracts/company-masters.json', { cache: 'no-cache' });
@@ -96,13 +135,16 @@ async function loadCompanyMasters() {
   return cachedMasters;
 }
 
-async function loadContractTemplate(docMeta) {
-  if (cachedTemplates.has(docMeta.key)) return cachedTemplates.get(docMeta.key);
-  const res = await fetch(`./assets/contracts/${docMeta.file}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load template ${docMeta.file}.`);
-  const html = await res.text();
-  cachedTemplates.set(docMeta.key, html);
-  return html;
+async function loadContractTemplate(docMeta, settingsOrOverrides = null) {
+  const fromArg = settingsOrOverrides?.templateOverrides?.[docMeta.key] || settingsOrOverrides?.[docMeta.key];
+  if (typeof fromArg === 'string' && fromArg.trim()) {
+    return fromArg;
+  }
+  const savedOverrides = readSavedContractTemplateOverrides();
+  if (savedOverrides[docMeta.key]) {
+    return savedOverrides[docMeta.key];
+  }
+  return loadDefaultContractTemplate(docMeta);
 }
 
 function decorateScreenPreview(html) {
@@ -232,7 +274,7 @@ export async function openPkwtConfigModal({
   const [masters, reholzLogoUrl] = await Promise.all([
     loadCompanyMasters(),
     loadReholzLogoUrl(),
-    ...CONTRACT_DOCUMENTS.map(docMeta => loadContractTemplate(docMeta).catch(() => ''))
+    ...CONTRACT_DOCUMENTS.map(docMeta => loadContractTemplate(docMeta, contractSettings).catch(() => ''))
   ]);
 
   let modal = document.getElementById('pkwt-config-modal');
@@ -537,7 +579,7 @@ export async function openPkwtConfigModal({
 
     const activeDoc = rule.documents.find(d => d.key === selectedDocKey) || rule.documents[0];
     try {
-      const templateHtml = await loadContractTemplate(activeDoc);
+      const templateHtml = await loadContractTemplate(activeDoc, activeSettings);
       if (seq !== renderSeq) return;
       const payload = { ...buildAgreementPayload(config, currentMaster), reholzLogoUrl };
       const rendered = renderAgreementHtml(templateHtml, payload, currentMaster);
@@ -635,7 +677,7 @@ export async function openPkwtConfigModal({
       const payload = { ...buildAgreementPayload(config, currentMaster), reholzLogoUrl };
       const htmlList = await Promise.all(
         docsToPrint.map(async docMeta => {
-          const tpl = await loadContractTemplate(docMeta);
+          const tpl = await loadContractTemplate(docMeta, activeSettings);
           return renderAgreementHtml(tpl, payload, currentMaster);
         })
       );
@@ -834,7 +876,7 @@ export function openPostPrintEmployeeUpdateModal({
       docSequence: String(payload.docSequence || config.docSequence || '001').trim(),
       salaryTier,
       salary: resolvedSalary,
-      address: form.elements.address.value.trim().toUpperCase()
+      address: toProperCase(form.elements.address.value.trim())
     };
     if (!overrides.employeeNik) {
       errorBox.textContent = 'Employee NIK is required.';

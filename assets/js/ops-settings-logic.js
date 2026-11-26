@@ -277,16 +277,26 @@ export const DEFAULT_OPS_SETTINGS = {
     earlyLeaveThresholdMinutes: 1, // >= 1 menit sebelum jam pulang jadwal -> PA (Pulang Awal)
     lateAndEarlyPriority: 'T', // 'T' | 'PA' saat terlambat dan pulang awal di hari yang sama
     mealThresholdMinutes: 6, // >= 6 menit dari jadwal masuk (07:35:59 dapat uang makan, 07:36:00 tidak)
+    mealAllowanceEnabled: true, // master aktif/nonaktif uang makan reguler
     mealAllowanceAmount: 10000, // Rp 10.000 per hari
+    earlyLeaveMealForfeitEnabled: true, // Senin-Jumat pulang < earlyLeaveMealCutoffTime uang makan hangus
     earlyLeaveMealCutoffTime: '15:00', // Senin-Jumat pulang < 15:00 uang makan hangus
+    saturdayMealEnabled: true, // apakah hari Sabtu bisa mendapat uang makan
+    saturdayMealRequireCutoff: true, // jika false, hadir Sabtu otomatis dapat tarif Sabtu tanpa batas jam pulang
     saturdayMealCutoffTime: '15:00', // Sabtu tidak dapat uang makan kecuali pulang >= 15:00
     saturdayMealAllowanceAmount: 7500, // Rp 7.500 jika Sabtu pulang >= 15:00
+    holidayMealEnabled: false, // uang makan saat masuk di hari libur/off-day terjadwal
+    holidayMealAmount: 10000,
+    mealRequireCheckout: false, // wajib memiliki tap pulang untuk mendapat uang makan
+    ekstraMealEnabled: true, // master aktif/nonaktif ekstra meal lembur
+    ekstraMealMinHours: 2, // minimal jam lembur untuk blok ekstra meal ke-1
     ekstraMealFirst2hAmount: 6000, // 2 jam lembur pertama
     ekstraMealSecond2hAmount: 8000, // 2 jam lembur kedua
     ekstraMealNext2hAmount: 10000, // 2 jam lembur ketiga & kelipatan 2 jam berikutnya
     mealPeriodStartDay: 5, // 5 = Jumat (0=Min..6=Sab)
     mealPeriodLengthDays: 7, // 7 hari -> Jumat s/d Kamis
     mealAutoOnManualHadir: false, // jika false, manual H tanpa jam masuk butuh override uang makan atau jam masuk <= batas
+    mealExceptions: [], // pengecualian permanen per karyawan: tidak dapat (none) atau tarif nominal khusus (custom_amount)
     exemptDriverLateFlag: true,
     workingDaysBasis: 26,
     maxPaidDaysCap: 25,
@@ -444,6 +454,22 @@ function normalizeWorkSchedules(raw = {}) {
   };
 }
 
+export function normalizeMealExceptions(raw = []) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(x => x && (x.employee_no || x.employeeNo || x.full_name || x.fullName))
+    .map((x, idx) => ({
+      id: String(x.id || `mexc-${idx + 1}`).trim(),
+      employee_no: String(x.employee_no ?? x.employeeNo ?? '').trim(),
+      full_name: String(x.full_name ?? x.fullName ?? '').trim(),
+      mode: x.mode === 'custom_amount' ? 'custom_amount' : 'none',
+      weekdayAmount: Math.round(sanitizeNum(x.weekdayAmount, 0, 0, 1000000)),
+      saturdayAmount: Math.round(sanitizeNum(x.saturdayAmount, 0, 0, 1000000)),
+      includeEkstraMeal: Boolean(x.includeEkstraMeal),
+      reason: String(x.reason || '').trim()
+    }));
+}
+
 function normalizeSignatories(raw = {}) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const def = DEFAULT_SIGNATORIES;
@@ -541,16 +567,26 @@ export function normalizeOpsSettings(raw = {}) {
       earlyLeaveThresholdMinutes: Math.round(sanitizeNum(att.earlyLeaveThresholdMinutes, defAtt.earlyLeaveThresholdMinutes, 0, 240)),
       lateAndEarlyPriority: att.lateAndEarlyPriority === 'PA' ? 'PA' : 'T',
       mealThresholdMinutes: Math.round(sanitizeNum(att.mealThresholdMinutes, defAtt.mealThresholdMinutes, 1, 180)),
+      mealAllowanceEnabled: att.mealAllowanceEnabled !== false,
       mealAllowanceAmount: Math.round(sanitizeNum(att.mealAllowanceAmount, defAtt.mealAllowanceAmount, 0, 1000000)),
+      earlyLeaveMealForfeitEnabled: att.earlyLeaveMealForfeitEnabled !== false,
       earlyLeaveMealCutoffTime: sanitizeTimeHm(att.earlyLeaveMealCutoffTime, defAtt.earlyLeaveMealCutoffTime),
+      saturdayMealEnabled: att.saturdayMealEnabled !== false,
+      saturdayMealRequireCutoff: att.saturdayMealRequireCutoff !== false,
       saturdayMealCutoffTime: sanitizeTimeHm(att.saturdayMealCutoffTime, defAtt.saturdayMealCutoffTime),
       saturdayMealAllowanceAmount: Math.round(sanitizeNum(att.saturdayMealAllowanceAmount, defAtt.saturdayMealAllowanceAmount, 0, 1000000)),
+      holidayMealEnabled: Boolean(att.holidayMealEnabled),
+      holidayMealAmount: Math.round(sanitizeNum(att.holidayMealAmount, defAtt.holidayMealAmount, 0, 1000000)),
+      mealRequireCheckout: Boolean(att.mealRequireCheckout),
+      ekstraMealEnabled: att.ekstraMealEnabled !== false,
+      ekstraMealMinHours: sanitizeNum(att.ekstraMealMinHours, defAtt.ekstraMealMinHours, 0.5, 12),
       ekstraMealFirst2hAmount: Math.round(sanitizeNum(att.ekstraMealFirst2hAmount, defAtt.ekstraMealFirst2hAmount, 0, 1000000)),
       ekstraMealSecond2hAmount: Math.round(sanitizeNum(att.ekstraMealSecond2hAmount, defAtt.ekstraMealSecond2hAmount, 0, 1000000)),
       ekstraMealNext2hAmount: Math.round(sanitizeNum(att.ekstraMealNext2hAmount, defAtt.ekstraMealNext2hAmount, 0, 1000000)),
       mealPeriodStartDay: Math.round(sanitizeNum(att.mealPeriodStartDay, defAtt.mealPeriodStartDay, 0, 6)),
       mealPeriodLengthDays: Math.round(sanitizeNum(att.mealPeriodLengthDays, defAtt.mealPeriodLengthDays, 1, 14)),
       mealAutoOnManualHadir: Boolean(att.mealAutoOnManualHadir),
+      mealExceptions: normalizeMealExceptions(att.mealExceptions),
       exemptDriverLateFlag: att.exemptDriverLateFlag !== false,
       workingDaysBasis: sanitizeNum(att.workingDaysBasis, defAtt.workingDaysBasis, 1, 31),
       maxPaidDaysCap: sanitizeNum(att.maxPaidDaysCap, defAtt.maxPaidDaysCap, 1, 31),
@@ -646,9 +682,11 @@ export function calculateEkstraMeal(overtimeHours = 0, settingsOrAttCfg = DEFAUL
         ...DEFAULT_OPS_SETTINGS.attendance,
         ...(settingsOrAttCfg && typeof settingsOrAttCfg === 'object' ? settingsOrAttCfg : {})
       };
+  if (att.ekstraMealEnabled === false) return 0;
   const h = Number(overtimeHours);
-  if (!Number.isFinite(h) || h < 2) return 0;
-  const blocks = Math.floor((h + 1e-9) / 2);
+  const minHours = Math.max(0.5, Number(att.ekstraMealMinHours ?? 2) || 2);
+  if (!Number.isFinite(h) || h < minHours - 1e-9) return 0;
+  const blocks = 1 + Math.floor((h - minHours + 1e-9) / 2);
   if (blocks <= 0) return 0;
   const first2h = Math.round(Number(att.ekstraMealFirst2hAmount ?? 6000));
   const second2h = Math.round(Number(att.ekstraMealSecond2hAmount ?? 8000));

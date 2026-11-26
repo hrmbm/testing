@@ -576,6 +576,8 @@ export function processStaffAttendancePeriod({
     let scheduledWorkDays = 0;
     const empDays = [];
 
+    const mealEx = resolveEmployeeMealException(emp, cfg);
+
     for (let di = 0; di < win.dates.length; di++) {
       const dateStr = win.dates[di];
       const meta = win.dayMeta[di];
@@ -608,7 +610,6 @@ export function processStaffAttendancePeriod({
       const review = reviewMap.get(`${nikKey}|${dateStr}`);
       const mealOverride = mealOvMap.get(`${nikKey}|${dateStr}`) || null;
 
-      const dow = meta.dow;
       const checkIn = ev?.check_in || '';
       const checkOut = ev?.check_out || '';
       const arrivalEval = checkIn
@@ -684,6 +685,7 @@ export function processStaffAttendancePeriod({
       }
 
       const mealResolution = resolveStaffDayMealEligibility({
+        employee: emp,
         workDate: dateStr,
         dow: meta.dow,
         isOffDay,
@@ -701,7 +703,8 @@ export function processStaffAttendancePeriod({
         checkOut,
         scheduleEnd: schedule.endTime
       });
-      const ekstraMealAmount = ['H', 'T', 'PA'].includes(finalCode) || (isOffDay && checkIn && checkOut)
+      const exBlocksEkstra = mealEx?.mode === 'none' && !mealEx.includeEkstraMeal;
+      const ekstraMealAmount = !exBlocksEkstra && (['H', 'T', 'PA'].includes(finalCode) || (isOffDay && checkIn && checkOut))
         ? calculateEkstraMeal(staffOtHours, cfg)
         : 0;
 
@@ -835,6 +838,7 @@ export function processStaffMealAllowanceReport({
 
   for (const emp of employees) {
     const nikKey = compactNik(emp.employee_no);
+    const mealEx = resolveEmployeeMealException(emp, cfg);
     const days = [];
     let empEligibleDays = 0;
     let empTotalAmount = 0;
@@ -895,6 +899,7 @@ export function processStaffMealAllowanceReport({
         reason = 'Belum bergabung';
       } else {
         const res = resolveStaffDayMealEligibility({
+          employee: emp,
           workDate: dateStr,
           dow: meta.dow,
           isOffDay,
@@ -920,7 +925,9 @@ export function processStaffMealAllowanceReport({
             checkOut,
             scheduleEnd: schedule.endTime
           });
-      const canGetOtMeal = !(emp.join_date && dateStr < emp.join_date) &&
+      const exBlocksEkstra = mealEx?.mode === 'none' && !mealEx.includeEkstraMeal;
+      const canGetOtMeal = !exBlocksEkstra &&
+        !(emp.join_date && dateStr < emp.join_date) &&
         !['S', 'I', 'A', 'CT', 'DS'].includes(attCode);
       const ekstraMealAmount = canGetOtMeal ? calculateEkstraMeal(staffOtHours, cfg) : 0;
 
@@ -970,6 +977,7 @@ export function processStaffMealAllowanceReport({
       department: emp.department || '',
       home_base: emp.home_base || 'PASURUAN',
       company_entity: normalizeCompanyEntity(emp.company_entity || 'MITRA'),
+      mealException: mealEx || null,
       days,
       totalEligibleDays: empEligibleDays,
       totalAmount: empTotalAmount,
@@ -1291,7 +1299,23 @@ export function computeStaffDayOvertimeHours({
   return Math.round(((outSec - endSec) / 3600) * 100) / 100;
 }
 
+export function resolveEmployeeMealException(employee = null, settingsOrAttCfg = DEFAULT_OPS_SETTINGS) {
+  if (!employee) return null;
+  const att = settingsOrAttCfg?.attendance
+    ? normalizeOpsSettings(settingsOrAttCfg).attendance
+    : settingsOrAttCfg;
+  const list = Array.isArray(att?.mealExceptions) ? att.mealExceptions : [];
+  if (!list.length) return null;
+  const nikKey = compactNik(employee.employee_no || '');
+  const nameKey = normKey(employee.full_name || employee.employee_name || '');
+  return list.find(ex =>
+    (nikKey && ex.employee_no && compactNik(ex.employee_no) === nikKey) ||
+    (nameKey && ex.full_name && normKey(ex.full_name) === nameKey)
+  ) || null;
+}
+
 export function resolveStaffDayMealEligibility({
+  employee = null,
   workDate = '',
   dow = null,
   isOffDay = false,
@@ -1307,12 +1331,25 @@ export function resolveStaffDayMealEligibility({
   const resolvedDow = typeof dow === 'number'
     ? dow
     : (workDate ? new Date(`${workDate}T00:00:00Z`).getUTCDay() : 1);
-  const weekdayAmount = Math.round(Number(attCfg.mealAllowanceAmount ?? 10000));
-  const saturdayAmount = Math.round(Number(attCfg.saturdayMealAllowanceAmount ?? 7500));
+  const mealEx = employee ? resolveEmployeeMealException(employee, attCfg) : null;
+  const hasCustomAmount = mealEx?.mode === 'custom_amount';
+  const weekdayAmount = hasCustomAmount
+    ? Math.max(0, Math.round(Number(mealEx.weekdayAmount ?? 0)))
+    : Math.round(Number(attCfg.mealAllowanceAmount ?? 10000));
+  const saturdayAmount = hasCustomAmount
+    ? Math.max(0, Math.round(Number(mealEx.saturdayAmount ?? 0)))
+    : Math.round(Number(attCfg.saturdayMealAllowanceAmount ?? 7500));
+  const holidayAmount = hasCustomAmount
+    ? weekdayAmount
+    : Math.round(Number(attCfg.holidayMealAmount ?? attCfg.mealAllowanceAmount ?? 10000));
+  const customHint = hasCustomAmount
+    ? `Tarif Khusus${mealEx.reason ? ` (${mealEx.reason})` : ''}`
+    : '';
 
   if (mealOverride && typeof mealOverride.eligible === 'boolean') {
-    const eligible = Boolean(mealOverride.eligible);
-    const amount = eligible ? (resolvedDow === 6 ? saturdayAmount : weekdayAmount) : 0;
+    const rawEligible = Boolean(mealOverride.eligible);
+    const amount = rawEligible ? (resolvedDow === 6 ? saturdayAmount : weekdayAmount) : 0;
+    const eligible = rawEligible && amount > 0;
     return {
       eligible,
       overridden: true,
@@ -1321,24 +1358,89 @@ export function resolveStaffDayMealEligibility({
     };
   }
 
+  if (mealEx?.mode === 'none') {
+    return {
+      eligible: false,
+      overridden: false,
+      exceptionMode: 'none',
+      amount: 0,
+      reason: mealEx.reason
+        ? `Pengecualian Karyawan: ${mealEx.reason}`
+        : 'Pengecualian Karyawan (Tidak Dapat Uang Makan)'
+    };
+  }
+
+  if (attCfg.mealAllowanceEnabled === false) {
+    return {
+      eligible: false,
+      overridden: false,
+      amount: 0,
+      reason: 'Uang Makan Reguler Dinonaktifkan'
+    };
+  }
+
   if (['S', 'I', 'A', 'CT', 'DS'].includes(attCode)) {
     return { eligible: false, overridden: false, amount: 0, reason: `Status ${attCode}` };
   }
+
   if ((attCode === 'L' && !checkIn && !checkOut) || isOffDay) {
+    if (attCfg.holidayMealEnabled && (checkIn || checkOut) && (!attCfg.mealRequireCheckout || checkOut)) {
+      if (holidayAmount <= 0) {
+        return { eligible: false, overridden: false, amount: 0, reason: customHint || 'Tarif Libur Rp 0' };
+      }
+      return {
+        eligible: true,
+        overridden: false,
+        amount: holidayAmount,
+        reason: customHint || `Masuk Hari Libur (Rp ${holidayAmount.toLocaleString('id-ID')})`
+      };
+    }
     return { eligible: false, overridden: false, amount: 0, reason: 'Libur' };
   }
 
-  // Hari Sabtu: tidak dapat uang makan kecuali pulang >= jam 15:00 -> Rp 7.500
+  if (attCfg.mealRequireCheckout && !checkOut) {
+    return {
+      eligible: false,
+      overridden: false,
+      amount: 0,
+      reason: 'Tidak ada jam pulang (Wajib Tap Pulang)'
+    };
+  }
+
+  // Hari Sabtu: fleksibel aktif/nonaktif & syarat jam pulang >= cutoff
   if (resolvedDow === 6) {
+    if (attCfg.saturdayMealEnabled === false) {
+      return {
+        eligible: false,
+        overridden: false,
+        amount: 0,
+        reason: 'Uang makan hari Sabtu dinonaktifkan'
+      };
+    }
     const satCutoff = normalizeTimeString(`${attCfg.saturdayMealCutoffTime || '15:00'}:00`);
     const satCutoffSec = timeToSeconds(satCutoff);
     const outSec = timeToSeconds(checkOut);
-    if (outSec !== null && satCutoffSec !== null && outSec >= satCutoffSec) {
+    const satPresent = Boolean(checkIn || checkOut || (attCode === 'H' && attCfg.mealAutoOnManualHadir));
+    if (attCfg.saturdayMealRequireCutoff === false && satPresent) {
+      if (saturdayAmount <= 0) {
+        return { eligible: false, overridden: false, amount: 0, reason: customHint || 'Tarif Khusus Sabtu Rp 0' };
+      }
       return {
         eligible: true,
         overridden: false,
         amount: saturdayAmount,
-        reason: `Sabtu pulang >= ${String(attCfg.saturdayMealCutoffTime || '15:00')} (Rp ${saturdayAmount.toLocaleString('id-ID')})`
+        reason: customHint || `Sabtu hadir (Tanpa batas jam pulang · Rp ${saturdayAmount.toLocaleString('id-ID')})`
+      };
+    }
+    if (outSec !== null && satCutoffSec !== null && outSec >= satCutoffSec) {
+      if (saturdayAmount <= 0) {
+        return { eligible: false, overridden: false, amount: 0, reason: customHint || 'Tarif Khusus Sabtu Rp 0' };
+      }
+      return {
+        eligible: true,
+        overridden: false,
+        amount: saturdayAmount,
+        reason: customHint || `Sabtu pulang >= ${String(attCfg.saturdayMealCutoffTime || '15:00')} (Rp ${saturdayAmount.toLocaleString('id-ID')})`
       };
     }
     return {
@@ -1351,32 +1453,39 @@ export function resolveStaffDayMealEligibility({
     };
   }
 
-  // Senin - Jumat: pulang < 15:00 uang makan hangus
-  const earlyCutoff = normalizeTimeString(`${attCfg.earlyLeaveMealCutoffTime || '15:00'}:00`);
-  const earlyCutoffSec = timeToSeconds(earlyCutoff);
-  const outSec = timeToSeconds(checkOut);
-  if (outSec !== null && earlyCutoffSec !== null && outSec < earlyCutoffSec) {
-    return {
-      eligible: false,
-      overridden: false,
-      amount: 0,
-      reason: `Pulang < ${String(attCfg.earlyLeaveMealCutoffTime || '15:00')} (Uang Makan Hangus)`
-    };
+  // Senin - Jumat: pulang < cutoff uang makan hangus (bila aturan aktif)
+  if (attCfg.earlyLeaveMealForfeitEnabled !== false) {
+    const earlyCutoff = normalizeTimeString(`${attCfg.earlyLeaveMealCutoffTime || '15:00'}:00`);
+    const earlyCutoffSec = timeToSeconds(earlyCutoff);
+    const outSec = timeToSeconds(checkOut);
+    if (outSec !== null && earlyCutoffSec !== null && outSec < earlyCutoffSec) {
+      return {
+        eligible: false,
+        overridden: false,
+        amount: 0,
+        reason: `Pulang < ${String(attCfg.earlyLeaveMealCutoffTime || '15:00')} (Uang Makan Hangus)`
+      };
+    }
   }
 
   if (checkIn) {
     const evalArrival = arrivalEval || evaluateStaffArrivalStatus({ checkInTime: checkIn, settings: attCfg });
-    const eligible = Boolean(evalArrival?.getsMealAllowance);
+    const eligible = Boolean(evalArrival?.getsMealAllowance) && weekdayAmount > 0;
     return {
       eligible,
       overridden: false,
       amount: eligible ? weekdayAmount : 0,
-      reason: evalArrival?.mealReason || ''
+      reason: eligible && customHint
+        ? `${evalArrival?.mealReason || 'Hadir'} · ${customHint}`
+        : (evalArrival?.mealReason || (weekdayAmount <= 0 ? (customHint || 'Tarif Khusus Rp 0') : ''))
     };
   }
 
   if (attCode === 'H' && attCfg.mealAutoOnManualHadir) {
-    return { eligible: true, overridden: false, amount: weekdayAmount, reason: 'Hadir Manual (H)' };
+    if (weekdayAmount <= 0) {
+      return { eligible: false, overridden: false, amount: 0, reason: customHint || 'Tarif Khusus Rp 0' };
+    }
+    return { eligible: true, overridden: false, amount: weekdayAmount, reason: customHint || 'Hadir Manual (H)' };
   }
 
   return { eligible: false, overridden: false, amount: 0, reason: 'Tidak ada jam masuk' };

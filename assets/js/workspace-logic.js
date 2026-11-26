@@ -1,5 +1,6 @@
 // Pure business logic helpers for HR&GA Workspace (unit-tested via node:test)
 import { computeDisc } from './disc-engine.js?v=20261124-hrga-workspace-22';
+import { toProperCase } from './hris-renderer.js?v=20261124-hrga-workspace-22';
 
 const DISC_RESULT_CACHE = new WeakMap();
 
@@ -1541,27 +1542,51 @@ export function parseEmployeeWorksheetAoa(aoa = []) {
   return { ...res, headerRowIndex: headerIdx };
 }
 
+export function stripAddressTypePrefix(street = '', addressType = '') {
+  const cleanStreet = String(street ?? '').trim().replace(/\s+/g, ' ');
+  if (!cleanStreet) return '';
+  const cleanType = String(addressType ?? '').trim().replace(/\s+/g, ' ');
+  if (!cleanType) return cleanStreet;
+  const escapedType = cleanType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = new RegExp(`^${escapedType}(?:[.:/\\-\\s]+)(.+)$`, 'i');
+  const match = cleanStreet.match(rx);
+  return match && match[1] ? match[1].trim() : cleanStreet;
+}
+
+export function normalizeEmployeeGender(value = '') {
+  const clean = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (!clean) return '';
+  const key = clean.toLowerCase();
+  if (key === 'l' || key === 'laki-laki' || key === 'laki - laki' || key === 'male' || key === 'pria') {
+    return 'Laki-laki';
+  }
+  if (key === 'p' || key === 'perempuan' || key === 'female' || key === 'wanita') {
+    return 'Perempuan';
+  }
+  return toProperCase(clean);
+}
+
 export function formatEmployeeExportRow(employee, applicant = null) {
   const appData = applicant?.application_data || {};
-  const genderRaw = employee.gender || appData.gender || '';
-  const genderLabel = genderRaw === 'L' ? 'Laki-laki' : genderRaw === 'P' ? 'Perempuan' : genderRaw;
+  const up = v => String(v ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+  const genderLabel = normalizeEmployeeGender(employee.gender || appData.gender || '');
   return {
-    Nama: employee.full_name || applicant?.full_name || appData.nama || '',
-    Nik: employee.employee_no || '',
-    Departement: employee.department || '',
+    Nama: up(employee.full_name || applicant?.full_name || appData.nama || ''),
+    Nik: up(employee.employee_no || ''),
+    Departement: up(employee.department || ''),
     'Tgl Masuk': formatDmyDash(employee.join_date || ''),
-    Jabatan: employee.position || applicant?.position || '',
+    Jabatan: up(employee.position || applicant?.position || ''),
     'Mulai Kontrak': formatDmyDash(employee.contract_start_date || ''),
     'Kontrak Berakhir': formatDmyDash(employee.contract_end_date || ''),
-    Alamat: employee.address || appData.alamat_asal || appData.domisili || '',
-    Nik2: employee.ktp_nik || applicant?.nik || appData.nik || '',
-    'Tempat Lahir': employee.birth_place || appData.tempat_lahir || '',
+    Alamat: toProperCase(employee.address || appData.alamat_asal || appData.domisili || ''),
+    Nik2: String(employee.ktp_nik || applicant?.nik || appData.nik || '').trim(),
+    'Tempat Lahir': toProperCase(employee.birth_place || appData.tempat_lahir || ''),
     'Tanggal Lahir': formatDmyDash(employee.birth_date || appData.tanggal_lahir || ''),
-    'No. Telp': employee.phone || appData.telepon || '',
-    Status: employee.employment_status || '',
-    Pendidikan: employee.education || appData.pendidikan_terakhir || '',
+    'No. Telp': String(employee.phone || appData.telepon || '').trim(),
+    Status: up(employee.employment_status || ''),
+    Pendidikan: up(employee.education || appData.pendidikan_terakhir || ''),
     'Jenis Kelamin': genderLabel,
-    Agama: employee.religion || appData.agama || '',
+    Agama: toProperCase(employee.religion || appData.agama || ''),
     'Home Base': normalizeHomeBase(employee.home_base || ''),
     Perusahaan: normalizeCompanyEntity(employee.company_entity || '')
   };
@@ -2052,24 +2077,29 @@ export function preserveCaretCurrencyValue(rawValue = '', selectionStart = null)
 }
 
 export function normalizeEmployeeRecordUppercase(emp = {}) {
-  const up = v => (v === null || v === undefined ? v : String(v).trim().replace(/\s+/g, ' ').toUpperCase());
-  const upOpt = v => (v === null || v === undefined || String(v).trim() === '' ? v : up(v));
+  const clean = v => (v === null || v === undefined ? v : String(v).trim().replace(/\s+/g, ' '));
+  const up = v => (v === null || v === undefined ? v : clean(v).toUpperCase());
+  const upOpt = v => (v === null || v === undefined || clean(v) === '' ? v : up(v));
+  const properOpt = v => (v === null || v === undefined || clean(v) === '' ? v : toProperCase(clean(v)));
+  const genderOpt = v => (v === null || v === undefined || clean(v) === '' ? v : normalizeEmployeeGender(clean(v)));
   const out = { ...emp };
   if ('employee_no' in out) out.employee_no = up(out.employee_no || '');
   if ('full_name' in out) out.full_name = up(out.full_name || '');
   if ('department' in out) out.department = up(out.department || '');
   if ('position' in out) out.position = up(out.position || '');
-  if ('address' in out) out.address = up(out.address || '');
-  if ('birth_place' in out) out.birth_place = upOpt(out.birth_place);
+  if ('address' in out) out.address = clean(out.address || '') ? toProperCase(clean(out.address || '')) : '';
+  if ('birth_place' in out) out.birth_place = properOpt(out.birth_place);
   if ('education' in out) out.education = upOpt(out.education);
-  if ('gender' in out) out.gender = upOpt(out.gender);
-  if ('religion' in out) out.religion = upOpt(out.religion);
-  if ('notes' in out) out.notes = upOpt(out.notes);
+  if ('gender' in out) out.gender = genderOpt(out.gender);
+  if ('religion' in out) out.religion = properOpt(out.religion);
+  if ('notes' in out) out.notes = clean(out.notes);
   if ('employment_status' in out) out.employment_status = up(out.employment_status || 'KONTRAK');
   if ('home_base' in out) out.home_base = normalizeHomeBase(out.home_base || 'PASURUAN');
   if ('company_entity' in out) out.company_entity = normalizeCompanyEntity(out.company_entity || 'MITRA');
   return out;
 }
+
+export const normalizeEmployeeRecordCasing = normalizeEmployeeRecordUppercase;
 
 
 

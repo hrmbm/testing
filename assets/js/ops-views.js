@@ -1638,10 +1638,16 @@ export async function renderStaffReportsView(host, ctx) {
           </tr>
         </thead>
         <tbody>
-          ${mealRep.rows.length ? mealRep.rows.map((r, idx) => `
+          ${mealRep.rows.length ? mealRep.rows.map((r, idx) => {
+            const exBadge = r.mealException
+              ? (r.mealException.mode === 'custom_amount'
+                  ? `<br><small class="pill blue" title="${esc(r.mealException.reason || 'Tarif Uang Makan Khusus')}">Tarif Khusus (${fmtIdr(r.mealException.weekdayAmount)}/${fmtIdr(r.mealException.saturdayAmount)})</small>`
+                  : `<br><small class="pill danger" title="${esc(r.mealException.reason || 'Tidak Dapat Uang Makan')}">Dikecualikan (Rp 0)</small>`)
+              : '';
+            return `
             <tr>
               <td>${idx + 1}</td>
-              <td class="l"><b>${esc(r.employee_name)}</b></td>
+              <td class="l"><b>${esc(r.employee_name)}</b>${exBadge}</td>
               <td class="nowrap"><code>${esc(r.employee_no)}</code></td>
               ${r.days.map(d => {
                 const bgCls = d.isOffDay ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : '';
@@ -1659,8 +1665,8 @@ export async function renderStaffReportsView(host, ctx) {
               <td class="num nowrap">${fmtIdr(r.totalAmount)}</td>
               <td class="num nowrap">${fmtIdr(r.totalEkstraMealAmount || 0)}</td>
               <td class="num nowrap"><b>${fmtIdr(r.totalCombinedAmount ?? r.totalAmount)}</b></td>
-            </tr>
-          `).join('') : `<tr><td colspan="${7 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
+            </tr>`;
+          }).join('') : `<tr><td colspan="${7 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
         </tbody>
         ${mealRep.rows.length ? `
           <tfoot>
@@ -3999,7 +4005,9 @@ export async function renderOpsSettingsView(host, ctx) {
             <label class="ops-field"><span>Tarif Uang Makan Sen–Jum (Rp)</span><input id="set-att-meal-amt" type="number" class="input" value="${s.attendance.mealAllowanceAmount}"></label>
             <label class="ops-field"><span>Jam Min Pulang Sen–Jum Dapat Makan</span><input id="set-att-early-meal-cut" type="time" class="input" value="${esc(s.attendance.earlyLeaveMealCutoffTime || '15:00')}"></label>
             <label class="ops-field"><span>Jam Min Pulang Sabtu Dapat Makan</span><input id="set-att-sat-meal-cut" type="time" class="input" value="${esc(s.attendance.saturdayMealCutoffTime || '15:00')}"></label>
-            <label class="ops-field"><span>Tarif Uang Makan Sabtu &ge; 15:00 (Rp)</span><input id="set-att-sat-meal-amt" type="number" class="input" value="${s.attendance.saturdayMealAllowanceAmount ?? 7500}"></label>
+            <label class="ops-field"><span>Tarif Uang Makan Sabtu (Rp)</span><input id="set-att-sat-meal-amt" type="number" class="input" value="${s.attendance.saturdayMealAllowanceAmount ?? 7500}"></label>
+            <label class="ops-field"><span>Tarif Uang Makan Hari Libur (Rp)</span><input id="set-att-hol-meal-amt" type="number" class="input" value="${s.attendance.holidayMealAmount ?? 10000}"></label>
+            <label class="ops-field"><span>Min Jam OT Ekstra Meal (jam)</span><input id="set-att-em-min-hrs" type="number" step="0.5" min="0.5" max="12" class="input" value="${s.attendance.ekstraMealMinHours ?? 2}"></label>
             <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-1 (Rp)</span><input id="set-att-em-1" type="number" class="input" value="${s.attendance.ekstraMealFirst2hAmount ?? 6000}"></label>
             <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-2 (Rp)</span><input id="set-att-em-2" type="number" class="input" value="${s.attendance.ekstraMealSecond2hAmount ?? 8000}"></label>
             <label class="ops-field"><span>Ekstra Meal OT 2 Jam Ke-3+ (Rp)</span><input id="set-att-em-3" type="number" class="input" value="${s.attendance.ekstraMealNext2hAmount ?? 10000}"></label>
@@ -4028,10 +4036,64 @@ export async function renderOpsSettingsView(host, ctx) {
                 <option value="L" ${s.attendance.autoMarkNoPunchAs === 'L' ? 'selected' : ''}>Libur (L) Otomatis</option>
               </select>
             </label>
+            <label class="ops-check"><input id="set-att-meal-enabled" type="checkbox" ${s.attendance.mealAllowanceEnabled !== false ? 'checked' : ''}> <span>Aktifkan Uang Makan Reguler</span></label>
+            <label class="ops-check"><input id="set-att-early-meal-enabled" type="checkbox" ${s.attendance.earlyLeaveMealForfeitEnabled !== false ? 'checked' : ''}> <span>Sen–Jum pulang &lt; batas jam hanguskan uang makan</span></label>
+            <label class="ops-check"><input id="set-att-sat-meal-enabled" type="checkbox" ${s.attendance.saturdayMealEnabled !== false ? 'checked' : ''}> <span>Aktifkan Uang Makan Hari Sabtu</span></label>
+            <label class="ops-check"><input id="set-att-sat-meal-req-cut" type="checkbox" ${s.attendance.saturdayMealRequireCutoff !== false ? 'checked' : ''}> <span>Sabtu wajib pulang &ge; jam batas</span></label>
+            <label class="ops-check"><input id="set-att-hol-meal-enabled" type="checkbox" ${s.attendance.holidayMealEnabled ? 'checked' : ''}> <span>Dapat Uang Makan saat masuk Hari Libur</span></label>
+            <label class="ops-check"><input id="set-att-meal-req-out" type="checkbox" ${s.attendance.mealRequireCheckout ? 'checked' : ''}> <span>Wajib memiliki tap pulang untuk Uang Makan</span></label>
+            <label class="ops-check"><input id="set-att-em-enabled" type="checkbox" ${s.attendance.ekstraMealEnabled !== false ? 'checked' : ''}> <span>Aktifkan Ekstra Meal Lembur (OT)</span></label>
             <label class="ops-check"><input id="set-att-exempt-drv" type="checkbox" ${s.attendance.exemptDriverLateFlag ? 'checked' : ''}> <span>Kecualikan Driver dari flag Terlambat (T)</span></label>
             <label class="ops-check"><input id="set-att-lock-rev" type="checkbox" ${s.attendance.preserveConfirmedReviews ? 'checked' : ''}> <span>Kunci penyesuaian HR terkonfirmasi</span></label>
             <label class="ops-check"><input id="set-att-meal-manual-h" type="checkbox" ${s.attendance.mealAutoOnManualHadir ? 'checked' : ''}> <span>Otomatis Uang Makan saat manual H tanpa tap</span></label>
             <label class="ops-check"><input id="set-att-rep-inc-h" type="checkbox" ${s.attendance.includeHInReportTotals ? 'checked' : ''}> <span>Tampilkan kolom Total H pada Report Absensi</span></label>
+          </div>
+          <div class="ops-subbox" style="margin-top:12px">
+            <div class="ops-head" style="margin-bottom:8px">
+              <div>
+                <h4>Pengecualian Uang Makan Per Karyawan (Nominal Khusus / Tidak Dapat)</h4>
+                <p class="ops-sub">Gunakan daftar ini jika orang tertentu memiliki tarif Uang Makan berbeda dari standar atau tidak menerima Uang Makan sama sekali.</p>
+              </div>
+              <button type="button" class="btn btn-sm btn-secondary" id="meal-exc-add">+ Tambah Pengecualian</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Karyawan</th>
+                    <th>Aturan Khusus</th>
+                    <th>Nominal Sen–Jum (Rp)</th>
+                    <th>Nominal Sabtu (Rp)</th>
+                    <th>Ekstra Meal OT</th>
+                    <th>Alasan / Catatan</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="meal-exc-tbody">
+                  ${(s.attendance.mealExceptions || []).length ? (s.attendance.mealExceptions || []).map(mex => `
+                    <tr class="meal-exc-row">
+                      <td><select class="input meal-exc-emp">${empOptions(mex.employee_no)}</select></td>
+                      <td>
+                        <select class="input meal-exc-mode">
+                          <option value="none" ${mex.mode !== 'custom_amount' ? 'selected' : ''}>Tidak Dapat (Rp 0)</option>
+                          <option value="custom_amount" ${mex.mode === 'custom_amount' ? 'selected' : ''}>Nominal Khusus</option>
+                        </select>
+                      </td>
+                      <td><input type="number" min="0" class="input meal-exc-wd" value="${mex.mode === 'custom_amount' ? (mex.weekdayAmount ?? 0) : 0}" ${mex.mode !== 'custom_amount' ? 'disabled' : ''}></td>
+                      <td><input type="number" min="0" class="input meal-exc-sat" value="${mex.mode === 'custom_amount' ? (mex.saturdayAmount ?? 0) : 0}" ${mex.mode !== 'custom_amount' ? 'disabled' : ''}></td>
+                      <td>
+                        <label class="ops-check" style="margin:0;white-space:nowrap">
+                          <input type="checkbox" class="meal-exc-ekstra" ${mex.includeEkstraMeal ? 'checked' : ''}>
+                          <span>Tetap dapat OT</span>
+                        </label>
+                      </td>
+                      <td><input type="text" class="input meal-exc-reason" value="${esc(mex.reason || '')}" placeholder="Contoh: Tunjangan makan bulanan"></td>
+                      <td><button type="button" class="btn btn-sm btn-secondary meal-exc-del">Hapus</button></td>
+                    </tr>
+                  `).join('') : '<tr class="meal-exc-empty"><td colspan="7" class="empty">Belum ada pengecualian uang makan per karyawan. Klik "+ Tambah Pengecualian".</td></tr>'}
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="ops-subbox" style="margin-top:12px">
             <h4>Kamus Kode Kehadiran Staff (9 Kode Standar)</h4>
@@ -4310,6 +4372,54 @@ export async function renderOpsSettingsView(host, ctx) {
     host.querySelector('#ws-exc-tbody')?.appendChild(tr);
   });
 
+  const bindMealExceptionRow = rowEl => {
+    const modeSel = rowEl.querySelector('.meal-exc-mode');
+    const wdInp = rowEl.querySelector('.meal-exc-wd');
+    const satInp = rowEl.querySelector('.meal-exc-sat');
+    const syncAmounts = () => {
+      const isCustom = modeSel?.value === 'custom_amount';
+      if (wdInp) wdInp.disabled = !isCustom;
+      if (satInp) satInp.disabled = !isCustom;
+    };
+    modeSel?.addEventListener('change', () => {
+      syncAmounts();
+      if (modeSel.value === 'custom_amount') {
+        if (wdInp && Number(wdInp.value) === 0) wdInp.value = String(s.attendance.mealAllowanceAmount ?? 10000);
+        if (satInp && Number(satInp.value) === 0) satInp.value = String(s.attendance.saturdayMealAllowanceAmount ?? 7500);
+      }
+    });
+    rowEl.querySelector('.meal-exc-del')?.addEventListener('click', () => rowEl.remove());
+    syncAmounts();
+  };
+  host.querySelectorAll('.meal-exc-row').forEach(bindMealExceptionRow);
+
+  host.querySelector('#meal-exc-add')?.addEventListener('click', () => {
+    host.querySelector('#meal-exc-tbody .meal-exc-empty')?.remove();
+    const tr = document.createElement('tr');
+    tr.className = 'meal-exc-row';
+    tr.innerHTML = `
+      <td><select class="input meal-exc-emp">${empOptions('')}</select></td>
+      <td>
+        <select class="input meal-exc-mode">
+          <option value="none">Tidak Dapat (Rp 0)</option>
+          <option value="custom_amount">Nominal Khusus</option>
+        </select>
+      </td>
+      <td><input type="number" min="0" class="input meal-exc-wd" value="0" disabled></td>
+      <td><input type="number" min="0" class="input meal-exc-sat" value="0" disabled></td>
+      <td>
+        <label class="ops-check" style="margin:0;white-space:nowrap">
+          <input type="checkbox" class="meal-exc-ekstra">
+          <span>Tetap dapat OT</span>
+        </label>
+      </td>
+      <td><input type="text" class="input meal-exc-reason" placeholder="Contoh: Tunjangan makan bulanan"></td>
+      <td><button type="button" class="btn btn-sm btn-secondary meal-exc-del">Hapus</button></td>
+    `;
+    bindMealExceptionRow(tr);
+    host.querySelector('#meal-exc-tbody')?.appendChild(tr);
+  });
+
   const addTariffRow = (tbodyId, rowClass) => {
     const tr = document.createElement('tr');
     tr.className = rowClass;
@@ -4467,6 +4577,22 @@ export async function renderOpsSettingsView(host, ctx) {
       const slocArr = host.querySelector('#set-stk-slocs').value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
       const exclArr = host.querySelector('#set-drv-excl').value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 
+      const mealExceptions = [...host.querySelectorAll('.meal-exc-row')].map((tr, i) => {
+        const sel = tr.querySelector('.meal-exc-emp');
+        const opt = sel?.selectedOptions?.[0];
+        const mode = tr.querySelector('.meal-exc-mode')?.value === 'custom_amount' ? 'custom_amount' : 'none';
+        return {
+          id: `mexc-${i + 1}`,
+          employee_no: sel?.value || '',
+          full_name: opt?.dataset?.name || '',
+          mode,
+          weekdayAmount: mode === 'custom_amount' ? Number(tr.querySelector('.meal-exc-wd')?.value || 0) : 0,
+          saturdayAmount: mode === 'custom_amount' ? Number(tr.querySelector('.meal-exc-sat')?.value || 0) : 0,
+          includeEkstraMeal: Boolean(tr.querySelector('.meal-exc-ekstra')?.checked),
+          reason: tr.querySelector('.meal-exc-reason')?.value?.trim() || ''
+        };
+      }).filter(x => x.employee_no || x.full_name);
+
       const next = normalizeOpsSettings({
         attendance: {
           ...s.attendance,
@@ -4476,16 +4602,26 @@ export async function renderOpsSettingsView(host, ctx) {
           earlyLeaveThresholdMinutes: host.querySelector('#set-att-early-min').value,
           lateAndEarlyPriority: host.querySelector('#set-att-late-pa-prio').value,
           mealThresholdMinutes: host.querySelector('#set-att-meal-min').value,
+          mealAllowanceEnabled: Boolean(host.querySelector('#set-att-meal-enabled')?.checked),
           mealAllowanceAmount: host.querySelector('#set-att-meal-amt').value,
+          earlyLeaveMealForfeitEnabled: Boolean(host.querySelector('#set-att-early-meal-enabled')?.checked),
           earlyLeaveMealCutoffTime: host.querySelector('#set-att-early-meal-cut')?.value || '15:00',
+          saturdayMealEnabled: Boolean(host.querySelector('#set-att-sat-meal-enabled')?.checked),
+          saturdayMealRequireCutoff: Boolean(host.querySelector('#set-att-sat-meal-req-cut')?.checked),
           saturdayMealCutoffTime: host.querySelector('#set-att-sat-meal-cut')?.value || '15:00',
           saturdayMealAllowanceAmount: host.querySelector('#set-att-sat-meal-amt')?.value ?? 7500,
+          holidayMealEnabled: Boolean(host.querySelector('#set-att-hol-meal-enabled')?.checked),
+          holidayMealAmount: host.querySelector('#set-att-hol-meal-amt')?.value ?? 10000,
+          mealRequireCheckout: Boolean(host.querySelector('#set-att-meal-req-out')?.checked),
+          ekstraMealEnabled: Boolean(host.querySelector('#set-att-em-enabled')?.checked),
+          ekstraMealMinHours: host.querySelector('#set-att-em-min-hrs')?.value ?? 2,
           ekstraMealFirst2hAmount: host.querySelector('#set-att-em-1')?.value ?? 6000,
           ekstraMealSecond2hAmount: host.querySelector('#set-att-em-2')?.value ?? 8000,
           ekstraMealNext2hAmount: host.querySelector('#set-att-em-3')?.value ?? 10000,
           mealPeriodStartDay: host.querySelector('#set-att-meal-start').value,
           mealPeriodLengthDays: host.querySelector('#set-att-meal-len').value,
           mealAutoOnManualHadir: Boolean(host.querySelector('#set-att-meal-manual-h')?.checked),
+          mealExceptions,
           includeHInReportTotals,
           staffReportTotalColumns,
           codebook,
