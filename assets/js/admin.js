@@ -105,6 +105,13 @@ import {
   extractActivePositionNames,
   normalizeDistrictToken,
   calculateVacancyMaxScore,
+  questionMaxPossibleScore,
+  RECRUIT_VACANCY_IMPORT_HEADERS,
+  RECRUIT_QUESTION_IMPORT_HEADERS,
+  RECRUIT_CITY_REF_HEADERS,
+  buildDistrictReferenceRows,
+  buildRecruitmentExportSheets,
+  parseRecruitmentImportRows,
   buildShareUrl
 } from './vacancy-logic.js?v=20261124-hrga-workspace-22';
 import {
@@ -129,6 +136,13 @@ import {
   parseStationeryMasterImportRows,
   parseStationeryMovementImportRows
 } from './stationery-logic.js?v=20261124-hrga-workspace-22';
+import {
+  DRIVER_SCHEDULE_IMPORT_HEADERS,
+  DRIVER_REF_HEADERS,
+  DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS,
+  buildDriverReferenceRows,
+  parseDriverScheduleImportRows
+} from './driver-logic.js?v=20261124-hrga-workspace-22';
 
 const CONTRACT_SETTINGS_STORAGE_KEY = 'hrga_contract_settings_v1';
 
@@ -4419,35 +4433,117 @@ function parseCsvTextToObjects(text) {
   });
 }
 
-async function readSpreadsheetFileObjects(file) {
+async function readSpreadsheetWorkbookSheets(file) {
   if (/\.csv$/i.test(file.name)) {
-    return parseCsvTextToObjects(await file.text());
+    const rows = parseCsvTextToObjects(await file.text());
+    return { sheetsByName: { Sheet1: rows }, firstSheetRows: rows };
   }
   const XLSX = await loadXlsxLib();
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
-  const firstSheet = wb.SheetNames[0];
-  if (!firstSheet) throw new Error('No worksheet found in uploaded file.');
-  return XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { defval: '' });
+  if (!wb.SheetNames.length) throw new Error('No worksheet found in uploaded file.');
+  const sheetsByName = {};
+  for (const name of wb.SheetNames) {
+    sheetsByName[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' });
+  }
+  return {
+    sheetsByName,
+    firstSheetRows: sheetsByName[wb.SheetNames[0]] || []
+  };
 }
 
-async function downloadSpreadsheetTemplateXlsx(headers, sampleRowOrRows, sheetName, filename) {
+async function readSpreadsheetFileObjects(file) {
+  const { firstSheetRows } = await readSpreadsheetWorkbookSheets(file);
+  return firstSheetRows;
+}
+
+async function downloadMultiSheetXlsx(sheets = [], filename = 'export.xlsx') {
   try {
     const XLSX = await loadXlsxLib();
     const wb = XLSX.utils.book_new();
-    const sampleList = Array.isArray(sampleRowOrRows) ? sampleRowOrRows : [sampleRowOrRows];
-    const ws = XLSX.utils.json_to_sheet(sampleList, { header: headers });
-    ws['!cols'] = headers.map(h => ({ wch: Math.max(16, h.length + 4) }));
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    for (const sheet of sheets) {
+      const headers = Array.isArray(sheet.headers) ? sheet.headers : [];
+      const rows = Array.isArray(sheet.rows) && sheet.rows.length
+        ? sheet.rows
+        : (headers.length ? [Object.fromEntries(headers.map(h => [h, '']))] : []);
+      const ws = XLSX.utils.json_to_sheet(rows, headers.length ? { header: headers } : undefined);
+      if (headers.length) {
+        ws['!cols'] = headers.map(h => ({ wch: Math.min(44, Math.max(14, String(h).length + 4)) }));
+      }
+      XLSX.utils.book_append_sheet(wb, ws, String(sheet.name || 'Sheet').slice(0, 31));
+    }
     XLSX.writeFile(wb, filename);
     say(`Downloaded ${filename}.`);
   } catch (err) {
-    say(formatAppError(err, 'Failed to generate XLSX template.'));
+    say(formatAppError(err, 'Failed to generate XLSX file.'));
   }
+}
+
+async function downloadSpreadsheetTemplateXlsx(headers, sampleRowOrRows, sheetName, filename) {
+  const sampleList = Array.isArray(sampleRowOrRows) ? sampleRowOrRows : [sampleRowOrRows];
+  await downloadMultiSheetXlsx([{ name: sheetName, headers, rows: sampleList }], filename);
 }
 
 function renderSystemImport(opsCtx = null) {
   content.innerHTML = `<div class="import-cards-grid">
+    <section class="panel" id="card-import-recruitment">
+      <div class="panel-head">
+        <h3>/apply Vacancies, Scoring &amp; Branching Import</h3>
+        <span class="status-pill green">XLSX + Ref Kota/Kec</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${RECRUIT_VACANCY_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+          ${RECRUIT_QUESTION_IMPORT_HEADERS.slice(1).map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+          <span class="import-schema-chip">+ Sheet Ref_Kota_Kecamatan</span>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-recruit-xlsx">Download Template XLSX (+ Ref Kota-Kecamatan) ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-recruit-export-xlsx">Export Config Aktif XLSX ↓</button>
+        </div>
+        <label class="confirm-box" style="margin:0">
+          <input type="checkbox" id="import-recruit-replace">
+          <span>Ganti seluruh daftar lowongan /apply (non-centang = gabung &amp; perbarui berdasarkan Position)</span>
+        </label>
+        <div class="import-drop-row">
+          <input id="import-recruit-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-recruit-submit" disabled>Import Vacancies</button>
+        </div>
+        <div id="import-recruit-preview" class="upload-preview-box hidden"></div>
+        <div id="import-recruit-warn" class="form-warning" role="status"></div>
+        <div id="import-recruit-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="card-import-driver-schedule">
+      <div class="panel-head">
+        <h3>Driver Manual Schedule Import</h3>
+        <span class="status-pill green">Driver / XLSX / CSV</span>
+      </div>
+      <div class="import-card-body">
+        <div class="import-schema-chips">
+          ${DRIVER_SCHEDULE_IMPORT_HEADERS.map(h => `<span class="import-schema-chip">${esc(h)}</span>`).join('')}
+          <span class="import-schema-chip">+ Sheet Ref_Daftar_Driver</span>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-ds-xlsx">Download XLSX Template (+ Ref Driver) ↓</button>
+          <button type="button" class="btn btn-secondary btn-xs" id="dl-ds-csv">Download CSV Template ↓</button>
+        </div>
+        <label class="confirm-box" style="margin:0">
+          <input type="checkbox" id="import-ds-replace">
+          <span>Timpa jadwal lama pada tanggal yang sama di file ini</span>
+        </label>
+        <div class="import-drop-row">
+          <input id="import-ds-file" class="input" type="file" accept=".xlsx,.xls,.csv">
+          <button type="button" class="btn btn-primary" id="import-ds-submit" disabled>Import Jadwal Driver</button>
+        </div>
+        <div id="import-ds-preview" class="upload-preview-box hidden"></div>
+        <div id="import-ds-result" class="upload-preview-box hidden"></div>
+        <div id="import-ds-warn" class="form-warning" role="status"></div>
+        <div id="import-ds-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h3>Candidate List Import</h3>
@@ -5056,6 +5152,197 @@ function renderSystemImport(opsCtx = null) {
       atkMvSubmit.textContent = 'Import Movement ATK';
     }
   });
+
+  // ---- Card 6: Recruitment /apply Vacancies, Scoring & Branching Import ----
+  $('#dl-recruit-xlsx').addEventListener('click', async () => {
+    await loadRecruitmentConfig();
+    const sheets = buildRecruitmentExportSheets(recruitVacancies, DISTRICTS_BY_CITY);
+    await downloadMultiSheetXlsx([
+      { name: 'Vacancies', headers: RECRUIT_VACANCY_IMPORT_HEADERS, rows: sheets.vacancyRows },
+      { name: 'Questions', headers: RECRUIT_QUESTION_IMPORT_HEADERS, rows: sheets.questionRows },
+      { name: 'Ref_Kota_Kecamatan', headers: RECRUIT_CITY_REF_HEADERS, rows: sheets.districtRefRows }
+    ], 'Template_Apply_Vacancies_Scoring.xlsx');
+  });
+
+  $('#dl-recruit-export-xlsx').addEventListener('click', async () => {
+    await loadRecruitmentConfig();
+    const sheets = buildRecruitmentExportSheets(recruitVacancies, DISTRICTS_BY_CITY);
+    await downloadMultiSheetXlsx([
+      { name: 'Vacancies', headers: RECRUIT_VACANCY_IMPORT_HEADERS, rows: sheets.vacancyRows },
+      { name: 'Questions', headers: RECRUIT_QUESTION_IMPORT_HEADERS, rows: sheets.questionRows },
+      { name: 'Ref_Kota_Kecamatan', headers: RECRUIT_CITY_REF_HEADERS, rows: sheets.districtRefRows }
+    ], `Apply_Vacancies_Config_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
+  let parsedRecruitVacancies = [];
+  const recFile = $('#import-recruit-file');
+  const recSubmit = $('#import-recruit-submit');
+  const recPreview = $('#import-recruit-preview');
+  const recWarn = $('#import-recruit-warn');
+  const recError = $('#import-recruit-error');
+  const recReplace = $('#import-recruit-replace');
+
+  recFile.addEventListener('change', async () => {
+    parsedRecruitVacancies = [];
+    recSubmit.disabled = true;
+    recWarn.textContent = '';
+    recError.textContent = '';
+    recPreview.classList.add('hidden');
+    const file = recFile.files?.[0];
+    if (!file) return;
+    try {
+      await loadRecruitmentConfig();
+      const { sheetsByName, firstSheetRows } = await readSpreadsheetWorkbookSheets(file);
+      const sheetNames = Object.keys(sheetsByName);
+      const vacKey = sheetNames.find(n => /^vacanc/i.test(n)) || sheetNames[0];
+      const qKey = sheetNames.find(n => /^question|^pertanyaan/i.test(n));
+      const { vacancies, errors, warnings } = parseRecruitmentImportRows(
+        sheetsByName[vacKey] || firstSheetRows,
+        qKey ? sheetsByName[qKey] : [],
+        recruitVacancies
+      );
+      if (!vacancies.length) {
+        recError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada lowongan yang valid dalam file.';
+        return;
+      }
+      const notes = [...(errors || []), ...(warnings || [])];
+      if (notes.length) {
+        recWarn.textContent = `${notes.length} catatan: ${notes.slice(0, 2).join('; ')}`;
+      }
+      parsedRecruitVacancies = vacancies;
+      recSubmit.disabled = false;
+      recPreview.classList.remove('hidden');
+      recPreview.innerHTML = `<b>${vacancies.length} posisi /apply siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${vacancies.map(v => `<div>• <b>${esc(v.name)}</b> — ${v.primaryDistricts.length} lokasi utama · ${v.questions.length} pertanyaan (Max ${calculateVacancyMaxScore(v)} pts)</div>`).join('')}</div>`;
+    } catch (err) {
+      recError.textContent = formatAppError(err, 'Gagal membaca file konfigurasi /apply.');
+    }
+  });
+
+  recSubmit.addEventListener('click', async () => {
+    if (!parsedRecruitVacancies.length) return;
+    recSubmit.disabled = true;
+    recSubmit.textContent = 'Importing…';
+    recWarn.textContent = '';
+    recError.textContent = '';
+    try {
+      await loadRecruitmentConfig();
+      const replaceAll = Boolean(recReplace?.checked);
+      let nextList;
+      if (replaceAll) {
+        nextList = parsedRecruitVacancies;
+      } else {
+        const byName = new Map(recruitVacancies.map(v => [v.name.toLowerCase(), v]));
+        parsedRecruitVacancies.forEach(v => byName.set(v.name.toLowerCase(), v));
+        nextList = [...byName.values()];
+      }
+      await persistRecruitVacancies(nextList);
+      const count = parsedRecruitVacancies.length;
+      parsedRecruitVacancies = [];
+      recFile.value = '';
+      recPreview.classList.add('hidden');
+      say(`Berhasil import ${count} posisi /apply ke Recruitment Settings.`);
+    } catch (err) {
+      recError.textContent = formatAppError(err, 'Gagal mengimport konfigurasi /apply.');
+      recSubmit.disabled = false;
+    } finally {
+      if (!parsedRecruitVacancies.length) recSubmit.disabled = true;
+      recSubmit.textContent = 'Import Vacancies';
+    }
+  });
+
+  // ---- Card 7: Driver Manual Schedule Import ----
+  $('#dl-ds-xlsx').addEventListener('click', async () => {
+    const mod = await loadOpsViewsModule();
+    await mod.exportDriverScheduleTemplateXlsx(resolvedOpsCtx);
+    say('Downloaded Template_Jadwal_Driver.xlsx.');
+  });
+  $('#dl-ds-csv').addEventListener('click', () =>
+    downloadCsvFile(DRIVER_SCHEDULE_IMPORT_HEADERS, DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS, 'Template_Jadwal_Driver.csv')
+  );
+
+  let rawDsRows = [];
+  const dsFile = $('#import-ds-file');
+  const dsSubmit = $('#import-ds-submit');
+  const dsPreview = $('#import-ds-preview');
+  const dsResult = $('#import-ds-result');
+  const dsWarn = $('#import-ds-warn');
+  const dsError = $('#import-ds-error');
+  const dsReplace = $('#import-ds-replace');
+
+  dsFile.addEventListener('change', async () => {
+    rawDsRows = [];
+    dsSubmit.disabled = true;
+    dsWarn.textContent = '';
+    dsError.textContent = '';
+    dsPreview.classList.add('hidden');
+    dsResult.classList.add('hidden');
+    const file = dsFile.files?.[0];
+    if (!file) return;
+    try {
+      const mod = await loadOpsViewsModule();
+      const opsSettings = mod.getCachedOpsSettings ? mod.getCachedOpsSettings(resolvedOpsCtx) : {};
+      const { sheetsByName, firstSheetRows } = await readSpreadsheetWorkbookSheets(file);
+      const sheetNames = Object.keys(sheetsByName);
+      const dsKey = sheetNames.find(n => /^jadwal|^driver_sched|^schedule/i.test(n)) || sheetNames[0];
+      const raw = sheetsByName[dsKey] || firstSheetRows;
+      const { rows: schedules, errors, warnings, conflicts } = parseDriverScheduleImportRows(raw, employees, opsSettings);
+      if (!schedules.length) {
+        dsError.textContent = errors.length ? errors.slice(0, 3).join(' ') : 'Tidak ada jadwal driver yang valid.';
+        return;
+      }
+      if (conflicts?.length) {
+        dsError.textContent = conflicts[0]?.message || 'Terdapat bentrok jam pada file jadwal driver.';
+        return;
+      }
+      const notes = [...errors, ...warnings];
+      if (notes.length) {
+        dsWarn.textContent = `${notes.length} catatan: ${notes.slice(0, 2).join('; ')}`;
+      }
+      rawDsRows = raw;
+      dsSubmit.disabled = false;
+      dsPreview.classList.remove('hidden');
+      dsPreview.innerHTML = `<b>${schedules.length} jadwal driver siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${schedules.slice(0, 8).map(s => `<div>• ${esc(s.work_date)} · <b>${esc(s.driver_name)}</b> (${esc(s.section)}) · ${(s.activities || []).length} kegiatan</div>`).join('')}${schedules.length > 8 ? `<div>… dan ${schedules.length - 8} jadwal lainnya</div>` : ''}</div>`;
+    } catch (err) {
+      dsError.textContent = formatAppError(err, 'Gagal membaca file jadwal driver.');
+    }
+  });
+
+  dsSubmit.addEventListener('click', async () => {
+    if (!rawDsRows.length) return;
+    dsSubmit.disabled = true;
+    dsSubmit.textContent = 'Importing…';
+    dsWarn.textContent = '';
+    dsError.textContent = '';
+    dsResult.classList.add('hidden');
+    try {
+      const mod = await loadOpsViewsModule();
+      const res = await mod.importDriverScheduleAction(resolvedOpsCtx, {
+        rawRows: rawDsRows,
+        replaceExisting: Boolean(dsReplace?.checked)
+      });
+      rawDsRows = [];
+      dsFile.value = '';
+      dsPreview.classList.add('hidden');
+      dsResult.classList.remove('hidden');
+      dsResult.innerHTML = `
+        <b>Berhasil import ${res.importedCount} jadwal driver</b> (${res.activityCount || 0} kegiatan).
+        <div class="row-actions" style="margin-top:8px">
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="attendanceDriverSchedule">Buka Manual Driver Schedules →</button>
+          <button type="button" class="btn btn-secondary btn-xs" data-jump-view="attendanceDriverReports">Buka Driver Reports →</button>
+        </div>`;
+      dsResult.querySelectorAll('[data-jump-view]').forEach(b => b.addEventListener('click', () => loadView(b.dataset.jumpView)));
+      if (res.errors?.length || res.warnings?.length) {
+        dsWarn.textContent = [...(res.errors || []), ...(res.warnings || [])].slice(0, 2).join('; ');
+      }
+      say(`Berhasil import ${res.importedCount} jadwal driver.`);
+    } catch (err) {
+      dsError.textContent = formatAppError(err, 'Gagal mengimport jadwal driver.');
+      dsSubmit.disabled = false;
+    } finally {
+      if (!rawDsRows.length) dsSubmit.disabled = true;
+      dsSubmit.textContent = 'Import Jadwal Driver';
+    }
+  });
 }
 
 /* ============================================================================
@@ -5577,7 +5864,7 @@ function renderRecruitApplyFieldsTab(host) {
             <div class="schema-option-chips">
               ${(field.options || []).map((opt, optIdx) => `
                 <div class="schema-option-item">
-                  <input class="input schema-option-input" value="${esc(opt)}" placeholder="Option label">
+                  <input class="input schema-option-input" data-apply-opt-idx="${optIdx}" value="${esc(opt)}" placeholder="Option label">
                   <button type="button" class="q-option-del" data-apply-del-opt="${optIdx}" aria-label="Remove option">&times;</button>
                 </div>
               `).join('')}
@@ -5593,221 +5880,266 @@ function renderRecruitApplyFieldsTab(host) {
   }).join('');
 
   host.innerHTML = `
-    <div class="vacancy-toolbar">
-      <div class="vacancy-toolbar-meta">
-        <h2>/apply Step 1 Field Order &amp; Schema</h2>
-        <span class="vacancy-count">${list.filter(f => f.enabled !== false).length} visible · ${list.length} total</span>
+    <div id="apply-tab-root">
+      <div class="vacancy-toolbar">
+        <div class="vacancy-toolbar-meta">
+          <h2>/apply Step 1 Field Order &amp; Schema</h2>
+          <span class="vacancy-count">${list.filter(f => f.enabled !== false).length} visible · ${list.length} total</span>
+        </div>
+        <div class="vacancy-toolbar-actions">
+          <button type="button" class="btn btn-secondary" id="apply-reset-btn">Reset Default</button>
+          <button type="button" class="btn btn-primary" id="apply-save-btn">Save Changes</button>
+        </div>
       </div>
-      <div class="vacancy-toolbar-actions">
-        <button type="button" class="btn btn-secondary" id="apply-reset-btn">Reset Default</button>
-        <button type="button" class="btn btn-primary" id="apply-save-btn">Save Changes</button>
-      </div>
-    </div>
 
-    <div class="schema-panel">
-      <div class="schema-field-list">${cardsHtml}</div>
-    </div>
-
-    <div class="schema-panel">
-      <div class="schema-panel-head">
-        <h3>Add Custom Field to Step 1 (/apply)</h3>
+      <div class="schema-panel">
+        <div class="schema-field-list">${cardsHtml}</div>
       </div>
-      <div class="schema-add-bar" style="margin-bottom:0">
-        <input id="apply-new-label" class="input" placeholder="Example: Age / Previous factory employer?">
-        <select id="apply-new-type" class="select" style="max-width:220px">
-          ${RECRUIT_APPLY_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
-        </select>
-        <button type="button" class="btn btn-secondary" id="apply-add-custom">+ Add Field</button>
+
+      <div class="schema-panel">
+        <div class="schema-panel-head">
+          <h3>Add Custom Field to Step 1 (/apply)</h3>
+        </div>
+        <div class="schema-add-bar" style="margin-bottom:0">
+          <input id="apply-new-label" class="input" placeholder="Example: Age / Previous factory employer?">
+          <select id="apply-new-type" class="select" style="max-width:220px">
+            ${RECRUIT_APPLY_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-secondary" id="apply-add-custom">+ Add Field</button>
+        </div>
       </div>
     </div>
   `;
 
-  $$('[data-apply-prop="required"]', host).forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) {
-        const card = cb.closest('[data-apply-idx]');
-        const enCb = card?.querySelector('[data-apply-prop="enabled"]');
+  const root = $('#apply-tab-root', host);
+  if (!root) return;
+
+  root.addEventListener('input', event => {
+    const target = event.target;
+    const card = target.closest('[data-apply-idx]');
+    if (!card) return;
+    const idx = Number(card.dataset.applyIdx);
+    const field = recruitDraftApply.fields[idx];
+    if (!field) return;
+    const prop = target.dataset.applyProp;
+    if (prop === 'label') field.label = target.value;
+    else if (prop === 'placeholder') field.placeholder = target.value;
+    else if (target.dataset.applyOptIdx !== undefined) {
+      field.options[Number(target.dataset.applyOptIdx)] = target.value;
+    }
+  });
+
+  root.addEventListener('change', event => {
+    const target = event.target;
+    const card = target.closest('[data-apply-idx]');
+    if (!card) return;
+    const idx = Number(card.dataset.applyIdx);
+    const field = recruitDraftApply.fields[idx];
+    if (!field) return;
+    const prop = target.dataset.applyProp;
+    if (prop === 'required') {
+      field.required = target.checked;
+      if (target.checked) {
+        field.enabled = true;
+        const enCb = card.querySelector('[data-apply-prop="enabled"]');
         if (enCb && !enCb.checked) enCb.checked = true;
       }
-    });
-  });
-
-  $$('[data-apply-prop="enabled"]', host).forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (!cb.checked) {
-        const card = cb.closest('[data-apply-idx]');
-        const reqCb = card?.querySelector('[data-apply-prop="required"]');
+    } else if (prop === 'enabled') {
+      field.enabled = target.checked;
+      if (!target.checked) {
+        field.required = false;
+        const reqCb = card.querySelector('[data-apply-prop="required"]');
         if (reqCb) reqCb.checked = false;
       }
-    });
+    } else if (prop === 'type' && !field.system) {
+      field.type = target.value;
+      if (['dropdown', 'radio', 'checkbox'].includes(field.type) && !field.options?.length) {
+        field.options = ['Option 1', 'Option 2'];
+      }
+      renderRecruitApplyFieldsTab(host);
+    }
   });
 
-  $$('[data-apply-move]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+  root.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    if (event.target.matches('[data-apply-new-opt]')) {
+      event.preventDefault();
+      event.target.closest('.schema-add-bar')?.querySelector('[data-apply-add-opt]')?.click();
+    } else if (event.target.id === 'apply-new-label') {
+      event.preventDefault();
+      $('#apply-add-custom', root)?.click();
+    }
+  });
+
+  root.addEventListener('click', async event => {
+    const btn = event.target.closest('button');
+    if (!btn) return;
+    const card = btn.closest('[data-apply-idx]');
+    const idx = card ? Number(card.dataset.applyIdx) : -1;
+
+    if (btn.dataset.applyMove !== undefined && idx >= 0) {
       syncRecruitApplyDraftFromDom(host);
-      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
       const target = idx + Number(btn.dataset.applyMove);
       if (target < 0 || target >= recruitDraftApply.fields.length) return;
       [recruitDraftApply.fields[idx], recruitDraftApply.fields[target]] = [recruitDraftApply.fields[target], recruitDraftApply.fields[idx]];
       renderRecruitApplyFieldsTab(host);
-    });
-  });
-
-  $$('[data-apply-del]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+      return;
+    }
+    if (btn.hasAttribute('data-apply-del') && idx >= 0) {
       syncRecruitApplyDraftFromDom(host);
-      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
       recruitDraftApply.fields.splice(idx, 1);
       renderRecruitApplyFieldsTab(host);
-    });
-  });
-
-  $$('.schema-field-card[data-apply-idx] [data-apply-prop="type"]', host).forEach(sel => {
-    sel.addEventListener('change', () => {
+      return;
+    }
+    if (btn.hasAttribute('data-apply-add-opt') && idx >= 0) {
       syncRecruitApplyDraftFromDom(host);
-      const idx = Number(sel.closest('[data-apply-idx]').dataset.applyIdx);
-      const field = recruitDraftApply.fields[idx];
-      if (field && ['dropdown', 'radio', 'checkbox'].includes(field.type) && !field.options?.length) {
-        field.options = ['Option 1', 'Option 2'];
-      }
-      renderRecruitApplyFieldsTab(host);
-    });
-  });
-
-  $$('[data-apply-add-opt]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncRecruitApplyDraftFromDom(host);
-      const card = btn.closest('[data-apply-idx]');
-      const idx = Number(card.dataset.applyIdx);
       const input = card.querySelector('[data-apply-new-opt]');
-      const val = input.value.trim();
+      const val = input?.value.trim() || '';
       if (!val) return;
       if (!recruitDraftApply.fields[idx].options.includes(val)) {
         recruitDraftApply.fields[idx].options.push(val);
       }
       renderRecruitApplyFieldsTab(host);
-    });
-  });
-
-  $$('[data-apply-new-opt]', host).forEach(input => {
-    input.addEventListener('keydown', event => {
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      input.closest('.schema-add-bar')?.querySelector('[data-apply-add-opt]')?.click();
-    });
-  });
-
-  $$('[data-apply-del-opt]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncRecruitApplyDraftFromDom(host);
-      const idx = Number(btn.closest('[data-apply-idx]').dataset.applyIdx);
-      const optIdx = Number(btn.dataset.applyDelOpt);
-      recruitDraftApply.fields[idx].options.splice(optIdx, 1);
-      renderRecruitApplyFieldsTab(host);
-    });
-  });
-
-  $('#apply-add-custom', host).addEventListener('click', () => {
-    syncRecruitApplyDraftFromDom(host);
-    const labelInput = $('#apply-new-label', host);
-    const typeSelect = $('#apply-new-type', host);
-    const label = labelInput.value.trim();
-    if (!label) {
-      say('Enter a field label first.');
-      labelInput.focus();
       return;
     }
-    const type = typeSelect.value;
-    recruitDraftApply.fields.push({
-      id: `custom_${Date.now().toString(36)}`,
-      label,
-      type,
-      required: false,
-      enabled: true,
-      system: false,
-      placeholder: '',
-      options: ['dropdown', 'radio', 'checkbox'].includes(type) ? ['Option 1', 'Option 2'] : []
-    });
-    renderRecruitApplyFieldsTab(host);
-  });
-
-  $('#apply-new-label', host).addEventListener('keydown', event => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    $('#apply-add-custom', host).click();
-  });
-
-  $('#apply-reset-btn', host).addEventListener('click', () => {
-    recruitDraftApply = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
-    renderRecruitApplyFieldsTab(host);
-    say('Reset /apply draft to defaults (unsaved).');
-  });
-
-  $('#apply-save-btn', host).addEventListener('click', async () => {
-    syncRecruitApplyDraftFromDom(host);
-    const btn = $('#apply-save-btn', host);
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
-    try {
-      await persistRecruitApplySchema(recruitDraftApply);
+    if (btn.dataset.applyDelOpt !== undefined && idx >= 0) {
+      syncRecruitApplyDraftFromDom(host);
+      recruitDraftApply.fields[idx].options.splice(Number(btn.dataset.applyDelOpt), 1);
       renderRecruitApplyFieldsTab(host);
-      say('/apply field configuration saved.');
-    } catch (error) {
-      say(formatAppError(error, 'Failed to save /apply field configuration.'));
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Save Changes';
+      return;
+    }
+    if (btn.id === 'apply-add-custom') {
+      syncRecruitApplyDraftFromDom(host);
+      const labelInput = $('#apply-new-label', root);
+      const typeSelect = $('#apply-new-type', root);
+      const label = labelInput.value.trim();
+      if (!label) {
+        say('Enter a field label first.');
+        labelInput.focus();
+        return;
+      }
+      const type = typeSelect.value;
+      recruitDraftApply.fields.push({
+        id: `custom_${Date.now().toString(36)}`,
+        label,
+        type,
+        required: false,
+        enabled: true,
+        system: false,
+        placeholder: '',
+        options: ['dropdown', 'radio', 'checkbox'].includes(type) ? ['Option 1', 'Option 2'] : []
+      });
+      renderRecruitApplyFieldsTab(host);
+      return;
+    }
+    if (btn.id === 'apply-reset-btn') {
+      recruitDraftApply = normalizeApplySchema(DEFAULT_APPLY_SCHEMA);
+      renderRecruitApplyFieldsTab(host);
+      say('Reset /apply draft to defaults (unsaved).');
+      return;
+    }
+    if (btn.id === 'apply-save-btn') {
+      syncRecruitApplyDraftFromDom(host);
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await persistRecruitApplySchema(recruitDraftApply);
+        renderRecruitApplyFieldsTab(host);
+        say('/apply field configuration saved.');
+      } catch (error) {
+        say(formatAppError(error, 'Failed to save /apply field configuration.'));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      }
     }
   });
 }
 
-function renderRecruitQuestionListSummary(questions = []) {
-  if (!questions.length) {
-    return '<span class="loc-empty">No position-specific questions</span>';
-  }
-  return `<ul class="q-summary-list">${questions.map((q, idx) => {
-    const typeLabel = RECRUIT_Q_TYPE_LABELS[q.type] || q.type;
-    const opts = ['dropdown', 'radio', 'checkbox'].includes(q.type)
-      ? (q.options || []).map(o => `<span class="vacancy-opt-tag">${esc(o.label)}</span>`).join('')
-      : '<span class="loc-empty">Open response</span>';
-    return `
-      <li class="q-summary-item">
-        <div class="q-summary-head">
-          <b>${idx + 1}. ${esc(q.label)}</b>
-          <span class="q-summary-type">${esc(typeLabel)}</span>
-        </div>
-        <div class="q-summary-opts">${opts}</div>
-      </li>
-    `;
-  }).join('')}</ul>`;
-}
-
-function renderRecruitQuestionScoreSummary(questions = []) {
-  if (!questions.length) {
-    return '<span class="loc-empty">No question scoring</span>';
-  }
-  return `<ul class="q-score-list">${questions.map((q, idx) => {
-    let scoreText = '';
-    if (['dropdown', 'radio', 'checkbox'].includes(q.type)) {
-      const opts = (q.options || []).map(o => `<span class="vacancy-score-chip">${esc(o.label)} <b>+${esc(o.score)} pts</b></span>`).join('');
-      scoreText = opts ? `<div class="vacancy-score-pill-row">${opts}</div>` : '<span class="loc-empty">0 pts</span>';
-    } else {
-      scoreText = q.filledScore
-        ? `<div class="vacancy-score-pill-row"><span class="vacancy-score-chip">Filled <b>+${esc(q.filledScore)} pts</b></span></div>`
-        : '<span class="loc-empty">0 pts (unscored)</span>';
-    }
-    return `
-      <li class="q-score-item">
-        <span class="q-score-idx">Q${idx + 1}:</span>
-        ${scoreText}
-      </li>
-    `;
-  }).join('')}</ul>`;
+function formatShowWhenConditionText(q, allQuestions = []) {
+  if (!q?.showWhen?.questionId) return 'Selalu tampil';
+  const parentIdx = allQuestions.findIndex(item => item.id === q.showWhen.questionId);
+  const parentTag = parentIdx >= 0 ? `Q${parentIdx + 1}` : q.showWhen.questionId;
+  const opMap = { equals: '=', not_equals: '≠', includes: 'berisi' };
+  const opSymbol = opMap[q.showWhen.operator] || '=';
+  return `Jika ${parentTag} ${opSymbol} "${q.showWhen.value}"`;
 }
 
 function renderRecruitDistrictSummary(list = []) {
-  if (!list.length) return '<span class="loc-empty">None specified</span>';
-  return `<div class="loc-district-list">${list.map(d => esc(d)).join(', ')}</div>`;
+  if (!list.length) return '<span class="loc-empty">Belum ditentukan</span>';
+  if (list.length <= 6) return `<div class="loc-district-list">${list.map(d => esc(d)).join(', ')}</div>`;
+  const preview = list.slice(0, 6).map(d => esc(d)).join(', ');
+  return `<div class="loc-district-list">${preview} <span class="recruit-more-badge">+${list.length - 6} kecamatan</span></div>`;
+}
+
+function renderVacancyMappingTable(v, effMin, effMode, maxScore) {
+  const rows = [];
+  rows.push(`
+    <tr>
+      <td class="map-col-code">LOC-1</td>
+      <td class="map-col-text">Lokasi Utama <span class="map-sub-muted">(${v.primaryDistricts.length} kecamatan)</span></td>
+      <td class="map-col-cond">Selalu dihitung</td>
+      <td class="map-col-num num">+${esc(v.primaryLocationScore)}</td>
+    </tr>
+    <tr>
+      <td class="map-col-code">LOC-2</td>
+      <td class="map-col-text">${esc(v.otherLocationLabel)}</td>
+      <td class="map-col-cond">Jika di luar lokasi utama</td>
+      <td class="map-col-num num">+${esc(v.otherLocationScore)}</td>
+    </tr>
+  `);
+
+  (v.questions || []).forEach((q, qIdx) => {
+    const condText = formatShowWhenConditionText(q, v.questions);
+    const hasCond = Boolean(q.showWhen?.questionId);
+    const condBadge = hasCond
+      ? `<span class="q-branch-pill">↳ ${esc(condText)}</span>`
+      : '<span class="map-sub-muted">Selalu tampil</span>';
+    const isChoice = ['dropdown', 'radio', 'checkbox'].includes(q.type);
+    if (isChoice && (q.options || []).length) {
+      (q.options || []).forEach((opt, optIdx) => {
+        const optCode = String.fromCharCode(65 + (optIdx % 26));
+        rows.push(`
+          <tr class="${hasCond ? 'is-branched-row' : ''}">
+            <td class="map-col-code">${optIdx === 0 ? `Q${qIdx + 1}` : ''}<span class="map-opt-code">${optCode}</span></td>
+            <td class="map-col-text">${optIdx === 0 ? `<b>${esc(q.label)}</b><br>` : ''}<span class="map-opt-label">${esc(opt.label)}</span></td>
+            <td class="map-col-cond">${optIdx === 0 ? condBadge : ''}</td>
+            <td class="map-col-num num">${Number(opt.score) >= 0 ? '+' : ''}${esc(opt.score)}</td>
+          </tr>
+        `);
+      });
+    } else {
+      rows.push(`
+        <tr class="${hasCond ? 'is-branched-row' : ''}">
+          <td class="map-col-code">Q${qIdx + 1}</td>
+          <td class="map-col-text"><b>${esc(q.label)}</b> <span class="map-sub-muted">(${esc(q.type)})</span></td>
+          <td class="map-col-cond">${condBadge}</td>
+          <td class="map-col-num num">${Number(q.filledScore) ? `+${esc(q.filledScore)}` : '0'}</td>
+        </tr>
+      `);
+    }
+  });
+
+  return `
+    <table class="recruit-map-table">
+      <thead>
+        <tr>
+          <th class="map-col-code">KODE</th>
+          <th class="map-col-text">KRITERIA / JAWABAN (TEKS)</th>
+          <th class="map-col-cond">KONDISI CABANG</th>
+          <th class="map-col-num num">SKOR (PTS)</th>
+        </tr>
+      </thead>
+      <tbody>${rows.join('')}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2" class="map-foot-label">Ambang Minimal &amp; Skor Maksimal</td>
+          <td class="map-col-cond">Min: <b class="num">${esc(effMin)} ${esc(effMode)}</b></td>
+          <td class="map-col-num num"><b>Max ${esc(maxScore)}</b></td>
+        </tr>
+      </tfoot>
+    </table>
+  `;
 }
 
 function renderRecruitVacanciesTab(host) {
@@ -5833,31 +6165,16 @@ function renderRecruitVacanciesTab(host) {
             <td class="col-pos">
               <div class="pos-name-title">${esc(v.name)}</div>
               <div class="pos-state-line ${v.active === false ? 'inactive' : ''}">${v.active === false ? 'Inactive' : 'Active on /apply'}</div>
-            </td>
-            <td class="col-loc-questions">
-              <div class="vacancy-loc-block">
-                <div class="vacancy-block-label">Primary Districts</div>
+              <div class="vacancy-loc-compact">
+                <div class="vacancy-block-label">Kecamatan Utama (${v.primaryDistricts.length})</div>
                 ${renderRecruitDistrictSummary(v.primaryDistricts)}
-                <div class="vacancy-other-loc-line">Other: ${esc(v.otherLocationLabel)}</div>
-              </div>
-              <div class="vacancy-q-block">
-                <div class="vacancy-block-label">Questions (${v.questions.length})</div>
-                ${renderRecruitQuestionListSummary(v.questions)}
               </div>
             </td>
-            <td class="col-score">
-              <div class="vacancy-score-block">
-                <div class="vacancy-score-pill-row">
-                  <span class="vacancy-score-chip">Max <b>${esc(maxScore)} pts</b></span>
-                  <span class="vacancy-score-chip">Min <b>${esc(effMin)}${effMode}</b></span>
-                </div>
-                <div class="vacancy-score-pill-row">
-                  <span class="vacancy-score-chip">Lokasi Utama <b>+${esc(v.primaryLocationScore)} pts</b></span>
-                  <span class="vacancy-score-chip">${esc(v.otherLocationLabel)} <b>+${esc(v.otherLocationScore)} pts</b></span>
-                </div>
-                ${renderRecruitQuestionScoreSummary(v.questions)}
-              </div>
+            <td class="col-mapping">
+              ${renderVacancyMappingTable(v, effMin, effMode, maxScore)}
             </td>
+            <td class="col-min num">${esc(effMin)} ${esc(effMode)}</td>
+            <td class="col-max num">${esc(maxScore)}</td>
             <td class="col-actions">
               <div class="vacancy-row-actions">
                 <button type="button" class="icon-btn primary-action" data-vac-action="edit" data-id="${esc(v.id)}">Edit</button>
@@ -5868,85 +6185,95 @@ function renderRecruitVacanciesTab(host) {
             </td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="4" class="table-empty">No vacancies match your search.</td></tr>';
+      : '<tr><td colspan="5" class="table-empty">No vacancies match your search.</td></tr>';
   };
 
   host.innerHTML = `
-    <div class="card ops-card" style="margin-bottom:16px">
-      <div class="ops-head">
-        <div>
-          <h3>Global Qualification Threshold &amp; WhatsApp Gate (/apply)</h3>
-          <p class="ops-sub">Jika kandidat memenuhi skor minimal, tombol Konfirmasi WhatsApp akan tampil. Jika di bawah skor minimal, lamaran tetap tersimpan di database tanpa tombol WA.</p>
+    <div id="vacancies-tab-root">
+      <div class="card ops-card" style="margin-bottom:16px">
+        <div class="ops-head">
+          <div>
+            <h3>Global Qualification Threshold &amp; WhatsApp Gate (/apply)</h3>
+            <p class="ops-sub">Jika kandidat memenuhi skor minimal, tombol Konfirmasi WhatsApp akan tampil. Jika di bawah skor minimal, lamaran tetap tersimpan di database tanpa tombol WA.</p>
+          </div>
+          <button type="button" class="btn btn-primary" id="recruit-save-scoring">Save Threshold Rules</button>
         </div>
-        <button type="button" class="btn btn-primary" id="recruit-save-scoring">Save Threshold Rules</button>
+        <div class="ops-form-grid">
+          <label class="ops-field">
+            <span>Default Minimum Score</span>
+            <input id="recruit-def-min" type="number" step="0.5" min="0" class="input" value="${esc(recruitScoringConfig.defaultMinScore)}">
+          </label>
+          <label class="ops-field">
+            <span>Scoring Basis</span>
+            <select id="recruit-def-mode" class="input">
+              <option value="percentage" ${recruitScoringConfig.scoringMode === 'percentage' ? 'selected' : ''}>Percentage (% of Max Score)</option>
+              <option value="points" ${recruitScoringConfig.scoringMode === 'points' ? 'selected' : ''}>Raw Points</option>
+            </select>
+          </label>
+          <label class="ops-check">
+            <input id="recruit-req-wa" type="checkbox" ${recruitScoringConfig.requireQualificationForWa ? 'checked' : ''}>
+            <span>Hide WhatsApp CTA if below minimum score</span>
+          </label>
+          <label class="ops-field" style="grid-column:1 / -1">
+            <span>Non-Qualified Confirmation Message (/apply)</span>
+            <input id="recruit-nonqual-msg" type="text" class="input" value="${esc(recruitScoringConfig.nonQualifiedMessage)}">
+          </label>
+        </div>
       </div>
-      <div class="ops-form-grid">
-        <label class="ops-field">
-          <span>Default Minimum Score</span>
-          <input id="recruit-def-min" type="number" step="0.5" min="0" class="input" value="${esc(recruitScoringConfig.defaultMinScore)}">
-        </label>
-        <label class="ops-field">
-          <span>Scoring Basis</span>
-          <select id="recruit-def-mode" class="input">
-            <option value="percentage" ${recruitScoringConfig.scoringMode === 'percentage' ? 'selected' : ''}>Percentage (% of Max Score)</option>
-            <option value="points" ${recruitScoringConfig.scoringMode === 'points' ? 'selected' : ''}>Raw Points</option>
-          </select>
-        </label>
-        <label class="ops-check">
-          <input id="recruit-req-wa" type="checkbox" ${recruitScoringConfig.requireQualificationForWa ? 'checked' : ''}>
-          <span>Hide WhatsApp CTA if below minimum score</span>
-        </label>
-        <label class="ops-field" style="grid-column:1 / -1">
-          <span>Non-Qualified Confirmation Message (/apply)</span>
-          <input id="recruit-nonqual-msg" type="text" class="input" value="${esc(recruitScoringConfig.nonQualifiedMessage)}">
-        </label>
-      </div>
-    </div>
 
-    <div class="vacancy-toolbar">
-      <div class="vacancy-toolbar-meta">
-        <h2>/apply Vacancies &amp; Scoring Rules</h2>
-        <span class="vacancy-count">${recruitVacancies.length} position(s) · ${activeCount} active · Global min threshold ≥ ${esc(recruitScoringConfig.defaultMinScore)} ${gModeLabel}</span>
+      <div class="vacancy-toolbar">
+        <div class="vacancy-toolbar-meta">
+          <h2>/apply Vacancies &amp; Scoring Rules</h2>
+          <span class="vacancy-count" id="recruit-vac-count">${recruitVacancies.length} position(s) · ${activeCount} active · Global min threshold ≥ ${esc(recruitScoringConfig.defaultMinScore)} ${gModeLabel}</span>
+        </div>
+        <div class="vacancy-toolbar-actions">
+          <input id="vacancy-search" class="vacancy-search" type="search" value="${esc(recruitSearchQuery)}" placeholder="Cari posisi, area, pertanyaan…">
+          <button id="recruit-dl-template-xlsx" class="btn btn-secondary btn-xs" type="button">Template Excel (+ Ref Kota) ↓</button>
+          <button id="recruit-export-xlsx" class="btn btn-secondary btn-xs" type="button">Export Excel ↓</button>
+          <label class="btn btn-secondary btn-xs" style="cursor:pointer">
+            Import Excel
+            <input id="recruit-quick-import-file" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+          </label>
+          <button id="add-vacancy-btn" class="btn btn-primary" type="button">+ Add Vacancy</button>
+        </div>
       </div>
-      <div class="vacancy-toolbar-actions">
-        <input id="vacancy-search" class="vacancy-search" type="search" value="${esc(recruitSearchQuery)}" placeholder="Search position, district, question…">
-        <button id="add-vacancy-btn" class="btn btn-primary" type="button">+ Add Vacancy</button>
-      </div>
-    </div>
 
-    <section class="panel table-panel">
-      <div class="table-wrap">
-        <table class="data-table vacancy-table">
-          <thead>
-            <tr>
-              <th class="col-pos">POSITION</th>
-              <th class="col-loc-questions">LOCATION &amp; QUESTIONS</th>
-              <th class="col-score">SCORE</th>
-              <th class="col-actions">ACTION</th>
-            </tr>
-          </thead>
-          <tbody id="vacancy-tbody"></tbody>
-        </table>
-      </div>
-    </section>
+      <section class="panel table-panel">
+        <div class="table-wrap">
+          <table class="data-table vacancy-table">
+            <thead>
+              <tr>
+                <th class="col-pos">POSISI &amp; LOKASI UTAMA</th>
+                <th class="col-mapping">MAPPING PERTANYAAN, CABANG &amp; SKOR (TEKS ↔ ANGKA)</th>
+                <th class="col-min num">MIN</th>
+                <th class="col-max num">MAX (PTS)</th>
+                <th class="col-actions">ACTION</th>
+              </tr>
+            </thead>
+            <tbody id="vacancy-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   `;
 
   const paintVacancyTable = () => {
     const tbody = $('#vacancy-tbody', host);
     if (tbody) tbody.innerHTML = buildVacancyRowsHtml();
-    $$('[data-vac-action]', host).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.id;
-        const action = btn.dataset.vacAction;
-        if (action === 'edit') openRecruitVacancyModal(id, host);
-        else if (action === 'duplicate') duplicateRecruitVacancy(id, host);
-        else if (action === 'delete') deleteRecruitVacancy(id, host);
-        else if (action === 'share') openRecruitShareModal(id);
-      });
-    });
   };
 
   paintVacancyTable();
+
+  $('#vacancy-tbody', host).addEventListener('click', event => {
+    const btn = event.target.closest('[data-vac-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const action = btn.dataset.vacAction;
+    if (action === 'edit') openRecruitVacancyModal(id, host);
+    else if (action === 'duplicate') duplicateRecruitVacancy(id, host);
+    else if (action === 'delete') deleteRecruitVacancy(id, host);
+    else if (action === 'share') openRecruitShareModal(id);
+  });
 
   $('#recruit-save-scoring', host).addEventListener('click', async () => {
     try {
@@ -5966,10 +6293,58 @@ function renderRecruitVacanciesTab(host) {
   const onVacancySearch = debounce(event => {
     recruitSearchQuery = event.target.value;
     paintVacancyTable();
-  }, 140);
+  }, 120);
   $('#vacancy-search', host).addEventListener('input', onVacancySearch);
 
   $('#add-vacancy-btn', host).addEventListener('click', () => openRecruitVacancyModal(null, host));
+
+  $('#recruit-dl-template-xlsx', host).addEventListener('click', async () => {
+    const sheets = buildRecruitmentExportSheets(recruitVacancies, DISTRICTS_BY_CITY);
+    await downloadMultiSheetXlsx([
+      { name: 'Vacancies', headers: RECRUIT_VACANCY_IMPORT_HEADERS, rows: sheets.vacancyRows },
+      { name: 'Questions', headers: RECRUIT_QUESTION_IMPORT_HEADERS, rows: sheets.questionRows },
+      { name: 'Ref_Kota_Kecamatan', headers: RECRUIT_CITY_REF_HEADERS, rows: sheets.districtRefRows }
+    ], 'Template_Apply_Vacancies_Scoring.xlsx');
+  });
+
+  $('#recruit-export-xlsx', host).addEventListener('click', async () => {
+    const sheets = buildRecruitmentExportSheets(recruitVacancies, DISTRICTS_BY_CITY);
+    await downloadMultiSheetXlsx([
+      { name: 'Vacancies', headers: RECRUIT_VACANCY_IMPORT_HEADERS, rows: sheets.vacancyRows },
+      { name: 'Questions', headers: RECRUIT_QUESTION_IMPORT_HEADERS, rows: sheets.questionRows },
+      { name: 'Ref_Kota_Kecamatan', headers: RECRUIT_CITY_REF_HEADERS, rows: sheets.districtRefRows }
+    ], `Apply_Vacancies_Config_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
+  $('#recruit-quick-import-file', host).addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const { sheetsByName, firstSheetRows } = await readSpreadsheetWorkbookSheets(file);
+      const sheetNames = Object.keys(sheetsByName);
+      const vacKey = sheetNames.find(n => /^vacanc/i.test(n)) || sheetNames[0];
+      const qKey = sheetNames.find(n => /^question|^pertanyaan/i.test(n));
+      const { vacancies, errors, warnings } = parseRecruitmentImportRows(
+        sheetsByName[vacKey] || firstSheetRows,
+        qKey ? sheetsByName[qKey] : [],
+        recruitVacancies
+      );
+      if (!vacancies.length) {
+        say(errors.length ? errors[0] : 'Tidak ada posisi valid di file Excel.');
+        return;
+      }
+      const byName = new Map(recruitVacancies.map(v => [v.name.toLowerCase(), v]));
+      vacancies.forEach(v => byName.set(v.name.toLowerCase(), v));
+      await persistRecruitVacancies([...byName.values()]);
+      renderRecruitVacanciesTab(host);
+      const notes = [...(errors || []), ...(warnings || [])];
+      say(`Berhasil import ${vacancies.length} posisi dari Excel${notes.length ? ` (${notes.length} catatan)` : ''}.`);
+    } catch (err) {
+      say(formatAppError(err, 'Gagal mengimport Excel konfigurasi /apply.'));
+    } finally {
+      event.target.value = '';
+    }
+  });
 }
 
 async function duplicateRecruitVacancy(id, host) {
@@ -6023,52 +6398,63 @@ async function deleteRecruitVacancy(id, host) {
   }
 }
 
+let cachedCatalogDistrictTokens = null;
 function getRecruitCatalogDistrictTokens() {
+  if (cachedCatalogDistrictTokens) return cachedCatalogDistrictTokens;
   const tokens = [];
   for (const [city, districts] of Object.entries(DISTRICTS_BY_CITY)) {
     for (const d of districts) {
       tokens.push({ city, district: d, token: normalizeDistrictToken(city, d) });
     }
   }
+  cachedCatalogDistrictTokens = tokens;
   return tokens;
+}
+
+function getFilteredDistrictTokens() {
+  const search = recruitPickerSearch.trim().toLowerCase();
+  return getRecruitCatalogDistrictTokens().filter(item => {
+    if (recruitPickerCityFilter !== 'All' && item.city !== recruitPickerCityFilter) return false;
+    if (search && !item.token.toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
+
+function updateVacancyModalMaxScoreBadge(modal) {
+  if (!modal || !recruitDraftVacancy) return;
+  const badge = $('#v-modal-max-badge', modal);
+  if (!badge) return;
+  const primScore = Number($('#v-primary-score', modal)?.value ?? recruitDraftVacancy.primaryLocationScore ?? 0);
+  const othScore = Number($('#v-other-score', modal)?.value ?? recruitDraftVacancy.otherLocationScore ?? 0);
+  const tempVacancy = {
+    ...recruitDraftVacancy,
+    primaryLocationScore: Number.isFinite(primScore) ? primScore : 0,
+    otherLocationScore: Number.isFinite(othScore) ? othScore : 0
+  };
+  badge.textContent = `Max: ${calculateVacancyMaxScore(tempVacancy)} pts`;
 }
 
 function renderRecruitDistrictPicker(modal) {
   if (!modal || !recruitDraftVacancy) return;
   const listEl = $('#district-picker-list', modal);
-  const search = recruitPickerSearch.trim().toLowerCase();
+  const selectedSet = new Set(recruitDraftVacancy.primaryDistricts);
+  const items = getFilteredDistrictTokens();
 
-  const items = getRecruitCatalogDistrictTokens().filter(item => {
-    if (recruitPickerCityFilter !== 'All' && item.city !== recruitPickerCityFilter) return false;
-    if (search && !item.token.toLowerCase().includes(search)) return false;
-    return true;
-  });
+  const selectCityBtn = $('#district-select-filtered', modal);
+  if (selectCityBtn) {
+    selectCityBtn.textContent = recruitPickerCityFilter === 'All'
+      ? `+ Pilih Semua (${items.length})`
+      : `+ Semua ${recruitPickerCityFilter} (${items.length})`;
+  }
 
   listEl.innerHTML = items.length
-    ? items.map(item => {
-        const checked = recruitDraftVacancy.primaryDistricts.includes(item.token);
-        return `
-          <label class="district-chip">
-            <input type="checkbox" value="${esc(item.token)}" ${checked ? 'checked' : ''}>
-            <span>${esc(item.token)}</span>
-          </label>
-        `;
-      }).join('')
+    ? items.map(item => `
+        <label class="district-chip">
+          <input type="checkbox" value="${esc(item.token)}" ${selectedSet.has(item.token) ? 'checked' : ''}>
+          <span>${esc(item.token)}</span>
+        </label>
+      `).join('')
     : '<div class="loc-empty" style="grid-column:1/-1;padding:8px">No matching districts found.</div>';
-
-  $$('input[type="checkbox"]', listEl).forEach(cb => {
-    cb.addEventListener('change', () => {
-      const token = cb.value;
-      if (cb.checked) {
-        if (!recruitDraftVacancy.primaryDistricts.includes(token)) {
-          recruitDraftVacancy.primaryDistricts.push(token);
-        }
-      } else {
-        recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== token);
-      }
-      renderRecruitSelectedDistrictTags(modal);
-    });
-  });
 
   renderRecruitSelectedDistrictTags(modal);
 }
@@ -6076,20 +6462,14 @@ function renderRecruitDistrictPicker(modal) {
 function renderRecruitSelectedDistrictTags(modal) {
   if (!modal || !recruitDraftVacancy) return;
   const tagsEl = $('#district-selected-tags', modal);
+  const countEl = $('#district-selected-count', modal);
+  if (countEl) countEl.textContent = `${recruitDraftVacancy.primaryDistricts.length} dipilih`;
   tagsEl.innerHTML = recruitDraftVacancy.primaryDistricts.map(token => `
     <span class="district-selected-tag">
       ${esc(token)}
       <button type="button" data-remove-district="${esc(token)}" aria-label="Remove ${esc(token)}">&times;</button>
     </span>
   `).join('');
-
-  $$('[data-remove-district]', tagsEl).forEach(btn => {
-    btn.addEventListener('click', () => {
-      const val = btn.dataset.removeDistrict;
-      recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== val);
-      renderRecruitDistrictPicker(modal);
-    });
-  });
 }
 
 function syncRecruitQuestionsFromDom(modal) {
@@ -6099,12 +6479,19 @@ function syncRecruitQuestionsFromDom(modal) {
 
   recruitDraftVacancy.questions = items.map((itemEl, idx) => {
     const existing = recruitDraftVacancy.questions[idx] || {};
-    const label = itemEl.querySelector('[data-q-prop="label"]')?.value || '';
-    const type = itemEl.querySelector('[data-q-prop="type"]')?.value || 'text';
+    const label = itemEl.querySelector('[data-q-prop="label"]')?.value ?? existing.label ?? '';
+    const type = itemEl.querySelector('[data-q-prop="type"]')?.value ?? existing.type ?? 'text';
     const required = itemEl.querySelector('[data-q-prop="required"]')?.checked !== false;
-    const placeholder = itemEl.querySelector('[data-q-prop="placeholder"]')?.value || '';
-    const filledScore = Number(itemEl.querySelector('[data-q-prop="filledScore"]')?.value || 0);
+    const placeholder = itemEl.querySelector('[data-q-prop="placeholder"]')?.value ?? '';
+    const filledScore = Number(itemEl.querySelector('[data-q-prop="filledScore"]')?.value ?? 0);
     const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(type);
+
+    const swOp = itemEl.querySelector('[data-q-sw="operator"]')?.value || 'always';
+    const swParent = itemEl.querySelector('[data-q-sw="parent"]')?.value || '';
+    const swVal = itemEl.querySelector('[data-q-sw="value"]')?.value ?? '';
+    const showWhen = swOp !== 'always' && swParent && swParent !== existing.id
+      ? { questionId: swParent, operator: swOp, value: swVal }
+      : null;
 
     const options = hasOptions
       ? $$('.q-option-row', itemEl).map(row => ({
@@ -6120,7 +6507,8 @@ function syncRecruitQuestionsFromDom(modal) {
       required,
       placeholder,
       filledScore: Number.isFinite(filledScore) ? filledScore : 0,
-      options
+      options,
+      showWhen
     };
   });
 }
@@ -6133,23 +6521,53 @@ function renderRecruitQuestionBuilder(modal) {
 
   if (!recruitDraftVacancy.questions.length) {
     host.innerHTML = '<div class="loc-empty" style="padding:10px 0">No questions added. Click "+ Add Question" to add position-specific screening prompts.</div>';
+    updateVacancyModalMaxScoreBadge(modal);
     return;
   }
 
   host.innerHTML = recruitDraftVacancy.questions.map((q, idx) => {
     const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(q.type);
-    const optionRows = (q.options || []).map((opt, optIdx) => `
-      <div class="q-option-row" data-opt-index="${optIdx}">
-        <input class="input" data-opt-label value="${esc(opt.label)}" placeholder="Answer ${String.fromCharCode(65 + (optIdx % 26))}">
-        <input class="input" data-opt-score type="number" step="0.5" value="${esc(opt.score)}" placeholder="Score">
-        <button type="button" class="q-option-del" data-del-opt="${optIdx}" aria-label="Remove choice">&times;</button>
-      </div>
-    `).join('');
+    const otherQuestions = recruitDraftVacancy.questions
+      .map((cand, cIdx) => ({ cand, cIdx }))
+      .filter(({ cand }) => cand.id !== q.id);
+    const sw = q.showWhen && q.showWhen.questionId ? q.showWhen : null;
+    const swOpValue = sw ? (sw.operator || 'equals') : 'always';
+    const swParentObj = sw ? recruitDraftVacancy.questions.find(p => p.id === sw.questionId) : null;
+    const swParentHasOptions = swParentObj && ['dropdown', 'radio', 'checkbox'].includes(swParentObj.type) && (swParentObj.options || []).length > 0;
+
+    const swValueControl = swOpValue === 'always'
+      ? ''
+      : (swParentHasOptions
+          ? `<select class="select" data-q-sw="value">
+              <option value="">-- Pilih Jawaban Pemicu --</option>
+              ${swParentObj.options.map(opt => `<option value="${esc(opt.label)}" ${sw?.value === opt.label ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}
+            </select>`
+          : `<input class="input" data-q-sw="value" value="${esc(sw?.value || '')}" placeholder="Nilai jawaban pemicu...">`);
+
+    const optionRows = (q.options || []).map((opt, optIdx) => {
+      const code = String.fromCharCode(65 + (optIdx % 26));
+      return `
+        <tr class="q-option-row" data-opt-index="${optIdx}">
+          <td class="q-opt-code-cell">${code}</td>
+          <td><input class="input" data-opt-label value="${esc(opt.label)}" placeholder="Teks Jawaban ${code}"></td>
+          <td><input class="input num" data-opt-score type="number" step="0.5" value="${esc(opt.score)}" placeholder="0"></td>
+          <td class="q-opt-branch-cell">
+            <button type="button" class="btn btn-secondary btn-xs" data-branch-opt="${optIdx}" title="Tambah pertanyaan lanjutan jika kandidat memilih jawaban ${code}">+ Cabang</button>
+          </td>
+          <td class="q-opt-del-cell">
+            <button type="button" class="q-option-del" data-del-opt="${optIdx}" aria-label="Remove choice">&times;</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
 
     return `
-      <div class="q-builder-item" data-q-index="${idx}">
+      <div class="q-builder-item ${sw ? 'is-conditional-child' : ''}" data-q-index="${idx}">
         <div class="q-builder-top">
-          <span class="q-builder-index">Question ${idx + 1}</span>
+          <div class="q-builder-title-wrap">
+            <span class="q-builder-index">Q${idx + 1}</span>
+            ${sw ? `<span class="q-branch-pill">${esc(formatShowWhenConditionText(q, recruitDraftVacancy.questions))}</span>` : '<span class="q-always-pill">Pertanyaan Utama</span>'}
+          </div>
           <div class="q-builder-controls">
             <button type="button" class="icon-btn" data-move-q="-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
             <button type="button" class="icon-btn" data-move-q="1" ${idx === recruitDraftVacancy.questions.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
@@ -6157,13 +6575,30 @@ function renderRecruitQuestionBuilder(modal) {
           </div>
         </div>
 
+        <div class="q-branch-bar">
+          <label class="q-branch-lbl">Kondisi Tampil:</label>
+          <select class="select" data-q-sw="operator">
+            <option value="always" ${swOpValue === 'always' ? 'selected' : ''}>Selalu tampil</option>
+            <option value="equals" ${swOpValue === 'equals' ? 'selected' : ''} ${!otherQuestions.length ? 'disabled' : ''}>Tampil jika jawaban =</option>
+            <option value="not_equals" ${swOpValue === 'not_equals' ? 'selected' : ''} ${!otherQuestions.length ? 'disabled' : ''}>Tampil jika jawaban ≠</option>
+            <option value="includes" ${swOpValue === 'includes' ? 'selected' : ''} ${!otherQuestions.length ? 'disabled' : ''}>Tampil jika berisi teks</option>
+          </select>
+          ${swOpValue !== 'always' ? `
+            <select class="select" data-q-sw="parent">
+              <option value="">-- Pilih Pertanyaan Induk --</option>
+              ${otherQuestions.map(({ cand, cIdx }) => `<option value="${esc(cand.id)}" ${sw?.questionId === cand.id ? 'selected' : ''}>Q${cIdx + 1} · ${esc(cand.label || '(Belum dinamai)')}</option>`).join('')}
+            </select>
+            ${swValueControl}
+          ` : ''}
+        </div>
+
         <div class="q-builder-fields">
           <div class="v-field">
-            <label>Question Prompt (Shown to Indonesian Candidate)</label>
-            <input class="input" data-q-prop="label" value="${esc(q.label)}" placeholder="Example: Pernah nyepray apa?">
+            <label>Pertanyaan (Ditampilkan ke Kandidat)</label>
+            <input class="input" data-q-prop="label" value="${esc(q.label)}" placeholder="Contoh: Pernah mengoperasikan mesin apa?">
           </div>
           <div class="v-field">
-            <label>Input Type</label>
+            <label>Tipe Input</label>
             <select class="select" data-q-prop="type">
               ${QUESTION_TYPES.map(t => `<option value="${esc(t.value)}" ${q.type === t.value ? 'selected' : ''}>${esc(RECRUIT_Q_TYPE_LABELS[t.value] || t.label)}</option>`).join('')}
             </select>
@@ -6176,19 +6611,29 @@ function renderRecruitQuestionBuilder(modal) {
 
         ${hasOptions ? `
           <div class="q-options-box">
-            <div class="q-options-head"><span>Choice Label</span><span>Score</span><span></span></div>
-            ${optionRows}
-            <button type="button" class="btn btn-secondary btn-xs" data-add-opt style="margin-top:4px">+ Add Option</button>
+            <table class="q-options-table">
+              <thead>
+                <tr>
+                  <th class="q-opt-code-cell">KODE</th>
+                  <th>PILIHAN JAWABAN (TEKS)</th>
+                  <th class="num" style="width:96px">SKOR (PTS)</th>
+                  <th style="width:96px">CABANG</th>
+                  <th style="width:34px"></th>
+                </tr>
+              </thead>
+              <tbody>${optionRows}</tbody>
+            </table>
+            <button type="button" class="btn btn-secondary btn-xs" data-add-opt style="margin-top:6px">+ Add Option</button>
           </div>
         ` : `
           <div class="q-nonoption-box">
             <div class="v-field">
               <label>Input Placeholder</label>
-              <input class="input" data-q-prop="placeholder" value="${esc(q.placeholder || '')}" placeholder="Example: Factory name or task description">
+              <input class="input" data-q-prop="placeholder" value="${esc(q.placeholder || '')}" placeholder="Contoh: Sebutkan nama pabrik atau jenis keahlian">
             </div>
             <div class="v-field">
-              <label>Score If Filled</label>
-              <input class="input" data-q-prop="filledScore" type="number" step="0.5" value="${esc(q.filledScore ?? 0)}">
+              <label>Skor Jika Diisi (pts)</label>
+              <input class="input num" data-q-prop="filledScore" type="number" step="0.5" value="${esc(q.filledScore ?? 0)}">
             </div>
           </div>
         `}
@@ -6196,57 +6641,7 @@ function renderRecruitQuestionBuilder(modal) {
     `;
   }).join('');
 
-  $$('.q-builder-item', host).forEach((itemEl, idx) => {
-    itemEl.querySelector('[data-q-prop="type"]').addEventListener('change', event => {
-      syncRecruitQuestionsFromDom(modal);
-      const nextType = event.target.value;
-      const target = recruitDraftVacancy.questions[idx];
-      target.type = nextType;
-      if (['dropdown', 'radio', 'checkbox'].includes(nextType) && !target.options.length) {
-        target.options = [
-          { label: 'Option A', score: 10 },
-          { label: 'Option B', score: 5 }
-        ];
-      }
-      renderRecruitQuestionBuilder(modal);
-    });
-
-    itemEl.querySelector('[data-del-q]').addEventListener('click', () => {
-      syncRecruitQuestionsFromDom(modal);
-      recruitDraftVacancy.questions.splice(idx, 1);
-      renderRecruitQuestionBuilder(modal);
-    });
-
-    itemEl.querySelectorAll('[data-move-q]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        syncRecruitQuestionsFromDom(modal);
-        const swapIdx = idx + Number(btn.dataset.moveQ);
-        if (swapIdx < 0 || swapIdx >= recruitDraftVacancy.questions.length) return;
-        [recruitDraftVacancy.questions[idx], recruitDraftVacancy.questions[swapIdx]] = [
-          recruitDraftVacancy.questions[swapIdx],
-          recruitDraftVacancy.questions[idx]
-        ];
-        renderRecruitQuestionBuilder(modal);
-      });
-    });
-
-    itemEl.querySelector('[data-add-opt]')?.addEventListener('click', () => {
-      syncRecruitQuestionsFromDom(modal);
-      const target = recruitDraftVacancy.questions[idx];
-      const nextLetter = String.fromCharCode(65 + ((target.options?.length || 0) % 26));
-      target.options.push({ label: `Option ${nextLetter}`, score: 0 });
-      renderRecruitQuestionBuilder(modal);
-    });
-
-    itemEl.querySelectorAll('[data-del-opt]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        syncRecruitQuestionsFromDom(modal);
-        recruitDraftVacancy.questions[idx].options.splice(Number(btn.dataset.delOpt), 1);
-        renderRecruitQuestionBuilder(modal);
-      });
-    });
-  });
-
+  updateVacancyModalMaxScoreBadge(modal);
   if (bodyEl) bodyEl.scrollTop = prevScrollTop;
 }
 
@@ -6261,7 +6656,10 @@ function openRecruitVacancyModal(id, host) {
         <div class="employee-modal-head">
           <div>
             <small id="v-modal-kicker">VACANCY &amp; SCORING (/apply)</small>
-            <h2 id="v-modal-title">Edit Vacancy</h2>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <h2 id="v-modal-title" style="margin:0">Edit Vacancy</h2>
+              <span id="v-modal-max-badge" class="recruit-max-badge">Max: 0 pts</span>
+            </div>
           </div>
           <button type="button" class="modal-close" id="v-modal-close" aria-label="Close">&times;</button>
         </div>
@@ -6284,7 +6682,7 @@ function openRecruitVacancyModal(id, host) {
                 </div>
                 <div class="v-field">
                   <label for="v-min-score">Min Qualification Override (Blank = Global Default)</label>
-                  <input id="v-min-score" class="input" type="number" step="0.5" min="0" placeholder="Inherit global">
+                  <input id="v-min-score" class="input num" type="number" step="0.5" min="0" placeholder="Inherit global">
                 </div>
                 <div class="v-field">
                   <label for="v-min-mode">Threshold Mode</label>
@@ -6298,16 +6696,20 @@ function openRecruitVacancyModal(id, host) {
             </div>
 
             <div class="v-form-section">
-              <div class="v-form-section-head"><h3>Primary Location Criteria &amp; Scoring</h3></div>
+              <div class="v-form-section-head">
+                <h3>Primary Location Criteria &amp; Scoring</h3>
+                <span id="district-selected-count" class="vacancy-count">0 dipilih</span>
+              </div>
               <div class="v-grid-2" style="margin-bottom:14px">
                 <div class="v-field">
-                  <label>Primary Districts (Static Catalog Picker)</label>
+                  <label>Primary Districts (Catalog Kota &amp; Kecamatan)</label>
                   <div class="district-picker-controls">
                     <select id="district-city-filter" class="select">
                       <option value="All">All Cities / Regencies</option>
                       ${Object.keys(DISTRICTS_BY_CITY).map(city => `<option value="${esc(city)}">${esc(city)}</option>`).join('')}
                     </select>
                     <input id="district-search" class="input" type="search" placeholder="Filter district…">
+                    <button type="button" class="btn btn-secondary btn-xs" id="district-select-filtered">+ Pilih Semua</button>
                     <button type="button" class="btn btn-secondary btn-xs" id="district-clear-all">Clear</button>
                   </div>
                   <div id="district-picker-list" class="district-picker-list"></div>
@@ -6318,8 +6720,8 @@ function openRecruitVacancyModal(id, host) {
                   <div id="district-selected-tags" class="district-selected-tags"></div>
                 </div>
                 <div class="v-field">
-                  <label for="v-primary-score">Primary Location Score</label>
-                  <input id="v-primary-score" class="input" type="number" step="0.5" value="10">
+                  <label for="v-primary-score">Primary Location Score (pts)</label>
+                  <input id="v-primary-score" class="input num" type="number" step="0.5" value="10">
                 </div>
               </div>
 
@@ -6329,15 +6731,15 @@ function openRecruitVacancyModal(id, host) {
                   <input id="v-other-label" class="input" value="Area selain lokasi utama">
                 </div>
                 <div class="v-field">
-                  <label for="v-other-score">Other Location Score</label>
-                  <input id="v-other-score" class="input" type="number" step="0.5" value="5">
+                  <label for="v-other-score">Other Location Score (pts)</label>
+                  <input id="v-other-score" class="input num" type="number" step="0.5" value="5">
                 </div>
               </div>
             </div>
 
             <div class="v-form-section">
               <div class="v-form-section-head">
-                <h3>Screening Questions &amp; Score Weights</h3>
+                <h3>Screening Questions, Branching &amp; Score Weights</h3>
                 <button type="button" class="btn btn-secondary btn-xs" id="add-question-btn">+ Add Question</button>
               </div>
               <div id="q-builder-list" class="q-builder-list"></div>
@@ -6365,6 +6767,35 @@ function openRecruitVacancyModal(id, host) {
     $('#v-modal-cancel', backdrop).addEventListener('click', closeModal);
     bindSafeModalClose(backdrop, closeModal);
 
+    // Delegated location score listeners -> O(1) max badge refresh
+    $('#v-primary-score', backdrop).addEventListener('input', () => updateVacancyModalMaxScoreBadge(backdrop));
+    $('#v-other-score', backdrop).addEventListener('input', () => updateVacancyModalMaxScoreBadge(backdrop));
+
+    // Delegated district picker events (zero 154x listener loops)
+    $('#district-picker-list', backdrop).addEventListener('change', event => {
+      const cb = event.target.closest('input[type="checkbox"]');
+      if (!cb || !recruitDraftVacancy) return;
+      const token = cb.value;
+      if (cb.checked) {
+        if (!recruitDraftVacancy.primaryDistricts.includes(token)) {
+          recruitDraftVacancy.primaryDistricts.push(token);
+        }
+      } else {
+        recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== token);
+      }
+      renderRecruitSelectedDistrictTags(backdrop);
+    });
+
+    $('#district-selected-tags', backdrop).addEventListener('click', event => {
+      const btn = event.target.closest('[data-remove-district]');
+      if (!btn || !recruitDraftVacancy) return;
+      const val = btn.dataset.removeDistrict;
+      recruitDraftVacancy.primaryDistricts = recruitDraftVacancy.primaryDistricts.filter(x => x !== val);
+      const matchCb = [...$('#district-picker-list', backdrop).querySelectorAll('input[type="checkbox"]')].find(c => c.value === val);
+      if (matchCb) matchCb.checked = false;
+      renderRecruitSelectedDistrictTags(backdrop);
+    });
+
     $('#district-city-filter', backdrop).addEventListener('change', event => {
       recruitPickerCityFilter = event.target.value;
       renderRecruitDistrictPicker(backdrop);
@@ -6372,13 +6803,26 @@ function openRecruitVacancyModal(id, host) {
     const onDistrictSearch = debounce(event => {
       recruitPickerSearch = event.target.value;
       renderRecruitDistrictPicker(backdrop);
-    }, 140);
+    }, 100);
     $('#district-search', backdrop).addEventListener('input', onDistrictSearch);
+
+    $('#district-select-filtered', backdrop).addEventListener('click', () => {
+      if (!recruitDraftVacancy) return;
+      const items = getFilteredDistrictTokens();
+      const set = new Set(recruitDraftVacancy.primaryDistricts);
+      items.forEach(item => set.add(item.token));
+      recruitDraftVacancy.primaryDistricts = [...set];
+      $$('#district-picker-list input[type="checkbox"]', backdrop).forEach(cb => { cb.checked = true; });
+      renderRecruitSelectedDistrictTags(backdrop);
+    });
+
     $('#district-clear-all', backdrop).addEventListener('click', () => {
       if (!recruitDraftVacancy) return;
       recruitDraftVacancy.primaryDistricts = [];
-      renderRecruitDistrictPicker(backdrop);
+      $$('#district-picker-list input[type="checkbox"]', backdrop).forEach(cb => { cb.checked = false; });
+      renderRecruitSelectedDistrictTags(backdrop);
     });
+
     $('#district-custom-add', backdrop).addEventListener('click', () => {
       const input = $('#district-custom-input', backdrop);
       const val = input.value.trim();
@@ -6394,6 +6838,161 @@ function openRecruitVacancyModal(id, host) {
       event.preventDefault();
       $('#district-custom-add', backdrop).click();
     });
+
+    // Single delegated controller on #q-builder-list (zero per-row listener loops, O(1) typing)
+    const qHost = $('#q-builder-list', backdrop);
+    qHost.addEventListener('input', event => {
+      if (!recruitDraftVacancy) return;
+      const itemEl = event.target.closest('[data-q-index]');
+      if (!itemEl) return;
+      const q = recruitDraftVacancy.questions[Number(itemEl.dataset.qIndex)];
+      if (!q) return;
+      const prop = event.target.dataset.qProp;
+      if (prop === 'label') q.label = event.target.value;
+      else if (prop === 'placeholder') q.placeholder = event.target.value;
+      else if (prop === 'filledScore') {
+        const val = Number(event.target.value);
+        q.filledScore = Number.isFinite(val) ? val : 0;
+        updateVacancyModalMaxScoreBadge(backdrop);
+      } else if (event.target.dataset.qSw === 'value' && q.showWhen) {
+        q.showWhen.value = event.target.value;
+      } else if (event.target.hasAttribute('data-opt-label')) {
+        const optIdx = Number(event.target.closest('[data-opt-index]')?.dataset.optIndex);
+        if (q.options[optIdx]) q.options[optIdx].label = event.target.value;
+      } else if (event.target.hasAttribute('data-opt-score')) {
+        const optIdx = Number(event.target.closest('[data-opt-index]')?.dataset.optIndex);
+        const val = Number(event.target.value);
+        if (q.options[optIdx]) q.options[optIdx].score = Number.isFinite(val) ? val : 0;
+        updateVacancyModalMaxScoreBadge(backdrop);
+      }
+    });
+
+    qHost.addEventListener('change', event => {
+      if (!recruitDraftVacancy) return;
+      const itemEl = event.target.closest('[data-q-index]');
+      if (!itemEl) return;
+      const idx = Number(itemEl.dataset.qIndex);
+      const q = recruitDraftVacancy.questions[idx];
+      if (!q) return;
+      const prop = event.target.dataset.qProp;
+      const swProp = event.target.dataset.qSw;
+
+      if (prop === 'required') {
+        q.required = event.target.checked;
+        return;
+      }
+      if (prop === 'type') {
+        q.type = event.target.value;
+        if (['dropdown', 'radio', 'checkbox'].includes(q.type) && !q.options?.length) {
+          q.options = [
+            { label: 'Ya', score: 10 },
+            { label: 'Tidak', score: 0 }
+          ];
+        }
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (swProp === 'operator') {
+        const nextOp = event.target.value;
+        if (nextOp === 'always') {
+          q.showWhen = null;
+        } else {
+          const fallbackParent = q.showWhen?.questionId
+            || recruitDraftVacancy.questions.slice(0, idx).reverse().find(c => c.id !== q.id)?.id
+            || recruitDraftVacancy.questions.find(c => c.id !== q.id)?.id
+            || '';
+          q.showWhen = {
+            questionId: fallbackParent,
+            operator: nextOp,
+            value: q.showWhen?.value || ''
+          };
+        }
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (swProp === 'parent') {
+        const nextParentId = event.target.value;
+        const parentObj = recruitDraftVacancy.questions.find(p => p.id === nextParentId);
+        const defaultOpt = parentObj?.options?.[0]?.label || '';
+        q.showWhen = {
+          questionId: nextParentId,
+          operator: q.showWhen?.operator || 'equals',
+          value: defaultOpt
+        };
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (swProp === 'value' && q.showWhen) {
+        q.showWhen.value = event.target.value;
+        const pill = itemEl.querySelector('.q-branch-pill');
+        if (pill) pill.textContent = formatShowWhenConditionText(q, recruitDraftVacancy.questions);
+      }
+    });
+
+    qHost.addEventListener('click', event => {
+      const btn = event.target.closest('button');
+      if (!btn || !recruitDraftVacancy) return;
+      const itemEl = btn.closest('[data-q-index]');
+      if (!itemEl) return;
+      const idx = Number(itemEl.dataset.qIndex);
+      const targetQ = recruitDraftVacancy.questions[idx];
+      if (!targetQ) return;
+
+      if (btn.hasAttribute('data-del-q')) {
+        const removedId = targetQ.id;
+        recruitDraftVacancy.questions.splice(idx, 1);
+        recruitDraftVacancy.questions.forEach(item => {
+          if (item.showWhen?.questionId === removedId) item.showWhen = null;
+        });
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (btn.dataset.moveQ !== undefined) {
+        const swapIdx = idx + Number(btn.dataset.moveQ);
+        if (swapIdx < 0 || swapIdx >= recruitDraftVacancy.questions.length) return;
+        [recruitDraftVacancy.questions[idx], recruitDraftVacancy.questions[swapIdx]] = [
+          recruitDraftVacancy.questions[swapIdx],
+          recruitDraftVacancy.questions[idx]
+        ];
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (btn.hasAttribute('data-add-opt')) {
+        const nextLetter = String.fromCharCode(65 + ((targetQ.options?.length || 0) % 26));
+        targetQ.options.push({ label: `Option ${nextLetter}`, score: 0 });
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (btn.dataset.delOpt !== undefined) {
+        targetQ.options.splice(Number(btn.dataset.delOpt), 1);
+        renderRecruitQuestionBuilder(backdrop);
+        return;
+      }
+      if (btn.dataset.branchOpt !== undefined) {
+        const opt = targetQ.options?.[Number(btn.dataset.branchOpt)];
+        const triggerVal = opt?.label || '';
+        const followId = `q_${Date.now().toString(36)}_${idx + 1}`;
+        recruitDraftVacancy.questions.splice(idx + 1, 0, {
+          id: followId,
+          label: `Pertanyaan lanjutan jika "${triggerVal}"`,
+          type: 'text',
+          required: true,
+          placeholder: 'Masukkan detail tambahan...',
+          filledScore: 10,
+          options: [],
+          showWhen: {
+            questionId: targetQ.id,
+            operator: 'equals',
+            value: triggerVal
+          }
+        });
+        renderRecruitQuestionBuilder(backdrop);
+        const insertedEl = qHost.querySelector(`[data-q-index="${idx + 1}"] [data-q-prop="label"]`);
+        insertedEl?.focus();
+        insertedEl?.select();
+      }
+    });
+
     $('#add-question-btn', backdrop).addEventListener('click', () => {
       syncRecruitQuestionsFromDom(backdrop);
       recruitDraftVacancy.questions.push({
@@ -6403,13 +7002,14 @@ function openRecruitVacancyModal(id, host) {
         required: true,
         placeholder: '',
         filledScore: 0,
+        showWhen: null,
         options: [
           { label: 'Ya', score: 10 },
           { label: 'Tidak', score: 0 }
         ]
       });
       renderRecruitQuestionBuilder(backdrop);
-      $('#q-builder-list', backdrop).lastElementChild?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      $('#q-builder-list', backdrop).lastElementChild?.scrollIntoView({ block: 'nearest' });
     });
   }
 
@@ -6503,6 +7103,7 @@ function openRecruitVacancyModal(id, host) {
             required: true,
             placeholder: '',
             filledScore: 0,
+            showWhen: null,
             options: [
               { label: 'Lebih dari 6 bulan', score: 60 },
               { label: 'Kurang dari 6 bulan', score: 20 }
@@ -6515,6 +7116,7 @@ function openRecruitVacancyModal(id, host) {
             required: true,
             placeholder: 'Uraikan tugas, alat, atau keahlian yang dikuasai',
             filledScore: 20,
+            showWhen: null,
             options: []
           }
         ]
@@ -6690,7 +7292,7 @@ function renderRecruitFormFieldsTab(host) {
   const positionsRows = recruitDraftForm.positions.map((pos, idx) => `
     <div class="schema-pos-row">
       <span class="schema-order-num">${idx + 1}</span>
-      <input class="input schema-pos-input" data-pos-list="positions" value="${esc(pos)}" placeholder="Position name">
+      <input class="input schema-pos-input" data-pos-list="positions" data-pos-idx="${idx}" value="${esc(pos)}" placeholder="Position name">
       <div class="schema-row-btns">
         <button type="button" class="icon-btn" data-pos-move="positions:${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
         <button type="button" class="icon-btn" data-pos-move="positions:${idx}:1" ${idx === recruitDraftForm.positions.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
@@ -6702,7 +7304,7 @@ function renderRecruitFormFieldsTab(host) {
   const sourceRows = recruitDraftForm.infoSources.map((src, idx) => `
     <div class="schema-pos-row">
       <span class="schema-order-num">${idx + 1}</span>
-      <input class="input schema-pos-input" data-pos-list="infoSources" value="${esc(src)}" placeholder="Information source">
+      <input class="input schema-pos-input" data-pos-list="infoSources" data-pos-idx="${idx}" value="${esc(src)}" placeholder="Information source">
       <div class="schema-row-btns">
         <button type="button" class="icon-btn" data-pos-move="infoSources:${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
         <button type="button" class="icon-btn" data-pos-move="infoSources:${idx}:1" ${idx === recruitDraftForm.infoSources.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
@@ -6804,7 +7406,7 @@ function renderRecruitFormFieldsTab(host) {
             <div class="schema-option-chips">
               ${(field.options || []).map((opt, optIdx) => `
                 <div class="schema-option-item">
-                  <input class="input schema-f2-option-input" value="${esc(opt)}" placeholder="Option label">
+                  <input class="input schema-f2-option-input" data-f2-opt-idx="${optIdx}" value="${esc(opt)}" placeholder="Option label">
                   <button type="button" class="q-option-del" data-f2-del-opt="${optIdx}" aria-label="Remove option">&times;</button>
                 </div>
               `).join('')}
@@ -6820,129 +7422,205 @@ function renderRecruitFormFieldsTab(host) {
   }).join('');
 
   host.innerHTML = `
-    <div class="vacancy-toolbar">
-      <div class="vacancy-toolbar-meta">
-        <h2>/form Stage 2 Sections &amp; Field Builder</h2>
-        <span class="vacancy-count">${recruitDraftForm.positions.length} position(s) · ${STAGE2_SECTION_META.length} sections</span>
+    <div id="form-tab-root">
+      <div class="vacancy-toolbar">
+        <div class="vacancy-toolbar-meta">
+          <h2>/form Stage 2 Sections &amp; Field Builder</h2>
+          <span class="vacancy-count">${recruitDraftForm.positions.length} position(s) · ${STAGE2_SECTION_META.length} sections</span>
+        </div>
+        <div class="vacancy-toolbar-actions">
+          <button type="button" class="btn btn-secondary" id="form-reset-btn">Reset Default</button>
+          <button type="button" class="btn btn-primary" id="form-save-btn">Save Changes</button>
+        </div>
       </div>
-      <div class="vacancy-toolbar-actions">
-        <button type="button" class="btn btn-secondary" id="form-reset-btn">Reset Default</button>
-        <button type="button" class="btn btn-primary" id="form-save-btn">Save Changes</button>
-      </div>
-    </div>
 
-    <div class="schema-grid-2">
+      <div class="schema-grid-2">
+        <div class="schema-panel">
+          <div class="schema-panel-head">
+            <h3>/form Position Dropdown</h3>
+            <span class="schema-panel-meta">${recruitDraftForm.positions.length} options</span>
+          </div>
+          <div class="schema-add-bar">
+            <input id="new-form-pos-input" class="input" placeholder="Add new /form position...">
+            <button type="button" class="btn btn-secondary btn-xs" id="add-form-pos-btn">+ Add</button>
+          </div>
+          <div class="schema-pos-list">${positionsRows}</div>
+        </div>
+
+        <div class="schema-panel">
+          <div class="schema-panel-head">
+            <h3>/form Information Sources</h3>
+            <span class="schema-panel-meta">${recruitDraftForm.infoSources.length} sources</span>
+          </div>
+          <div class="schema-add-bar">
+            <input id="new-form-src-input" class="input" placeholder="Add new information source...">
+            <button type="button" class="btn btn-secondary btn-xs" id="add-form-src-btn">+ Add</button>
+          </div>
+          <div class="schema-pos-list">${sourceRows}</div>
+        </div>
+      </div>
+
       <div class="schema-panel">
         <div class="schema-panel-head">
-          <h3>/form Position Dropdown</h3>
-          <span class="schema-panel-meta">${recruitDraftForm.positions.length} options</span>
+          <h3>Step Section Ordering &amp; Final Statement</h3>
+          <span class="schema-panel-meta">Steps with no visible sections are automatically skipped on /form</span>
         </div>
-        <div class="schema-add-bar">
-          <input id="new-form-pos-input" class="input" placeholder="Add new /form position...">
-          <button type="button" class="btn btn-secondary btn-xs" id="add-form-pos-btn">+ Add</button>
+        <div class="schema-step-order-grid">${stepOrderHtml}</div>
+        <div class="v-field" style="margin-top:14px">
+          <label for="form-consent-text">Candidate Declaration Statement (Final Step · J)</label>
+          <input id="form-consent-text" class="input" value="${esc(recruitDraftForm.consentText || DEFAULT_STAGE2_SCHEMA.consentText)}">
         </div>
-        <div class="schema-pos-list">${positionsRows}</div>
       </div>
 
       <div class="schema-panel">
         <div class="schema-panel-head">
-          <h3>/form Information Sources</h3>
-          <span class="schema-panel-meta">${recruitDraftForm.infoSources.length} sources</span>
+          <h3>Sections &amp; Field Ordering (/form)</h3>
+          <span class="schema-panel-meta">${esc(activeMeta.stepLabel)} · ${currentSec.fields.filter(f => f.enabled !== false).length} visible</span>
         </div>
-        <div class="schema-add-bar">
-          <input id="new-form-src-input" class="input" placeholder="Add new information source...">
-          <button type="button" class="btn btn-secondary btn-xs" id="add-form-src-btn">+ Add</button>
+
+        <div class="schema-section-tabs" role="tablist">${sectionTabsHtml}</div>
+
+        <div class="schema-section-settings">
+          <div class="v-field">
+            <label for="form-sec-title">Section Heading (${esc(activeMeta.code)})</label>
+            <input id="form-sec-title" class="input" value="${esc(currentSec.title || activeMeta.defaultTitle)}">
+          </div>
+          <label class="schema-section-toggle">
+            <input type="checkbox" id="form-sec-enabled" ${mandatorySec || currentSec.enabled !== false ? 'checked' : ''} ${mandatorySec ? 'disabled' : ''}>
+            <span>${mandatorySec ? 'Core Required Section' : 'Show This Section on /form'}</span>
+          </label>
         </div>
-        <div class="schema-pos-list">${sourceRows}</div>
-      </div>
-    </div>
 
-    <div class="schema-panel">
-      <div class="schema-panel-head">
-        <h3>Step Section Ordering &amp; Final Statement</h3>
-        <span class="schema-panel-meta">Steps with no visible sections are automatically skipped on /form</span>
-      </div>
-      <div class="schema-step-order-grid">${stepOrderHtml}</div>
-      <div class="v-field" style="margin-top:14px">
-        <label for="form-consent-text">Candidate Declaration Statement (Final Step · J)</label>
-        <input id="form-consent-text" class="input" value="${esc(recruitDraftForm.consentText || DEFAULT_STAGE2_SCHEMA.consentText)}">
-      </div>
-    </div>
+        <div class="schema-field-list">${fieldsHtml}</div>
 
-    <div class="schema-panel">
-      <div class="schema-panel-head">
-        <h3>Sections &amp; Field Ordering (/form)</h3>
-        <span class="schema-panel-meta">${esc(activeMeta.stepLabel)} · ${currentSec.fields.filter(f => f.enabled !== false).length} visible</span>
-      </div>
-
-      <div class="schema-section-tabs" role="tablist">${sectionTabsHtml}</div>
-
-      <div class="schema-section-settings">
-        <div class="v-field">
-          <label for="form-sec-title">Section Heading (${esc(activeMeta.code)})</label>
-          <input id="form-sec-title" class="input" value="${esc(currentSec.title || activeMeta.defaultTitle)}">
-        </div>
-        <label class="schema-section-toggle">
-          <input type="checkbox" id="form-sec-enabled" ${mandatorySec || currentSec.enabled !== false ? 'checked' : ''} ${mandatorySec ? 'disabled' : ''}>
-          <span>${mandatorySec ? 'Core Required Section' : 'Show This Section on /form'}</span>
-        </label>
-      </div>
-
-      <div class="schema-field-list">${fieldsHtml}</div>
-
-      <div class="schema-options-wrap" style="margin-top:14px">
-        <span class="schema-options-label">Add Custom Field to Section ${esc(activeMeta.code)} · ${esc(currentSec.title)}</span>
-        <div class="schema-add-bar" style="margin-bottom:0">
-          <input id="form-new-field-label" class="input" placeholder="Example: Nomor SIM / Pengalaman Organisasi">
-          <select id="form-new-field-type" class="select" style="max-width:210px">
-            ${RECRUIT_FORM_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
-          </select>
-          <button type="button" class="btn btn-secondary" id="form-add-custom-field">+ Add Field</button>
+        <div class="schema-options-wrap" style="margin-top:14px">
+          <span class="schema-options-label">Add Custom Field to Section ${esc(activeMeta.code)} · ${esc(currentSec.title)}</span>
+          <div class="schema-add-bar" style="margin-bottom:0">
+            <input id="form-new-field-label" class="input" placeholder="Example: Nomor SIM / Pengalaman Organisasi">
+            <select id="form-new-field-type" class="select" style="max-width:210px">
+              ${RECRUIT_FORM_FIELD_TYPE_OPTIONS.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-secondary" id="form-add-custom-field">+ Add Field</button>
+          </div>
         </div>
       </div>
     </div>
   `;
 
-  $('#add-form-pos-btn', host).addEventListener('click', () => {
-    syncRecruitFormDraftFromDom(host);
-    const input = $('#new-form-pos-input', host);
-    const name = input.value.trim();
-    if (!name) return;
-    if (recruitDraftForm.positions.some(p => p.toLowerCase() === name.toLowerCase())) {
-      say(`Position "${name}" already exists.`);
+  const root = $('#form-tab-root', host);
+  if (!root) return;
+
+  root.addEventListener('input', event => {
+    const target = event.target;
+    if (target.id === 'form-consent-text') {
+      recruitDraftForm.consentText = target.value;
       return;
     }
-    recruitDraftForm.positions.push(name);
-    renderRecruitFormFieldsTab(host);
-  });
-
-  $('#new-form-pos-input', host).addEventListener('keydown', event => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    $('#add-form-pos-btn', host).click();
-  });
-
-  $('#add-form-src-btn', host).addEventListener('click', () => {
-    syncRecruitFormDraftFromDom(host);
-    const input = $('#new-form-src-input', host);
-    const name = input.value.trim();
-    if (!name) return;
-    if (recruitDraftForm.infoSources.some(s => s.toLowerCase() === name.toLowerCase())) {
-      say(`Source "${name}" already exists.`);
+    if (target.id === 'form-sec-title') {
+      currentSec.title = target.value;
       return;
     }
-    recruitDraftForm.infoSources.push(name);
-    renderRecruitFormFieldsTab(host);
+    if (target.dataset.posList && target.dataset.posIdx !== undefined) {
+      recruitDraftForm[target.dataset.posList][Number(target.dataset.posIdx)] = target.value;
+      return;
+    }
+    const card = target.closest('[data-f2-idx]');
+    if (!card) return;
+    const field = currentSec.fields[Number(card.dataset.f2Idx)];
+    if (!field) return;
+    const prop = target.dataset.f2Prop;
+    if (prop === 'label') field.label = target.value;
+    else if (prop === 'placeholder') field.placeholder = target.value;
+    else if (target.dataset.f2OptIdx !== undefined) {
+      field.options[Number(target.dataset.f2OptIdx)] = target.value;
+    }
   });
 
-  $('#new-form-src-input', host).addEventListener('keydown', event => {
+  root.addEventListener('change', event => {
+    const target = event.target;
+    if (target.id === 'form-sec-enabled') {
+      syncRecruitFormDraftFromDom(host);
+      renderRecruitFormFieldsTab(host);
+      return;
+    }
+    const card = target.closest('[data-f2-idx]');
+    if (!card) return;
+    const field = currentSec.fields[Number(card.dataset.f2Idx)];
+    if (!field) return;
+    const prop = target.dataset.f2Prop;
+    if (prop === 'required') {
+      field.required = target.checked;
+      if (target.checked) {
+        field.enabled = true;
+        const enCb = card.querySelector('[data-f2-prop="enabled"]');
+        if (enCb && !enCb.checked) enCb.checked = true;
+      }
+    } else if (prop === 'enabled') {
+      field.enabled = target.checked;
+      if (!target.checked) {
+        field.required = false;
+        const reqCb = card.querySelector('[data-f2-prop="required"]');
+        if (reqCb) reqCb.checked = false;
+      }
+    } else if (prop === 'wide') {
+      field.wide = target.checked;
+    } else if (prop === 'type' && !field.system) {
+      field.type = target.value;
+      if (RECRUIT_FORM_CHOICE_TYPES.has(field.type) && !field.options?.length) {
+        field.options = ['Option 1', 'Option 2'];
+      }
+      renderRecruitFormFieldsTab(host);
+    }
+  });
+
+  root.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
-    event.preventDefault();
-    $('#add-form-src-btn', host).click();
+    if (event.target.id === 'new-form-pos-input') {
+      event.preventDefault();
+      $('#add-form-pos-btn', root)?.click();
+    } else if (event.target.id === 'new-form-src-input') {
+      event.preventDefault();
+      $('#add-form-src-btn', root)?.click();
+    } else if (event.target.matches('[data-f2-new-opt]')) {
+      event.preventDefault();
+      event.target.closest('.schema-add-bar')?.querySelector('[data-f2-add-opt]')?.click();
+    } else if (event.target.id === 'form-new-field-label') {
+      event.preventDefault();
+      $('#form-add-custom-field', root)?.click();
+    }
   });
 
-  $$('[data-pos-move]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+  root.addEventListener('click', async event => {
+    const btn = event.target.closest('button');
+    if (!btn) return;
+
+    if (btn.id === 'add-form-pos-btn') {
+      syncRecruitFormDraftFromDom(host);
+      const input = $('#new-form-pos-input', root);
+      const name = input.value.trim();
+      if (!name) return;
+      if (recruitDraftForm.positions.some(p => p.toLowerCase() === name.toLowerCase())) {
+        say(`Position "${name}" already exists.`);
+        return;
+      }
+      recruitDraftForm.positions.push(name);
+      renderRecruitFormFieldsTab(host);
+      return;
+    }
+    if (btn.id === 'add-form-src-btn') {
+      syncRecruitFormDraftFromDom(host);
+      const input = $('#new-form-src-input', root);
+      const name = input.value.trim();
+      if (!name) return;
+      if (recruitDraftForm.infoSources.some(s => s.toLowerCase() === name.toLowerCase())) {
+        say(`Source "${name}" already exists.`);
+        return;
+      }
+      recruitDraftForm.infoSources.push(name);
+      renderRecruitFormFieldsTab(host);
+      return;
+    }
+    if (btn.dataset.posMove) {
       syncRecruitFormDraftFromDom(host);
       const [listName, rawIdx, rawDelta] = btn.dataset.posMove.split(':');
       const idx = Number(rawIdx);
@@ -6951,11 +7629,9 @@ function renderRecruitFormFieldsTab(host) {
       if (!Array.isArray(arr) || target < 0 || target >= arr.length) return;
       [arr[idx], arr[target]] = [arr[target], arr[idx]];
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-pos-del]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+      return;
+    }
+    if (btn.dataset.posDel) {
       syncRecruitFormDraftFromDom(host);
       const [listName, rawIdx] = btn.dataset.posDel.split(':');
       const idx = Number(rawIdx);
@@ -6963,11 +7639,9 @@ function renderRecruitFormFieldsTab(host) {
       if (!Array.isArray(arr) || arr.length <= 1) return;
       arr.splice(idx, 1);
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-step-move-sec]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+      return;
+    }
+    if (btn.dataset.stepMoveSec) {
       syncRecruitFormDraftFromDom(host);
       const [rawStep, rawIdx, rawDelta] = btn.dataset.stepMoveSec.split(':');
       const step = Number(rawStep);
@@ -6978,159 +7652,95 @@ function renderRecruitFormFieldsTab(host) {
       [order[idx], order[target]] = [order[target], order[idx]];
       if (step === 0) recruitDraftForm.step0SectionOrder = [...order];
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-f2-tab]', host).forEach(tab => {
-    tab.addEventListener('click', () => {
+      return;
+    }
+    if (btn.dataset.f2Tab) {
       syncRecruitFormDraftFromDom(host);
-      recruitActiveFormSecTab = tab.dataset.f2Tab;
+      recruitActiveFormSecTab = btn.dataset.f2Tab;
       renderRecruitFormFieldsTab(host);
-    });
-  });
+      return;
+    }
 
-  $('#form-sec-enabled', host)?.addEventListener('change', () => {
-    syncRecruitFormDraftFromDom(host);
-    renderRecruitFormFieldsTab(host);
-  });
+    const card = btn.closest('[data-f2-idx]');
+    const idx = card ? Number(card.dataset.f2Idx) : -1;
 
-  $$('[data-f2-prop="required"]', host).forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) {
-        const card = cb.closest('[data-f2-idx]');
-        const enCb = card?.querySelector('[data-f2-prop="enabled"]');
-        if (enCb && !enCb.checked) enCb.checked = true;
-      }
-    });
-  });
-
-  $$('[data-f2-prop="enabled"]', host).forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (!cb.checked) {
-        const card = cb.closest('[data-f2-idx]');
-        const reqCb = card?.querySelector('[data-f2-prop="required"]');
-        if (reqCb) reqCb.checked = false;
-      }
-    });
-  });
-
-  $$('[data-f2-move]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+    if (btn.dataset.f2Move !== undefined && idx >= 0) {
       syncRecruitFormDraftFromDom(host);
-      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
       const target = idx + Number(btn.dataset.f2Move);
       const list = recruitDraftForm.sections[recruitActiveFormSecTab].fields;
       if (target < 0 || target >= list.length) return;
       [list[idx], list[target]] = [list[target], list[idx]];
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-f2-del]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
+      return;
+    }
+    if (btn.hasAttribute('data-f2-del') && idx >= 0) {
       syncRecruitFormDraftFromDom(host);
-      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
       recruitDraftForm.sections[recruitActiveFormSecTab].fields.splice(idx, 1);
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('.schema-field-card[data-f2-idx] [data-f2-prop="type"]', host).forEach(sel => {
-    sel.addEventListener('change', () => {
+      return;
+    }
+    if (btn.hasAttribute('data-f2-add-opt') && idx >= 0) {
       syncRecruitFormDraftFromDom(host);
-      const idx = Number(sel.closest('[data-f2-idx]').dataset.f2Idx);
-      const field = recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx];
-      if (field && RECRUIT_FORM_CHOICE_TYPES.has(field.type) && !field.options?.length) {
-        field.options = ['Option 1', 'Option 2'];
-      }
-      renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-f2-add-opt]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncRecruitFormDraftFromDom(host);
-      const card = btn.closest('[data-f2-idx]');
-      const idx = Number(card.dataset.f2Idx);
       const input = card.querySelector('[data-f2-new-opt]');
-      const val = input.value.trim();
+      const val = input?.value.trim() || '';
       if (!val) return;
       const field = recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx];
       if (!Array.isArray(field.options)) field.options = [];
       if (!field.options.includes(val)) field.options.push(val);
       renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $$('[data-f2-new-opt]', host).forEach(input => {
-    input.addEventListener('keydown', event => {
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      input.closest('.schema-add-bar')?.querySelector('[data-f2-add-opt]')?.click();
-    });
-  });
-
-  $$('[data-f2-del-opt]', host).forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncRecruitFormDraftFromDom(host);
-      const idx = Number(btn.closest('[data-f2-idx]').dataset.f2Idx);
-      const optIdx = Number(btn.dataset.f2DelOpt);
-      recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx].options.splice(optIdx, 1);
-      renderRecruitFormFieldsTab(host);
-    });
-  });
-
-  $('#form-add-custom-field', host).addEventListener('click', () => {
-    syncRecruitFormDraftFromDom(host);
-    const labelInput = $('#form-new-field-label', host);
-    const typeSelect = $('#form-new-field-type', host);
-    const label = labelInput.value.trim();
-    if (!label) {
-      say('Enter a field label first.');
-      labelInput.focus();
       return;
     }
-    const type = typeSelect.value;
-    recruitDraftForm.sections[recruitActiveFormSecTab].fields.push({
-      name: `custom_${Date.now().toString(36)}`,
-      label,
-      placeholder: '',
-      type,
-      required: false,
-      enabled: true,
-      system: false,
-      wide: type === 'textarea' || type === 'radio' || type === 'checkbox',
-      options: RECRUIT_FORM_CHOICE_TYPES.has(type) ? ['Option 1', 'Option 2'] : []
-    });
-    renderRecruitFormFieldsTab(host);
-  });
-
-  $('#form-new-field-label', host).addEventListener('keydown', event => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    $('#form-add-custom-field', host).click();
-  });
-
-  $('#form-reset-btn', host).addEventListener('click', () => {
-    recruitDraftForm = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
-    renderRecruitFormFieldsTab(host);
-    say('Reset /form draft to defaults (unsaved).');
-  });
-
-  $('#form-save-btn', host).addEventListener('click', async () => {
-    syncRecruitFormDraftFromDom(host);
-    const btn = $('#form-save-btn', host);
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
-    try {
-      await persistRecruitFormSchema(recruitDraftForm);
+    if (btn.dataset.f2DelOpt !== undefined && idx >= 0) {
+      syncRecruitFormDraftFromDom(host);
+      recruitDraftForm.sections[recruitActiveFormSecTab].fields[idx].options.splice(Number(btn.dataset.f2DelOpt), 1);
       renderRecruitFormFieldsTab(host);
-      say('/form schema configuration saved.');
-    } catch (error) {
-      say(formatAppError(error, 'Failed to save /form schema configuration.'));
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Save Changes';
+      return;
+    }
+    if (btn.id === 'form-add-custom-field') {
+      syncRecruitFormDraftFromDom(host);
+      const labelInput = $('#form-new-field-label', root);
+      const typeSelect = $('#form-new-field-type', root);
+      const label = labelInput.value.trim();
+      if (!label) {
+        say('Enter a field label first.');
+        labelInput.focus();
+        return;
+      }
+      const type = typeSelect.value;
+      recruitDraftForm.sections[recruitActiveFormSecTab].fields.push({
+        name: `custom_${Date.now().toString(36)}`,
+        label,
+        placeholder: '',
+        type,
+        required: false,
+        enabled: true,
+        system: false,
+        wide: type === 'textarea' || type === 'radio' || type === 'checkbox',
+        options: RECRUIT_FORM_CHOICE_TYPES.has(type) ? ['Option 1', 'Option 2'] : []
+      });
+      renderRecruitFormFieldsTab(host);
+      return;
+    }
+    if (btn.id === 'form-reset-btn') {
+      recruitDraftForm = normalizeStage2Schema(DEFAULT_STAGE2_SCHEMA);
+      renderRecruitFormFieldsTab(host);
+      say('Reset /form draft to defaults (unsaved).');
+      return;
+    }
+    if (btn.id === 'form-save-btn') {
+      syncRecruitFormDraftFromDom(host);
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await persistRecruitFormSchema(recruitDraftForm);
+        renderRecruitFormFieldsTab(host);
+        say('/form schema configuration saved.');
+      } catch (error) {
+        say(formatAppError(error, 'Failed to save /form schema configuration.'));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      }
     }
   });
 }

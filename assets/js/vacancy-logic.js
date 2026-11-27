@@ -25,6 +25,18 @@ export const DISTRICTS_BY_CITY = {
     'Sumberpucung', 'Tajinan', 'Tirtoyudo', 'Tumpang', 'Turen', 'Wagir', 'Wajak',
     'Wonosari', 'Blimbing (Kota)', 'Kedungkandang (Kota)', 'Klojen (Kota)',
     'Lowokwaru (Kota)', 'Sukun (Kota)'
+  ],
+  Surabaya: [
+    'Asemrowo', 'Benowo', 'Bubutan', 'Bulak', 'Dukuh Pakis', 'Gayungan', 'Genteng',
+    'Gubeng', 'Gunung Anyar', 'Jambangan', 'Karang Pilang', 'Kenjeran', 'Krembangan',
+    'Lakarsantri', 'Mulyorejo', 'Pabean Cantian', 'Pakal', 'Rungkut', 'Sambikerep',
+    'Sawahan', 'Semampir', 'Simokerto', 'Sukolilo', 'Sukomanunggal', 'Tambaksari',
+    'Tandes', 'Tegalsari', 'Tenggilis Mejoyo', 'Wiyung', 'Wonocolo', 'Wonokromo'
+  ],
+  Gresik: [
+    'Balongpanggang', 'Benjeng', 'Bungah', 'Cerme', 'Driyorejo', 'Duduksampeyan',
+    'Dukun', 'Gresik', 'Kebomas', 'Kedamean', 'Manyar', 'Menganti', 'Panceng',
+    'Sangkapura', 'Sidayu', 'Tambak', 'Ujungpangkah', 'Wringinanom'
   ]
 };
 
@@ -59,6 +71,18 @@ export const HR_WHATSAPP_NUMBER = '628133193313';
 
 const VALID_QUESTION_TYPES = new Set(QUESTION_TYPES.map(item => item.value));
 
+const VALID_SHOW_OPERATORS = new Set(['equals', 'not_equals', 'includes']);
+
+function normalizeShowWhen(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const questionId = String(raw.questionId || '').trim();
+  if (!questionId) return null;
+  const operator = VALID_SHOW_OPERATORS.has(raw.operator) ? raw.operator : 'equals';
+  const value = String(raw.value ?? '').trim();
+  if (!value) return null;
+  return { questionId, operator, value };
+}
+
 function makeQuestion(id, label, type, extra = {}) {
   return {
     id,
@@ -67,7 +91,8 @@ function makeQuestion(id, label, type, extra = {}) {
     required: extra.required !== false,
     placeholder: extra.placeholder || '',
     filledScore: Number.isFinite(Number(extra.filledScore)) ? Number(extra.filledScore) : 0,
-    options: Array.isArray(extra.options) ? extra.options : []
+    options: Array.isArray(extra.options) ? extra.options : [],
+    showWhen: normalizeShowWhen(extra.showWhen)
   };
 }
 
@@ -349,7 +374,8 @@ export function normalizeQuestion(raw = {}, index = 0) {
     required: raw.required !== false,
     placeholder: String(raw.placeholder || '').trim(),
     filledScore: hasOptions ? 0 : toNumberScore(raw.filledScore, 0),
-    options
+    options,
+    showWhen: normalizeShowWhen(raw.showWhen)
   };
 }
 
@@ -381,6 +407,11 @@ export function normalizeVacancy(raw = {}, index = 0) {
     }
     questions[i].id = qid;
     seenIds.add(qid);
+  }
+  for (const q of questions) {
+    if (q.showWhen && (q.showWhen.questionId === q.id || !seenIds.has(q.showWhen.questionId))) {
+      q.showWhen = null;
+    }
   }
 
   const rawMinScore = raw.minScore;
@@ -530,23 +561,131 @@ export function isPrimaryDistrictMatch(primaryDistricts = [], city = '', distric
   });
 }
 
-export function calculateVacancyMaxScore(vacancy) {
-  const v = normalizeVacancy(vacancy || {});
-  const maxLocationScore = Math.max(v.primaryLocationScore, v.otherLocationScore, 0);
-  let maxQuestionScore = 0;
+function matchesShowWhenRule(rule, rawAnswer) {
+  if (!rule) return true;
+  const target = String(rule.value ?? '').trim().toLocaleLowerCase('id');
+  if (!target) return true;
+  const op = VALID_SHOW_OPERATORS.has(rule.operator) ? rule.operator : 'equals';
 
-  for (const q of v.questions) {
-    if (q.type === 'dropdown' || q.type === 'radio') {
-      maxQuestionScore += q.options.length ? Math.max(...q.options.map(opt => opt.score), 0) : 0;
-    } else if (q.type === 'checkbox') {
-      for (const opt of q.options) {
-        if (opt.score > 0) maxQuestionScore += opt.score;
-      }
+  if (Array.isArray(rawAnswer)) {
+    const cleanArr = rawAnswer.map(x => String(x ?? '').trim().toLocaleLowerCase('id')).filter(Boolean);
+    if (!cleanArr.length) return false;
+    if (op === 'not_equals') return !cleanArr.some(v => v === target);
+    if (op === 'includes') return cleanArr.some(v => v.includes(target));
+    return cleanArr.some(v => v === target);
+  }
+
+  const strVal = String(rawAnswer ?? '').trim().toLocaleLowerCase('id');
+  if (!strVal) return false;
+  if (op === 'not_equals') return strVal !== target;
+  if (op === 'includes') return strVal.includes(target);
+  return strVal === target;
+}
+
+export function isQuestionVisible(question, answers = {}, allQuestions = [], visited = new Set()) {
+  if (!question) return false;
+  const rule = question.showWhen;
+  if (!rule || !rule.questionId) return true;
+  if (visited.has(question.id)) return false;
+
+  const nextVisited = new Set(visited);
+  nextVisited.add(question.id);
+
+  if (Array.isArray(allQuestions) && allQuestions.length) {
+    const parent = allQuestions.find(q => q.id === rule.questionId);
+    if (!parent) return false;
+    if (!isQuestionVisible(parent, answers, allQuestions, nextVisited)) return false;
+  }
+
+  return matchesShowWhenRule(rule, answers?.[rule.questionId]);
+}
+
+export function questionMaxPossibleScore(q) {
+  if (!q) return 0;
+  if (q.type === 'dropdown' || q.type === 'radio') {
+    return q.options?.length ? Math.max(...q.options.map(opt => Number(opt.score) || 0), 0) : 0;
+  }
+  if (q.type === 'checkbox') {
+    let sum = 0;
+    for (const opt of q.options || []) {
+      if (Number(opt.score) > 0) sum += Number(opt.score);
+    }
+    return sum;
+  }
+  return Math.max(0, Number(q.filledScore) || 0);
+}
+
+function calculateQuestionTreeMaxScore(questions = []) {
+  if (!Array.isArray(questions) || !questions.length) return 0;
+  const byId = new Map(questions.map(q => [q.id, q]));
+  const childrenByParent = new Map();
+  const roots = [];
+
+  for (const q of questions) {
+    const pid = q.showWhen?.questionId;
+    if (pid && byId.has(pid) && pid !== q.id) {
+      if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+      childrenByParent.get(pid).push(q);
     } else {
-      maxQuestionScore += Math.max(0, q.filledScore);
+      roots.push(q);
     }
   }
 
+  const evalSubtree = (node, visited = new Set()) => {
+    if (!node || visited.has(node.id)) return 0;
+    const nextVisited = new Set(visited);
+    nextVisited.add(node.id);
+
+    const children = childrenByParent.get(node.id) || [];
+    if (!children.length) return questionMaxPossibleScore(node);
+
+    const isSingleChoice = node.type === 'dropdown' || node.type === 'radio';
+    const hasMutuallyExclusiveEquals = isSingleChoice && children.some(c => c.showWhen?.operator === 'equals');
+
+    if (hasMutuallyExclusiveEquals) {
+      const candidateBranches = [];
+      const optMap = new Map();
+      for (const opt of node.options || []) {
+        optMap.set(String(opt.label || '').trim(), Number(opt.score) || 0);
+      }
+      for (const c of children) {
+        const val = String(c.showWhen?.value || '').trim();
+        if (c.showWhen?.operator === 'equals' && val && !optMap.has(val)) {
+          optMap.set(val, 0);
+        }
+      }
+      if (!optMap.size) optMap.set('', 0);
+
+      for (const [ansVal, baseScore] of optMap.entries()) {
+        let totalBranch = Math.max(0, baseScore);
+        for (const child of children) {
+          if (matchesShowWhenRule(child.showWhen, ansVal)) {
+            totalBranch += evalSubtree(child, nextVisited);
+          }
+        }
+        candidateBranches.push(totalBranch);
+      }
+      return Math.max(0, ...candidateBranches);
+    }
+
+    let total = questionMaxPossibleScore(node);
+    for (const child of children) {
+      total += evalSubtree(child, nextVisited);
+    }
+    return total;
+  };
+
+  let sum = 0;
+  for (const r of roots) {
+    sum += evalSubtree(r, new Set());
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+export function calculateVacancyMaxScore(vacancy) {
+  const v = normalizeVacancy(vacancy || {});
+  const maxLocationScore = Math.max(v.primaryLocationScore, v.otherLocationScore, 0);
+  const maxQuestionScore = calculateQuestionTreeMaxScore(v.questions);
   return Math.round((maxLocationScore + maxQuestionScore) * 100) / 100;
 }
 
@@ -559,35 +698,33 @@ export function calculateCandidateScore(vacancy, city = '', district = '', answe
   const maxLocationScore = Math.max(v.primaryLocationScore, v.otherLocationScore, 0);
 
   let questionScore = 0;
-  let maxQuestionScore = 0;
+  const maxQuestionScore = calculateQuestionTreeMaxScore(v.questions);
   const questionBreakdown = [];
 
   for (const q of v.questions) {
+    const visible = isQuestionVisible(q, answers, v.questions);
+    if (!visible) continue;
+
     const rawVal = answers?.[q.id];
     let earned = 0;
-    let maxForQ = 0;
 
     if (q.type === 'dropdown' || q.type === 'radio') {
       const selectedText = String(rawVal ?? '').trim();
       const matched = q.options.find(opt => opt.label === selectedText);
       earned = matched ? matched.score : 0;
-      maxForQ = q.options.length ? Math.max(...q.options.map(opt => opt.score), 0) : 0;
     } else if (q.type === 'checkbox') {
       const selectedList = Array.isArray(rawVal)
         ? rawVal.map(x => String(x || '').trim())
         : (typeof rawVal === 'string' && rawVal.trim() ? [rawVal.trim()] : []);
       for (const opt of q.options) {
-        if (opt.score > 0) maxForQ += opt.score;
         if (selectedList.includes(opt.label)) earned += opt.score;
       }
     } else {
       const hasValue = String(rawVal ?? '').trim() !== '';
       earned = hasValue ? q.filledScore : 0;
-      maxForQ = Math.max(0, q.filledScore);
     }
 
     questionScore += earned;
-    maxQuestionScore += maxForQ;
     questionBreakdown.push({
       id: q.id,
       label: q.label,
@@ -658,6 +795,7 @@ export function buildStage1WhatsAppMessage(payload = {}, vacancy = null, applySc
   if (normalizedVacancy && Array.isArray(normalizedVacancy.questions)) {
     for (const q of normalizedVacancy.questions) {
       coveredKeys.add(q.id);
+      if (!isQuestionVisible(q, exp, normalizedVacancy.questions)) continue;
       const ans = formatWaAnswerValue(exp[q.id]);
       if (ans) {
         const cleanLabel = String(q.label || q.id).trim().replace(/:$/, '');
@@ -712,4 +850,254 @@ export function buildStage1WhatsAppUrl(payload = {}, vacancy = null, applySchema
   const cleanNumber = String(waNumber || HR_WHATSAPP_NUMBER).replace(/\D/g, '') || HR_WHATSAPP_NUMBER;
   const text = buildStage1WhatsAppMessage(payload, vacancy, applySchema, referenceId);
   return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(text)}`;
+}
+
+// ============================================================================
+// Recruitment (/apply) Import / Export & Kota - Kecamatan Reference Catalog
+// ============================================================================
+export const RECRUIT_VACANCY_IMPORT_HEADERS = [
+  'Position',
+  'Active',
+  'Primary_Districts',
+  'Primary_Loc_Score',
+  'Other_Loc_Label',
+  'Other_Loc_Score',
+  'Min_Score',
+  'Min_Mode'
+];
+
+export const RECRUIT_QUESTION_IMPORT_HEADERS = [
+  'Position',
+  'Order',
+  'Question_ID',
+  'Question_Text',
+  'Type',
+  'Required',
+  'Placeholder',
+  'Filled_Score',
+  'Options_Score',
+  'Show_If_Question_ID',
+  'Show_If_Operator',
+  'Show_If_Value'
+];
+
+export const RECRUIT_CITY_REF_HEADERS = [
+  'No',
+  'Kota_Kabupaten',
+  'Kecamatan',
+  'Token_Primary_Districts'
+];
+
+export function buildDistrictReferenceRows(districtsByCity = DISTRICTS_BY_CITY) {
+  const rows = [];
+  let no = 1;
+  for (const [city, districts] of Object.entries(districtsByCity || {})) {
+    for (const district of (districts || [])) {
+      rows.push({
+        No: no++,
+        Kota_Kabupaten: city,
+        Kecamatan: district,
+        Token_Primary_Districts: normalizeDistrictToken(city, district)
+      });
+    }
+  }
+  return rows;
+}
+
+export function formatOptionsScoreString(options = []) {
+  return (Array.isArray(options) ? options : [])
+    .filter(opt => String(opt?.label || '').trim())
+    .map(opt => `${String(opt.label).trim()}:${toNumberScore(opt.score, 0)}`)
+    .join(' | ');
+}
+
+export function parseOptionsScoreString(raw = '') {
+  if (Array.isArray(raw)) {
+    return raw.map(opt => {
+      if (typeof opt === 'string') return parseOptionsScoreString(opt)[0] || null;
+      const label = String(opt?.label || '').trim();
+      return label ? { label, score: toNumberScore(opt?.score, 0) } : null;
+    }).filter(Boolean);
+  }
+  const text = String(raw ?? '').trim();
+  if (!text) return [];
+  const parts = text.split(/\s*(?:\||;|\r?\n)\s*/).map(s => s.trim()).filter(Boolean);
+  return parts.map(part => {
+    const colonIdx = part.lastIndexOf(':');
+    if (colonIdx > 0) {
+      const candidateScore = part.slice(colonIdx + 1).trim();
+      if (/^-?\d+(?:[.,]\d+)?$/.test(candidateScore)) {
+        const label = part.slice(0, colonIdx).trim();
+        const score = toNumberScore(candidateScore.replace(',', '.'), 0);
+        return label ? { label, score } : null;
+      }
+    }
+    return { label: part, score: 0 };
+  }).filter(Boolean);
+}
+
+export function buildRecruitmentExportSheets(vacancies = DEFAULT_VACANCIES, districtsByCity = DISTRICTS_BY_CITY) {
+  const list = normalizeVacancyList(vacancies);
+  const vacancyRows = list.map(v => ({
+    Position: v.name,
+    Active: v.active !== false ? 'YES' : 'NO',
+    Primary_Districts: (v.primaryDistricts || []).join(', '),
+    Primary_Loc_Score: v.primaryLocationScore,
+    Other_Loc_Label: v.otherLocationLabel,
+    Other_Loc_Score: v.otherLocationScore,
+    Min_Score: v.minScore ?? '',
+    Min_Mode: v.minScoreMode || 'inherit'
+  }));
+
+  const questionRows = [];
+  for (const v of list) {
+    (v.questions || []).forEach((q, idx) => {
+      const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(q.type);
+      questionRows.push({
+        Position: v.name,
+        Order: idx + 1,
+        Question_ID: q.id,
+        Question_Text: q.label,
+        Type: q.type,
+        Required: q.required !== false ? 'YES' : 'NO',
+        Placeholder: q.placeholder || '',
+        Filled_Score: hasOptions ? 0 : toNumberScore(q.filledScore, 0),
+        Options_Score: hasOptions ? formatOptionsScoreString(q.options) : '',
+        Show_If_Question_ID: q.showWhen?.questionId || '',
+        Show_If_Operator: q.showWhen?.operator || '',
+        Show_If_Value: q.showWhen?.value || ''
+      });
+    });
+  }
+
+  return {
+    vacancyRows,
+    questionRows,
+    districtRefRows: buildDistrictReferenceRows(districtsByCity)
+  };
+}
+
+function readRowCell(row, aliases = []) {
+  if (!row || typeof row !== 'object') return '';
+  const keys = Object.keys(row);
+  for (const alias of aliases) {
+    if (alias in row && row[alias] !== undefined && row[alias] !== null) return row[alias];
+  }
+  const normAliases = aliases.map(a => a.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const k of keys) {
+    const nk = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normAliases.includes(nk) && row[k] !== undefined && row[k] !== null) return row[k];
+  }
+  return '';
+}
+
+function parseBoolCell(raw, fallback = true) {
+  const s = String(raw ?? '').trim().toUpperCase();
+  if (!s) return fallback;
+  if (['NO', 'TIDAK', 'FALSE', '0', 'NONAKTIF', 'INACTIVE', 'N'].includes(s)) return false;
+  if (['YES', 'YA', 'TRUE', '1', 'AKTIF', 'ACTIVE', 'Y'].includes(s)) return true;
+  return fallback;
+}
+
+export function parseRecruitmentImportRows(vacancyRawRows = [], questionRawRows = [], existingVacancies = []) {
+  const errors = [];
+  const warnings = [];
+  const existingList = normalizeVacancyList(existingVacancies || []);
+  const existingByName = new Map(existingList.map(v => [v.name.toLocaleLowerCase('id'), v]));
+
+  const qGrouped = new Map();
+  const qRowsArr = Array.isArray(questionRawRows) ? questionRawRows : [];
+  qRowsArr.forEach((rawRow, idx) => {
+    const posName = String(readRowCell(rawRow, ['Position', 'Posisi', 'Lowongan'])).trim();
+    const qText = String(readRowCell(rawRow, ['Question_Text', 'Question', 'Pertanyaan', 'Label'])).trim();
+    if (!posName && !qText) return;
+    if (!posName || !qText) {
+      errors.push(`Questions baris ${idx + 2}: Position dan Question_Text wajib diisi.`);
+      return;
+    }
+    const key = posName.toLocaleLowerCase('id');
+    if (!qGrouped.has(key)) qGrouped.set(key, []);
+    const orderNum = Number(readRowCell(rawRow, ['Order', 'Urutan', 'No']));
+    const rawType = String(readRowCell(rawRow, ['Type', 'Tipe'])).trim().toLowerCase() || 'text';
+    const type = VALID_QUESTION_TYPES.has(rawType) ? rawType : 'text';
+    if (!VALID_QUESTION_TYPES.has(rawType) && rawType !== '') {
+      warnings.push(`Pertanyaan "${qText}" (${posName}): tipe "${rawType}" diubah ke "text".`);
+    }
+    const qId = String(readRowCell(rawRow, ['Question_ID', 'ID'])).trim() || slugifyKey(qText, `q_${idx + 1}`);
+    const optionsRaw = readRowCell(rawRow, ['Options_Score', 'Options', 'Opsi_Skor']);
+    const hasOptions = ['dropdown', 'radio', 'checkbox'].includes(type);
+    const options = hasOptions ? parseOptionsScoreString(optionsRaw) : [];
+    if (hasOptions && !options.length) {
+      warnings.push(`Pertanyaan "${qText}" (${posName}) bertipe ${type} namun Options_Score kosong.`);
+    }
+    const showParent = String(readRowCell(rawRow, ['Show_If_Question_ID', 'Parent_ID', 'Tampil_Jika_ID'])).trim();
+    const showOpRaw = String(readRowCell(rawRow, ['Show_If_Operator', 'Operator'])).trim().toLowerCase() || 'equals';
+    const showVal = String(readRowCell(rawRow, ['Show_If_Value', 'Show_If_Answer', 'Jawaban_Pemicu'])).trim();
+
+    qGrouped.get(key).push({
+      _order: Number.isFinite(orderNum) ? orderNum : idx + 1,
+      id: qId,
+      label: qText,
+      type,
+      required: parseBoolCell(readRowCell(rawRow, ['Required', 'Wajib']), true),
+      placeholder: String(readRowCell(rawRow, ['Placeholder'])).trim(),
+      filledScore: hasOptions ? 0 : toNumberScore(readRowCell(rawRow, ['Filled_Score', 'Skor_Isi']), 0),
+      options,
+      showWhen: showParent && showVal
+        ? { questionId: showParent, operator: VALID_SHOW_OPERATORS.has(showOpRaw) ? showOpRaw : 'equals', value: showVal }
+        : null
+    });
+  });
+
+  const resultMap = new Map();
+  const vRowsArr = Array.isArray(vacancyRawRows) ? vacancyRawRows : [];
+  vRowsArr.forEach((rawRow, idx) => {
+    const posName = String(readRowCell(rawRow, ['Position', 'Posisi', 'Lowongan', 'Name'])).trim();
+    if (!posName) return;
+    const key = posName.toLocaleLowerCase('id');
+    const prev = existingByName.get(key);
+    const rawDistricts = String(readRowCell(rawRow, ['Primary_Districts', 'Lokasi_Utama', 'Districts'])).trim();
+    const primaryDistricts = rawDistricts
+      ? rawDistricts.split(/\s*(?:,|;|\||\r?\n)\s*/).map(s => s.trim()).filter(Boolean)
+      : (prev?.primaryDistricts ? [...prev.primaryDistricts] : [...DEFAULT_PRIMARY_DISTRICTS]);
+
+    const rawMinScore = readRowCell(rawRow, ['Min_Score', 'Skor_Minimal']);
+    const minScore = String(rawMinScore ?? '').trim() === '' ? null : toNumberScore(rawMinScore, null);
+    const rawMinMode = String(readRowCell(rawRow, ['Min_Mode', 'Mode_Minimal'])).trim().toLowerCase();
+    const minScoreMode = ['percentage', 'points', 'inherit'].includes(rawMinMode) ? rawMinMode : 'inherit';
+
+    const questionsFromSheet = qGrouped.get(key);
+    const orderedQuestions = questionsFromSheet
+      ? [...questionsFromSheet].sort((a, b) => a._order - b._order)
+      : (prev?.questions ? structuredClone(prev.questions) : []);
+
+    resultMap.set(key, normalizeVacancy({
+      id: prev?.id || slugifyKey(posName, `lowongan_${idx + 1}`),
+      name: posName,
+      active: parseBoolCell(readRowCell(rawRow, ['Active', 'Aktif', 'Status']), true),
+      primaryDistricts,
+      primaryLocationScore: toNumberScore(readRowCell(rawRow, ['Primary_Loc_Score', 'Skor_Lokasi_Utama']), prev?.primaryLocationScore ?? 20),
+      otherLocationLabel: String(readRowCell(rawRow, ['Other_Loc_Label', 'Label_Lokasi_Lain'])).trim() || prev?.otherLocationLabel || 'Area selain lokasi utama',
+      otherLocationScore: toNumberScore(readRowCell(rawRow, ['Other_Loc_Score', 'Skor_Lokasi_Lain']), prev?.otherLocationScore ?? 10),
+      minScore,
+      minScoreMode,
+      questions: orderedQuestions
+    }, idx));
+  });
+
+  // Allow questions-only import when no Vacancies sheet rows were passed
+  if (!resultMap.size && qGrouped.size) {
+    for (const [key, qList] of qGrouped.entries()) {
+      const prev = existingByName.get(key);
+      const posName = prev?.name || qList[0]?.Position || key;
+      const ordered = [...qList].sort((a, b) => a._order - b._order);
+      resultMap.set(key, normalizeVacancy({
+        ...(prev ? structuredClone(prev) : createStarterVacancy(posName)),
+        questions: ordered
+      }));
+    }
+  }
+
+  const vacancies = normalizeVacancyList([...resultMap.values()]);
+  return { vacancies, errors, warnings };
 }

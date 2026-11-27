@@ -1334,6 +1334,80 @@ test('Dashboard renders 6 module boxes and supports Lead Register & Invited Edit
   assert.equal(rows[0].rowKey, 'app:a2');
 });
 
+test('Driver schedule import parser & department-separated meal report + print-only Global', async () => {
+  const { buildDriverReferenceRows, parseDriverScheduleImportRows } = await import('../assets/js/driver-logic.js');
+  const { processStaffMealAllowanceReport, groupMealReportByDepartment } = await import('../assets/js/attendance-logic.js');
+
+  const employees = [
+    { id: 'emp-drv-1', employee_no: 'DRV-001', full_name: 'Samsul Hadi', department: 'GA', position: 'SOPIR', status: 'Active' },
+    { id: 'emp-s1', employee_no: 'STF-001', full_name: 'Rina Sari', department: 'Produksi', position: 'Operator', status: 'Active' },
+    { id: 'emp-s2', employee_no: 'STF-002', full_name: 'Budianto', department: 'Warehouse', position: 'Admin', status: 'Active' },
+    { id: 'emp-s3', employee_no: 'STF-003', full_name: 'Noname', department: '', position: 'Helper', status: 'Active' }
+  ];
+
+  const driverRefs = buildDriverReferenceRows(employees, { activeDrivers: [] });
+  assert.ok(driverRefs.some(r => r.Nama_Driver === 'Samsul Hadi' && r.NIK === 'DRV-001'));
+
+  const { rows: parsedSchedules, errors } = parseDriverScheduleImportRows([
+    {
+      Tanggal: '2026-11-24',
+      NIK: 'DRV-001',
+      Departemen: 'indoor',
+      Kegiatan: 'Antar Direksi ke Surabaya',
+      Jam_Mulai: '08:00',
+      Jam_Selesai: '12:30',
+      Sampai_Pulang: 'Ya',
+      Catatan: 'Rapat Klien'
+    },
+    {
+      Tanggal: '2026-11-24',
+      Nama_Driver: 'Samsul Hadi',
+      Departemen: 'Indoor',
+      Kegiatan: 'Jemput Tamu Bandara',
+      Jam_Mulai: '13:30',
+      Jam_Selesai: '16:00',
+      Sampai_Pulang: 'Tidak',
+      Catatan: ''
+    }
+  ], employees, { activeDrivers: [] });
+
+  assert.equal(errors.length, 0);
+  assert.equal(parsedSchedules.length, 1);
+  assert.equal(parsedSchedules[0].employee_no, 'DRV-001');
+  assert.equal(parsedSchedules[0].section, 'Indoor');
+  assert.equal(parsedSchedules[0].activities.length, 2);
+  assert.equal(parsedSchedules[0].activities[0].is_until_home, true);
+  assert.equal(parsedSchedules[0].activities[1].is_until_home, false);
+
+  const rawEvents = [
+    { employee_no: 'STF-001', work_date: '2026-11-02', check_in: '07:20:00', check_out: '19:30:00', source_type: 'presensi', source_status: 'H' },
+    { employee_no: 'STF-002', work_date: '2026-11-02', check_in: '07:25:00', check_out: '17:00:00', source_type: 'presensi', source_status: 'H' },
+    { employee_no: 'STF-003', work_date: '2026-11-02', check_in: '07:25:00', check_out: '17:00:00', source_type: 'presensi', source_status: 'H' }
+  ];
+  const mealRep = processStaffMealAllowanceReport({
+    anchorDateIso: '2026-11-05',
+    employees: employees.slice(1),
+    rawEvents
+  });
+  const grouped = groupMealReportByDepartment(mealRep);
+  assert.equal(grouped.departments.length, 3);
+  assert.equal(grouped.departments[0].department, 'PRODUKSI');
+  assert.equal(grouped.departments[1].department, 'WAREHOUSE');
+  assert.equal(grouped.departments[2].department, 'TANPA DEPARTEMEN');
+  assert.ok(grouped.global.grandTotalCombinedAmount > 0);
+  assert.equal(
+    grouped.departments.reduce((s, d) => s + d.totalCombinedAmount, 0),
+    grouped.global.grandTotalCombinedAmount
+  );
+
+  // Check UI separation: screen renders stf-meal-dept-card without global screen table; Global is print-only
+  const opsViewsText = fs.readFileSync('assets/js/ops-views.js', 'utf8');
+  assert.ok(opsViewsText.includes('stf-meal-dept-card'), 'Meal screen view must separate tables by department');
+  assert.ok(opsViewsText.includes('ops-srep-print-global'), 'Global meal report must be available via Print Global action');
+  assert.ok(opsViewsText.includes('ops-ds-import-submit'), 'Driver Schedule screen must include inline import controls');
+});
+
+
 
 
 

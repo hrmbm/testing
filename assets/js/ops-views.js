@@ -46,7 +46,8 @@ import {
   evaluateStaffArrivalStatus,
   addMinutesToScheduleCutoff,
   resolveDefaultStaffFocusDate,
-  countPendingStaffForSelectedDate
+  countPendingStaffForSelectedDate,
+  groupMealReportByDepartment
 } from './attendance-logic.js?v=20261124-hrga-workspace-22';
 import {
   isEligibleDriver,
@@ -54,7 +55,12 @@ import {
   normalizeScheduleActivities,
   validateDriverSchedules,
   reconcileDriverSchedulesAndAttendance,
-  computeDriverDayMetrics
+  computeDriverDayMetrics,
+  DRIVER_SCHEDULE_IMPORT_HEADERS,
+  DRIVER_REF_HEADERS,
+  DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS,
+  buildDriverReferenceRows,
+  parseDriverScheduleImportRows
 } from './driver-logic.js?v=20261124-hrga-workspace-22';
 import {
   renderDriverReportsView as renderDriverReportsModule,
@@ -205,6 +211,81 @@ async function exportSheetXlsx(filename, sheetName, aoa) {
   XLSX.writeFile(wb, filename);
 }
 
+async function exportMultiSheetObjectsXlsx(filename, sheets = []) {
+  const XLSX = await loadXlsx();
+  const wb = XLSX.utils.book_new();
+  for (const sh of sheets) {
+    const headers = Array.isArray(sh.headers) ? sh.headers : [];
+    const rows = Array.isArray(sh.rows) ? sh.rows : [];
+    const ws = XLSX.utils.json_to_sheet(rows, headers.length ? { header: headers } : undefined);
+    const colsSource = headers.length ? headers : Object.keys(rows[0] || {});
+    ws['!cols'] = colsSource.map(h => ({ wch: Math.max(14, String(h).length + 4) }));
+    XLSX.utils.book_append_sheet(wb, ws, String(sh.name || 'Sheet').slice(0, 31));
+  }
+  XLSX.writeFile(wb, filename);
+}
+
+function downloadOpsCsvObjects(headers, rows, filename) {
+  const escCsv = v => {
+    const s = String(v ?? '');
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [
+    headers.map(escCsv).join(','),
+    ...(rows || []).map(r => headers.map(h => escCsv(r?.[h] ?? '')).join(','))
+  ].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function readOpsSpreadsheetObjects(file) {
+  const name = String(file?.name || '');
+  if (/\.csv$/i.test(name)) {
+    const text = String(await file.text()).replace(/^\uFEFF/, '');
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (ch === '"') inQuotes = false;
+        else cell += ch;
+      } else if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell);
+        if (row.some(c => c.trim() !== '')) rows.push(row);
+        row = [];
+        cell = '';
+      } else cell += ch;
+    }
+    row.push(cell);
+    if (row.some(c => c.trim() !== '')) rows.push(row);
+    if (rows.length < 2) return [];
+    const headers = rows[0].map(h => String(h || '').trim());
+    return rows.slice(1).map(cols => {
+      const obj = {};
+      headers.forEach((h, idx) => { if (h) obj[h] = cols[idx] ?? ''; });
+      return obj;
+    });
+  }
+  const XLSX = await loadXlsx();
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+  const firstSheet = wb.SheetNames[0];
+  if (!firstSheet) throw new Error('File spreadsheet kosong.');
+  return XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { defval: '' });
+}
+
 // ============================================================================
 // State Adapter (Demo LocalStorage + Live Supabase)
 // ============================================================================
@@ -312,6 +393,30 @@ function toSqlStationeryItemRow(it) {
   };
 }
 
+function buildEmptyLiveOpsState() {
+  const settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
+  const stationeryDepartments = normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, settings.stationery.canonicalSlocs);
+  settings.stationery.canonicalSlocs = stationeryDepartments.map(d => d.name);
+  return {
+    settings,
+    calendarDays: [],
+    uploadBatches: [],
+    rawEvents: [],
+    staffReviews: [],
+    staffMealOverrides: [],
+    conditionalHolidays: [],
+    cutiBalances: [],
+    driverSchedules: [],
+    driverReconciliations: [],
+    driverAdjustments: { kurangGajiByDriver: {} },
+    stationeryItems: [],
+    stationeryDepartments,
+    stationeryMovements: [],
+    stationeryPlanManual: readStoredPlanManual(),
+    stationeryPrDrafts: readStoredPrDrafts()
+  };
+}
+
 function buildInitialDemoOpsState() {
   const settings = normalizeOpsSettings(DEFAULT_OPS_SETTINGS);
   const stationeryDepartments = normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, settings.stationery.canonicalSlocs);
@@ -340,18 +445,17 @@ export function readDemoOpsState() {
   try {
     const raw = JSON.parse(localStorage.getItem(DEMO_OPS_STORAGE_KEY) || 'null');
     if (raw && typeof raw === 'object') {
-      const seed = buildInitialDemoOpsState();
-      const settings = normalizeOpsSettings(raw.settings || seed.settings);
+      const settings = normalizeOpsSettings(raw.settings || DEFAULT_OPS_SETTINGS);
       const rawDepts = Array.isArray(raw.stationeryDepartments) && raw.stationeryDepartments.length
         ? raw.stationeryDepartments
-        : (readStoredDepartments() || seed.stationeryDepartments);
+        : (readStoredDepartments() || SEED_STATIONERY_DEPARTMENTS);
       const stationeryDepartments = normalizeStationeryDepartments(rawDepts, settings.stationery.canonicalSlocs);
       settings.stationery.canonicalSlocs = stationeryDepartments.map(d => d.name);
 
       let atkItems = normalizeStationeryItems(
-        Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : seed.stationeryItems
+        Array.isArray(raw.stationeryItems) && raw.stationeryItems.length ? raw.stationeryItems : SEED_STATIONERY_ITEMS
       );
-      let atkMovements = Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : seed.stationeryMovements;
+      let atkMovements = Array.isArray(raw.stationeryMovements) ? raw.stationeryMovements : structuredClone(SEED_STATIONERY_MOVEMENTS);
 
       // One-time cleanup so leftover stock numbers & old sample movements start cleanly at 0
       if (!localStorage.getItem(ATK_STOCK_CLEANUP_KEY)) {
@@ -361,16 +465,16 @@ export function readDemoOpsState() {
 
       const nextState = {
         settings,
-        calendarDays: Array.isArray(raw.calendarDays) ? raw.calendarDays : seed.calendarDays,
-        uploadBatches: Array.isArray(raw.uploadBatches) ? raw.uploadBatches : seed.uploadBatches,
-        rawEvents: Array.isArray(raw.rawEvents) ? raw.rawEvents : seed.rawEvents,
-        staffReviews: Array.isArray(raw.staffReviews) ? raw.staffReviews : seed.staffReviews,
-        staffMealOverrides: Array.isArray(raw.staffMealOverrides) ? raw.staffMealOverrides : seed.staffMealOverrides,
+        calendarDays: Array.isArray(raw.calendarDays) ? raw.calendarDays : structuredClone(SEED_CALENDAR_DAYS),
+        uploadBatches: Array.isArray(raw.uploadBatches) ? raw.uploadBatches : structuredClone(SEED_ATTENDANCE_BATCHES),
+        rawEvents: Array.isArray(raw.rawEvents) ? raw.rawEvents : structuredClone(SEED_ATTENDANCE_EVENTS),
+        staffReviews: Array.isArray(raw.staffReviews) ? raw.staffReviews : structuredClone(SEED_STAFF_REVIEWS),
+        staffMealOverrides: Array.isArray(raw.staffMealOverrides) ? raw.staffMealOverrides : structuredClone(SEED_STAFF_MEAL_OVERRIDES),
         conditionalHolidays: Array.isArray(raw.conditionalHolidays) ? raw.conditionalHolidays : [],
-        cutiBalances: Array.isArray(raw.cutiBalances) ? raw.cutiBalances : seed.cutiBalances,
-        driverSchedules: Array.isArray(raw.driverSchedules) ? raw.driverSchedules : seed.driverSchedules,
-        driverReconciliations: Array.isArray(raw.driverReconciliations) ? raw.driverReconciliations : seed.driverReconciliations,
-        driverAdjustments: raw.driverAdjustments && typeof raw.driverAdjustments === 'object' ? raw.driverAdjustments : seed.driverAdjustments,
+        cutiBalances: Array.isArray(raw.cutiBalances) ? raw.cutiBalances : structuredClone(SEED_CUTI_BALANCES),
+        driverSchedules: Array.isArray(raw.driverSchedules) ? raw.driverSchedules : structuredClone(SEED_DRIVER_SCHEDULES),
+        driverReconciliations: Array.isArray(raw.driverReconciliations) ? raw.driverReconciliations : structuredClone(SEED_DRIVER_RECONCILIATIONS),
+        driverAdjustments: raw.driverAdjustments && typeof raw.driverAdjustments === 'object' ? raw.driverAdjustments : structuredClone(SEED_DRIVER_ADJUSTMENTS),
         stationeryItems: atkItems,
         stationeryDepartments,
         stationeryMovements: atkMovements,
@@ -418,7 +522,7 @@ async function loadOpsState(ctx, force = false) {
   }
   const sb = ctx.supabase;
   opsStatePromise = (async () => {
-    const state = buildInitialDemoOpsState();
+    const state = buildEmptyLiveOpsState();
     try {
       const [setRes, calRes, batRes, evRes, revRes, holRes, cutiRes, drvRes, stkItemRes, stkMvRes] = await Promise.all([
         sb.from('portal_settings').select('key,value').in('key', [OPS_SETTINGS_KEY, DRIVER_ADJUSTMENTS_KEY, STATIONERY_DEPTS_KEY, STATIONERY_PLAN_MANUAL_KEY, STATIONERY_PR_DRAFTS_KEY, STATIONERY_MATERIAL_META_KEY]),
@@ -1643,8 +1747,25 @@ export async function renderStaffReportsView(host, ctx) {
     `;
   };
 
-  const buildMealTableHtml = ({ forPrint = false } = {}) => {
+  const groupedMeal = groupMealReportByDepartment(mealRep);
+  const selectedMealDept = host.dataset.staffMealDept || 'ALL';
+  const visibleMealDepts = selectedMealDept === 'ALL'
+    ? groupedMeal.departments
+    : groupedMeal.departments.filter(d => d.department === selectedMealDept);
+
+  const buildMealTableHtml = ({
+    rows = mealRep.rows,
+    dailyTotals = mealRep.dailyTotals,
+    totalEligibleDays = mealRep.grandTotalEligibleDays,
+    totalAmount = mealRep.grandTotalAmount,
+    totalEkstraMealAmount = mealRep.grandTotalEkstraMealAmount,
+    totalCombinedAmount = mealRep.grandTotalCombinedAmount,
+    totalLabel = 'TOTAL',
+    includeDepartmentCol = false,
+    forPrint = false
+  } = {}) => {
     const cls = forPrint ? 'stf-print-table' : 'stf-meal-table';
+    const fixedCols = includeDepartmentCol ? 4 : 3;
     return `
       <table class="${cls}">
         <thead>
@@ -1652,6 +1773,7 @@ export async function renderStaffReportsView(host, ctx) {
             <th style="width:34px">No</th>
             <th class="l">Nama</th>
             <th>NIK</th>
+            ${includeDepartmentCol ? '<th class="l">Departemen</th>' : ''}
             ${mealRep.window.dayMeta.map(m => `
               <th class="${m.isSunday ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : ''}">
                 ${esc(m.dayShort)}<br><small>${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}</small>
@@ -1664,7 +1786,7 @@ export async function renderStaffReportsView(host, ctx) {
           </tr>
         </thead>
         <tbody>
-          ${mealRep.rows.length ? mealRep.rows.map((r, idx) => {
+          ${rows.length ? rows.map((r, idx) => {
             const exBadge = r.mealException
               ? (r.mealException.mode === 'custom_amount'
                   ? `<br><small class="pill blue" title="${esc(r.mealException.reason || 'Tarif Uang Makan Khusus')}">Tarif Khusus (${fmtIdr(r.mealException.weekdayAmount)}/${fmtIdr(r.mealException.saturdayAmount)})</small>`
@@ -1675,6 +1797,7 @@ export async function renderStaffReportsView(host, ctx) {
               <td>${idx + 1}</td>
               <td class="l"><b>${esc(r.employee_name)}</b>${exBadge}</td>
               <td class="nowrap"><code>${esc(r.employee_no)}</code></td>
+              ${includeDepartmentCol ? `<td class="l nowrap">${esc(r.department || '-')}</td>` : ''}
               ${r.days.map(d => {
                 const bgCls = d.isOffDay ? (forPrint ? 'stf-print-sun' : 'stf-col-sun') : '';
                 const tapHint = d.check_in || d.check_out
@@ -1692,17 +1815,17 @@ export async function renderStaffReportsView(host, ctx) {
               <td class="num nowrap">${fmtIdr(r.totalEkstraMealAmount || 0)}</td>
               <td class="num nowrap"><b>${fmtIdr(r.totalCombinedAmount ?? r.totalAmount)}</b></td>
             </tr>`;
-          }).join('') : `<tr><td colspan="${7 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
+          }).join('') : `<tr><td colspan="${fixedCols + 4 + mealRep.window.dayMeta.length}" class="empty">Tidak ada data staff.</td></tr>`}
         </tbody>
-        ${mealRep.rows.length ? `
+        ${rows.length ? `
           <tfoot>
             <tr>
-              <th colspan="3" class="l">TOTAL</th>
-              ${mealRep.dailyTotals.map(dt => `<th>${dt.eligibleCount}</th>`).join('')}
-              <th class="num">${mealRep.grandTotalEligibleDays}</th>
-              <th class="num nowrap">${fmtIdr(mealRep.grandTotalAmount)}</th>
-              <th class="num nowrap">${fmtIdr(mealRep.grandTotalEkstraMealAmount || 0)}</th>
-              <th class="num nowrap">${fmtIdr(mealRep.grandTotalCombinedAmount ?? mealRep.grandTotalAmount)}</th>
+              <th colspan="${fixedCols}" class="l">${esc(totalLabel)}</th>
+              ${dailyTotals.map(dt => `<th>${dt.eligibleCount}</th>`).join('')}
+              <th class="num">${totalEligibleDays}</th>
+              <th class="num nowrap">${fmtIdr(totalAmount)}</th>
+              <th class="num nowrap">${fmtIdr(totalEkstraMealAmount || 0)}</th>
+              <th class="num nowrap">${fmtIdr(totalCombinedAmount ?? totalAmount)}</th>
             </tr>
           </tfoot>
         ` : ''}
@@ -1713,6 +1836,35 @@ export async function renderStaffReportsView(host, ctx) {
   const legendHtml = STAFF_ATTENDANCE_CODE_ORDER
     .map(c => `<span><b>${c}</b> = ${esc(codebook[c] || c)}</span>`)
     .join('');
+
+  const deptCardsHtml = visibleMealDepts.length
+    ? visibleMealDepts.map(dept => `
+        <div class="card ops-card stf-meal-dept-card" data-meal-dept="${esc(dept.department)}">
+          <div class="drv-upah-toolbar" style="margin-bottom:10px">
+            <div>
+              <h3>DEPARTEMEN: ${esc(dept.department)}</h3>
+              <p class="ops-sub">${dept.rows.length} karyawan · ${dept.totalEligibleDays} hari layak · Uang Makan: ${fmtIdr(dept.totalAmount)} · Ekstra Meal: ${fmtIdr(dept.totalEkstraMealAmount)} · <b>Total Terima: ${fmtIdr(dept.totalCombinedAmount)}</b></p>
+            </div>
+            <div class="ops-actions">
+              <button type="button" class="btn btn-sm btn-secondary ops-meal-print-one-dept" data-dept="${esc(dept.department)}">Print Dept Ini</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            ${buildMealTableHtml({
+              rows: dept.rows,
+              dailyTotals: dept.dailyTotals,
+              totalEligibleDays: dept.totalEligibleDays,
+              totalAmount: dept.totalAmount,
+              totalEkstraMealAmount: dept.totalEkstraMealAmount,
+              totalCombinedAmount: dept.totalCombinedAmount,
+              totalLabel: `SUBTOTAL ${dept.department}`,
+              includeDepartmentCol: false,
+              forPrint: false
+            })}
+          </div>
+        </div>
+      `).join('')
+    : `<div class="card ops-card"><p class="ops-empty-hint">Tidak ada data staff pada departemen yang dipilih.</p></div>`;
 
   host.innerHTML = `
     <div class="ops-stack">
@@ -1728,7 +1880,10 @@ export async function renderStaffReportsView(host, ctx) {
               <option value="REHOLZ" ${entityFilter === 'REHOLZ' ? 'selected' : ''}>PT. Radin Mitra Lestari</option>
             </select>
             <input id="ops-srep-search" type="search" class="input" value="${esc(host.dataset.staffRepQuery || '')}" placeholder="Cari Nama / NIK...">
-            <button type="button" class="btn btn-secondary" id="ops-srep-print">Cetak / PDF</button>
+            ${activeCard === 'absensi'
+              ? '<button type="button" class="btn btn-secondary" id="ops-srep-print">Cetak / PDF</button>'
+              : `<button type="button" class="btn btn-secondary" id="ops-srep-print-dept">Print Per Departemen</button>
+                 <button type="button" class="btn btn-secondary" id="ops-srep-print-global">Print Global</button>`}
             <button type="button" class="btn btn-primary" id="ops-srep-xlsx">Download Excel</button>
           </div>
         </div>
@@ -1742,7 +1897,7 @@ export async function renderStaffReportsView(host, ctx) {
           <button type="button" class="drv-report-card ${activeCard === 'uang_makan' ? 'is-active' : ''}" data-staff-card="uang_makan">
             <div class="drv-report-card-eyebrow">LAPORAN 2</div>
             <div class="drv-report-card-title">Report Uang Makan &amp; Ekstra Meal</div>
-            <div class="drv-report-card-meta">${esc(mealRep.window.label)} · Sen–Jum ${fmtIdr(mealRep.dailyAmount)} (Plg &ge; ${esc(attCfg.earlyLeaveMealCutoffTime || '15:00')}) · Sab &ge; ${esc(attCfg.saturdayMealCutoffTime || '15:00')} = ${fmtIdr(mealRep.saturdayAmount)} + Ekstra Meal OT</div>
+            <div class="drv-report-card-meta">${esc(mealRep.window.label)} · Dipisah per Departemen di layar (${groupedMeal.departments.length} dept) · Print Global tersedia</div>
           </button>
         </div>
       </div>
@@ -1766,26 +1921,28 @@ export async function renderStaffReportsView(host, ctx) {
         <div class="card ops-card">
           <div class="drv-upah-toolbar">
             <div>
-              <h3>2. Report Uang Makan Staff — ${esc(mealRep.window.label)}</h3>
+              <h3>2. Report Uang Makan Staff (Per Departemen) — ${esc(mealRep.window.label)}</h3>
+              <p class="ops-sub">Tampilan layar dipisahkan per Departemen (${groupedMeal.departments.length} departemen). Gunakan <b>Print Global</b> di kanan atas untuk mencetak gabungan seluruh departemen.</p>
             </div>
             <div class="ops-actions">
+              <select id="ops-meal-dept-filter" class="input" aria-label="Filter departemen uang makan">
+                <option value="ALL" ${selectedMealDept === 'ALL' ? 'selected' : ''}>Semua Departemen (${groupedMeal.departments.length})</option>
+                ${groupedMeal.departments.map(d => `<option value="${esc(d.department)}" ${selectedMealDept === d.department ? 'selected' : ''}>${esc(d.department)} (${d.rows.length})</option>`).join('')}
+              </select>
               <button type="button" class="btn btn-sm btn-secondary" id="ops-meal-prev">&lt; Minggu Sebelumnya</button>
               <input id="ops-meal-anchor" type="date" class="input" value="${esc(mealRep.window.startDate)}" aria-label="Pilih tanggal minggu uang makan">
               <button type="button" class="btn btn-sm btn-secondary" id="ops-meal-next">Minggu Berikutnya &gt;</button>
             </div>
           </div>
 
-          <div class="kpi-grid ops-kpi-4" style="margin-bottom:14px">
+          <div class="kpi-grid ops-kpi-4" style="margin-top:12px">
             <div class="card kpi-card"><div class="kpi-label">Karyawan Staff (${mealRep.grandTotalEligibleDays} Hari Layak)</div><div class="kpi-val">${mealRep.rows.length}</div></div>
             <div class="card kpi-card"><div class="kpi-label">Total Uang Makan Reguler</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalAmount)}</div></div>
             <div class="card kpi-card"><div class="kpi-label">Total Ekstra Meal OT</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalEkstraMealAmount || 0)}</div></div>
             <div class="card kpi-card"><div class="kpi-label">Grand Total Terima</div><div class="kpi-val">${fmtIdr(mealRep.grandTotalCombinedAmount ?? mealRep.grandTotalAmount)}</div></div>
           </div>
-
-          <div class="table-wrap">
-            ${buildMealTableHtml({ forPrint: false })}
-          </div>
         </div>
+        ${deptCardsHtml}
       `}
     </div>
   `;
@@ -1804,6 +1961,11 @@ export async function renderStaffReportsView(host, ctx) {
 
   host.querySelector('#ops-srep-entity')?.addEventListener('change', e => {
     host.dataset.staffRepEntity = e.target.value || 'ALL';
+    renderStaffReportsView(host, ctx);
+  });
+
+  host.querySelector('#ops-meal-dept-filter')?.addEventListener('change', e => {
+    host.dataset.staffMealDept = e.target.value || 'ALL';
     renderStaffReportsView(host, ctx);
   });
 
@@ -1842,63 +2004,166 @@ export async function renderStaffReportsView(host, ctx) {
       ];
       await exportSheetXlsx(`Report_Absensi_Staff_${periodKey}.xlsx`, 'Report Absensi', aoa);
     } else {
-      const aoa = [
-        ['No', 'Nama', 'NIK', ...mealRep.window.dayMeta.map(m => `${m.dayShort} ${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`), 'Total Hari', 'Uang Makan (Rp)', 'Ekstra Meal OT (Rp)', 'Total Diterima (Rp)'],
-        ...mealRep.rows.map((r, i) => [
-          i + 1,
-          r.employee_name,
-          r.employee_no,
-          ...r.days.map(d => (d.amount || 0) + (d.ekstraMealAmount || 0)),
-          r.totalEligibleDays,
-          r.totalAmount,
-          r.totalEkstraMealAmount || 0,
-          r.totalCombinedAmount ?? r.totalAmount
-        ])
+      const XLSX = await loadXlsx();
+      const wb = XLSX.utils.book_new();
+      const deptDayHdr = mealRep.window.dayMeta.map(m => `${m.dayShort} ${String(m.dayNum).padStart(2, '0')}/${String(m.monthNum).padStart(2, '0')}`);
+      const perDeptAoa = [
+        ['Departemen', 'No', 'Nama', 'NIK', ...deptDayHdr, 'Total Hari', 'Uang Makan (Rp)', 'Ekstra Meal OT (Rp)', 'Total Diterima (Rp)']
       ];
-      await exportSheetXlsx(`Report_Uang_Makan_${mealRep.window.startDate}_${mealRep.window.endDate}.xlsx`, 'Uang Makan', aoa);
+      for (const dept of groupedMeal.departments) {
+        dept.rows.forEach((r, i) => {
+          perDeptAoa.push([
+            dept.department,
+            i + 1,
+            r.employee_name,
+            r.employee_no,
+            ...r.days.map(d => (d.amount || 0) + (d.ekstraMealAmount || 0)),
+            r.totalEligibleDays,
+            r.totalAmount,
+            r.totalEkstraMealAmount || 0,
+            r.totalCombinedAmount ?? r.totalAmount
+          ]);
+        });
+        perDeptAoa.push([
+          `SUBTOTAL ${dept.department}`,
+          '',
+          `${dept.rows.length} staff`,
+          '',
+          ...dept.dailyTotals.map(dt => dt.totalCombinedAmount || 0),
+          dept.totalEligibleDays,
+          dept.totalAmount,
+          dept.totalEkstraMealAmount || 0,
+          dept.totalCombinedAmount || 0
+        ]);
+      }
+      const wsDept = XLSX.utils.aoa_to_sheet(perDeptAoa);
+      XLSX.utils.book_append_sheet(wb, wsDept, 'Per Departemen');
+
+      const rekapAoa = [
+        ['Departemen', 'Jumlah Staff', 'Total Hari Layak', 'Uang Makan Reguler (Rp)', 'Ekstra Meal OT (Rp)', 'Total Diterima (Rp)'],
+        ...groupedMeal.departments.map(d => [
+          d.department,
+          d.rows.length,
+          d.totalEligibleDays,
+          d.totalAmount,
+          d.totalEkstraMealAmount || 0,
+          d.totalCombinedAmount || 0
+        ]),
+        [
+          'GRAND TOTAL',
+          mealRep.rows.length,
+          mealRep.grandTotalEligibleDays,
+          mealRep.grandTotalAmount,
+          mealRep.grandTotalEkstraMealAmount || 0,
+          mealRep.grandTotalCombinedAmount ?? mealRep.grandTotalAmount
+        ]
+      ];
+      const wsRekap = XLSX.utils.aoa_to_sheet(rekapAoa);
+      XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Departemen');
+      XLSX.writeFile(wb, `Report_Uang_Makan_${mealRep.window.startDate}_${mealRep.window.endDate}.xlsx`);
     }
   });
+
+  const buildMealPrintSheetHtml = ({ deptObj = null } = {}) => {
+    const stfSig = state.settings.driver.signatories.staffReport || state.settings.driver.signatories.summary;
+    const loc = state.settings.driver.reportLocationLabel || 'PASURUAN';
+    const isGlobal = !deptObj;
+    const titleLine = isGlobal
+      ? 'REPORT UANG MAKAN &amp; EKSTRA MEAL STAFF (GLOBAL)'
+      : `REPORT UANG MAKAN &amp; EKSTRA MEAL STAFF — ${esc(deptObj.department)}`;
+    return `
+      <div class="stf-pdf-sheet pkwt-print-sheet">
+        <div class="drv-pdf-header">
+          <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+          <div>${titleLine}</div>
+          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(mealRep.window.label)}</div>
+          ${isGlobal
+            ? `<div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">CAKUPAN</span>: GLOBAL (${groupedMeal.departments.length} DEPARTEMEN · ${mealRep.rows.length} STAFF)</div>`
+            : `<div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">DEPARTEMEN</span>: ${esc(deptObj.department)} (${deptObj.rows.length} STAFF)</div>`}
+          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">TARIF</span>: ${fmtIdr(mealRep.dailyAmount)} / HARI (SABTU &ge; ${esc(attCfg.saturdayMealCutoffTime || '15:00')}: ${fmtIdr(mealRep.saturdayAmount)}) + EKSTRA MEAL OT</div>
+        </div>
+        ${isGlobal
+          ? buildMealTableHtml({
+              rows: mealRep.rows,
+              dailyTotals: mealRep.dailyTotals,
+              totalEligibleDays: mealRep.grandTotalEligibleDays,
+              totalAmount: mealRep.grandTotalAmount,
+              totalEkstraMealAmount: mealRep.grandTotalEkstraMealAmount,
+              totalCombinedAmount: mealRep.grandTotalCombinedAmount,
+              totalLabel: 'GRAND TOTAL (GLOBAL)',
+              includeDepartmentCol: true,
+              forPrint: true
+            })
+          : buildMealTableHtml({
+              rows: deptObj.rows,
+              dailyTotals: deptObj.dailyTotals,
+              totalEligibleDays: deptObj.totalEligibleDays,
+              totalAmount: deptObj.totalAmount,
+              totalEkstraMealAmount: deptObj.totalEkstraMealAmount,
+              totalCombinedAmount: deptObj.totalCombinedAmount,
+              totalLabel: `TOTAL ${deptObj.department}`,
+              includeDepartmentCol: false,
+              forPrint: true
+            })}
+        ${renderTwoSignatoriesHtml(stfSig, loc, mealRep.window.endDate)}
+      </div>
+    `;
+  };
 
   host.querySelector('#ops-srep-print')?.addEventListener('click', () => {
     const stfSig = state.settings.driver.signatories.staffReport || state.settings.driver.signatories.summary;
     const loc = state.settings.driver.reportLocationLabel || 'PASURUAN';
-    if (activeCard === 'absensi') {
-      const sheetHtml = `
-        <div class="stf-pdf-sheet pkwt-print-sheet">
-          <div class="drv-pdf-header">
-            <div>PT. MITRA BINAMANDIRI MAKMUR</div>
-            <div>REPORT ABSENSI STAFF</div>
-            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)}</div>
-          </div>
-          ${buildAbsensiTableHtml({ forPrint: true })}
-          <div class="stf-print-legend">${legendHtml}</div>
-          ${renderTwoSignatoriesHtml(stfSig, loc, computed.window.endDate)}
+    const sheetHtml = `
+      <div class="stf-pdf-sheet pkwt-print-sheet">
+        <div class="drv-pdf-header">
+          <div>PT. MITRA BINAMANDIRI MAKMUR</div>
+          <div>REPORT ABSENSI STAFF</div>
+          <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(computed.window.startDate)} s/d ${esc(computed.window.endDate)}</div>
         </div>
-      `;
-      openDomPrintPreview({
-        title: `Report Absensi Staff — ${periodKey}`,
-        pagesHtml: sheetHtml,
-        landscape: true
-      });
-    } else {
-      const sheetHtml = `
-        <div class="stf-pdf-sheet pkwt-print-sheet">
-          <div class="drv-pdf-header">
-            <div>PT. MITRA BINAMANDIRI MAKMUR</div>
-            <div>REPORT UANG MAKAN &amp; EKSTRA MEAL STAFF</div>
-            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">PERIODE</span>: ${esc(mealRep.window.label)}</div>
-            <div class="drv-pdf-header-line"><span class="drv-pdf-header-lbl">TARIF</span>: ${fmtIdr(mealRep.dailyAmount)} / HARI (SABTU &ge; ${esc(attCfg.saturdayMealCutoffTime || '15:00')}: ${fmtIdr(mealRep.saturdayAmount)}) + EKSTRA MEAL OT</div>
-          </div>
-          ${buildMealTableHtml({ forPrint: true })}
-          ${renderTwoSignatoriesHtml(stfSig, loc, mealRep.window.endDate)}
-        </div>
-      `;
-      openDomPrintPreview({
-        title: `Report Uang Makan Staff — ${mealRep.window.startDate} s/d ${mealRep.window.endDate}`,
-        pagesHtml: sheetHtml,
-        landscape: true
-      });
+        ${buildAbsensiTableHtml({ forPrint: true })}
+        <div class="stf-print-legend">${legendHtml}</div>
+        ${renderTwoSignatoriesHtml(stfSig, loc, computed.window.endDate)}
+      </div>
+    `;
+    openDomPrintPreview({
+      title: `Report Absensi Staff — ${periodKey}`,
+      pagesHtml: sheetHtml,
+      landscape: true
+    });
+  });
+
+  host.querySelector('#ops-srep-print-dept')?.addEventListener('click', () => {
+    if (!visibleMealDepts.length) {
+      showInlineBanner(host, 'Tidak ada data departemen untuk dicetak.', 'warn');
+      return;
     }
+    const pagesHtml = visibleMealDepts.map(dept => buildMealPrintSheetHtml({ deptObj: dept })).join('');
+    openDomPrintPreview({
+      title: `Report Uang Makan Per Departemen — ${mealRep.window.startDate} s/d ${mealRep.window.endDate}`,
+      pagesHtml,
+      landscape: true
+    });
+  });
+
+  host.querySelector('#ops-srep-print-global')?.addEventListener('click', () => {
+    openDomPrintPreview({
+      title: `Report Uang Makan Staff (Global) — ${mealRep.window.startDate} s/d ${mealRep.window.endDate}`,
+      pagesHtml: buildMealPrintSheetHtml({ deptObj: null }),
+      landscape: true
+    });
+  });
+
+  host.addEventListener('click', event => {
+    const deptBtn = event.target.closest('.ops-meal-print-one-dept');
+    if (!deptBtn) return;
+    const deptName = deptBtn.dataset.dept;
+    const deptObj = groupedMeal.departments.find(d => d.department === deptName);
+    if (!deptObj) return;
+    openDomPrintPreview({
+      title: `Report Uang Makan ${deptObj.department} — ${mealRep.window.startDate} s/d ${mealRep.window.endDate}`,
+      pagesHtml: buildMealPrintSheetHtml({ deptObj }),
+      landscape: true
+    });
   });
 }
 
@@ -1929,17 +2194,35 @@ export async function renderDriverScheduleView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Daftar Jadwal Manual Driver (${state.driverSchedules.length})</h2>
+            <p class="ops-sub">Input manual per kegiatan atau import massal dari Excel/CSV (termasuk sheet referensi Daftar Driver).</p>
           </div>
           <div class="ops-actions">
+            <button type="button" class="btn btn-secondary" id="ops-ds-dl-xlsx">Template Excel ↓</button>
+            <button type="button" class="btn btn-secondary" id="ops-ds-dl-csv">Template CSV ↓</button>
             <button type="button" class="btn btn-primary" id="ops-ds-open-modal">+ Tambah Jadwal</button>
           </div>
         </div>
+
+        <div id="ops-ds-import-bar" class="ops-inline-import-bar">
+          <div class="ops-inline-import-controls">
+            <input id="ops-ds-import-file" class="input" type="file" accept=".xlsx,.xls,.csv" aria-label="Pilih file import jadwal driver">
+            <label class="ops-check" style="margin:0;white-space:nowrap">
+              <input id="ops-ds-import-replace" type="checkbox">
+              <span>Timpa seluruh jadwal lama</span>
+            </label>
+            <button type="button" class="btn btn-primary" id="ops-ds-import-submit" disabled>Import Jadwal Driver</button>
+          </div>
+          <div id="ops-ds-import-preview" class="upload-preview-box hidden"></div>
+          <div id="ops-ds-import-warn" class="form-warning" role="status"></div>
+          <div id="ops-ds-import-error" class="form-error" role="alert"></div>
+        </div>
+
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <thead>
               <tr><th>Tanggal</th><th>Driver</th><th>Departemen</th><th>Rincian Kegiatan &amp; Estimasi Jam</th><th>Aksi</th></tr>
             </thead>
-            <tbody>
+            <tbody id="ops-ds-tbody">
               ${state.driverSchedules.length ? state.driverSchedules.map(s => {
                 const acts = normalizeScheduleActivities(s);
                 const actsHtml = acts.map(a => `
@@ -2166,23 +2449,94 @@ export async function renderDriverScheduleView(host, ctx) {
     });
   };
 
+  host.querySelector('#ops-ds-dl-xlsx')?.addEventListener('click', () => {
+    const refRows = buildDriverReferenceRows(allEmployees, state.settings);
+    exportMultiSheetObjectsXlsx('Template_Jadwal_Driver.xlsx', [
+      { name: 'Jadwal_Driver', headers: DRIVER_SCHEDULE_IMPORT_HEADERS, rows: DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS },
+      { name: 'Ref_Daftar_Driver', headers: DRIVER_REF_HEADERS, rows: refRows }
+    ]);
+  });
+
+  host.querySelector('#ops-ds-dl-csv')?.addEventListener('click', () => {
+    downloadOpsCsvObjects(DRIVER_SCHEDULE_IMPORT_HEADERS, DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS, 'Template_Jadwal_Driver.csv');
+  });
+
+  let rawDsImportRows = [];
+  const dsFileEl = host.querySelector('#ops-ds-import-file');
+  const dsSubmitEl = host.querySelector('#ops-ds-import-submit');
+  const dsPrevEl = host.querySelector('#ops-ds-import-preview');
+  const dsWarnEl = host.querySelector('#ops-ds-import-warn');
+  const dsErrEl = host.querySelector('#ops-ds-import-error');
+  const dsReplaceEl = host.querySelector('#ops-ds-import-replace');
+
+  dsFileEl?.addEventListener('change', async () => {
+    rawDsImportRows = [];
+    dsSubmitEl.disabled = true;
+    dsWarnEl.textContent = '';
+    dsErrEl.textContent = '';
+    dsPrevEl.classList.add('hidden');
+    const file = dsFileEl.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await readOpsSpreadsheetObjects(file);
+      const parsed = parseDriverScheduleImportRows(raw, allEmployees, state.settings);
+      if (!parsed.rows.length) {
+        dsErrEl.textContent = parsed.errors.slice(0, 3).join(' ') || 'Tidak ada jadwal driver yang valid di file ini.';
+        return;
+      }
+      if (parsed.errors.length || parsed.warnings.length || parsed.conflicts.length) {
+        const msgs = [
+          parsed.errors.length ? `${parsed.errors.length} baris dilewati` : '',
+          parsed.warnings.length ? `${parsed.warnings.length} peringatan` : '',
+          parsed.conflicts.length ? `${parsed.conflicts.length} konflik jam (${parsed.conflicts[0].message})` : ''
+        ].filter(Boolean);
+        dsWarnEl.textContent = msgs.join(' · ');
+      }
+      rawDsImportRows = raw;
+      dsSubmitEl.disabled = false;
+      dsPrevEl.classList.remove('hidden');
+      dsPrevEl.innerHTML = `<b>${parsed.rows.length} jadwal (${parsed.activityCount} kegiatan) siap diimport</b><div style="margin-top:6px;max-height:130px;overflow:auto">${parsed.rows.slice(0, 8).map(r => `<div>• ${esc(r.work_date)} · <b>${esc(r.driver_name)}</b> (${esc(r.section)}) — ${esc(r.destination)}</div>`).join('')}${parsed.rows.length > 8 ? `<div>… dan ${parsed.rows.length - 8} jadwal lainnya</div>` : ''}</div>`;
+    } catch (err) {
+      dsErrEl.textContent = formatAppError(err, 'Gagal membaca file jadwal driver.');
+    }
+  });
+
+  dsSubmitEl?.addEventListener('click', async () => {
+    if (!rawDsImportRows.length) return;
+    dsSubmitEl.disabled = true;
+    dsSubmitEl.textContent = 'Importing…';
+    dsErrEl.textContent = '';
+    try {
+      const res = await importDriverScheduleAction(ctx, {
+        rawRows: rawDsImportRows,
+        replaceExisting: Boolean(dsReplaceEl?.checked)
+      });
+      await renderDriverScheduleView(host, ctx);
+      showInlineBanner(host, `Berhasil mengimport ${res.importedCount} jadwal driver (${res.activityCount} kegiatan).`, 'ok');
+    } catch (err) {
+      dsErrEl.textContent = formatAppError(err, 'Gagal mengimport jadwal driver.');
+      dsSubmitEl.disabled = false;
+      dsSubmitEl.textContent = 'Import Jadwal Driver';
+    }
+  });
+
   host.querySelector('#ops-ds-open-modal')?.addEventListener('click', () => {
     openDriverScheduleModal({});
   });
 
-  host.querySelectorAll('.ops-ds-add-dept').forEach(btn => {
-    btn.addEventListener('click', () => {
+  host.querySelector('#ops-ds-tbody')?.addEventListener('click', async event => {
+    const addDeptBtn = event.target.closest('.ops-ds-add-dept');
+    if (addDeptBtn) {
       openDriverScheduleModal({
-        preDate: btn.dataset.date || '2026-11-14',
-        preDriver: btn.dataset.nik || '',
+        preDate: addDeptBtn.dataset.date || '2026-11-14',
+        preDriver: addDeptBtn.dataset.nik || '',
         preSection: 'Radin'
       });
-    });
-  });
-
-  host.querySelectorAll('.ops-ds-del').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.id;
+      return;
+    }
+    const delBtn = event.target.closest('.ops-ds-del');
+    if (delBtn) {
+      const id = delBtn.dataset.id;
       if (ctx.isDemoMode) {
         state.driverSchedules = state.driverSchedules.filter(s => s.id !== id);
         saveDemoOpsState(state);
@@ -2195,7 +2549,7 @@ export async function renderDriverScheduleView(host, ctx) {
         invalidateOpsStateCache();
       }
       renderDriverScheduleView(host, ctx);
-    });
+    }
   });
 }
 
@@ -5542,6 +5896,70 @@ export async function clearStationeryStockAndMovementsAction(ctx) {
   }
 
   return { clearedItems: zeroedItems.length };
+}
+
+export async function importDriverScheduleAction(ctx, { rawRows = [], replaceExisting = false } = {}) {
+  const state = await loadOpsState(ctx, true);
+  const allEmployees = getAllKnownEmployees(ctx);
+  const parsed = parseDriverScheduleImportRows(rawRows, allEmployees, state.settings);
+  if (!parsed.rows.length) {
+    throw new Error(parsed.errors.slice(0, 3).join(' ') || 'Tidak ada jadwal driver yang valid.');
+  }
+  if (parsed.conflicts.length) {
+    throw new Error(parsed.conflicts[0]?.message || 'Terdapat bentrok jam pada file jadwal driver.');
+  }
+
+  const keyOf = row => `${row.work_date}|${compactNik(row.employee_no || '')}|${String(row.section || '').toLowerCase()}`;
+  const incomingKeys = new Set(parsed.rows.map(keyOf));
+  const keptExisting = replaceExisting
+    ? []
+    : (state.driverSchedules || []).filter(s => !incomingKeys.has(keyOf(s)));
+
+  const mergedValidation = validateDriverSchedules([...keptExisting, ...parsed.rows], allEmployees, state.settings);
+  if (!mergedValidation.valid) {
+    throw new Error(mergedValidation.conflicts[0]?.message || 'Jadwal import bentrok dengan jadwal driver yang sudah tersimpan.');
+  }
+
+  if (ctx.isDemoMode || !ctx.supabase) {
+    state.driverSchedules = [...parsed.rows, ...keptExisting];
+    saveDemoOpsState(state);
+    invalidateOpsStateCache();
+  } else {
+    const sb = ctx.supabase;
+    if (replaceExisting) {
+      const { error: delAllErr } = await sb.from('driver_daily_schedules').delete().neq('id', '');
+      if (delAllErr) throw delAllErr;
+    } else {
+      const replaceIds = (state.driverSchedules || []).filter(s => incomingKeys.has(keyOf(s))).map(s => s.id).filter(Boolean);
+      for (let i = 0; i < replaceIds.length; i += 100) {
+        const { error: delErr } = await sb.from('driver_daily_schedules').delete().in('id', replaceIds.slice(i, i + 100));
+        if (delErr) throw delErr;
+      }
+    }
+    for (let i = 0; i < parsed.rows.length; i += 100) {
+      const batch = parsed.rows.slice(i, i + 100);
+      const { error: upErr } = await sb.from('driver_daily_schedules').upsert(batch, { onConflict: 'id' });
+      if (upErr) throw upErr;
+    }
+    invalidateOpsStateCache();
+  }
+
+  return {
+    importedCount: parsed.rows.length,
+    activityCount: parsed.activityCount,
+    errors: parsed.errors,
+    warnings: parsed.warnings
+  };
+}
+
+export async function exportDriverScheduleTemplateXlsx(ctx) {
+  const state = await loadOpsState(ctx);
+  const allEmployees = getAllKnownEmployees(ctx);
+  const refRows = buildDriverReferenceRows(allEmployees, state.settings);
+  await exportMultiSheetObjectsXlsx('Template_Jadwal_Driver.xlsx', [
+    { name: 'Jadwal_Driver', headers: DRIVER_SCHEDULE_IMPORT_HEADERS, rows: DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS },
+    { name: 'Ref_Daftar_Driver', headers: DRIVER_REF_HEADERS, rows: refRows }
+  ]);
 }
 
 // Keep evaluateStaffArrivalStatus and applyStationeryTransaction referenced cleanly

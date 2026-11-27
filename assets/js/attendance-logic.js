@@ -999,6 +999,77 @@ export function processStaffMealAllowanceReport({
   };
 }
 
+export function groupMealReportByDepartment(mealReport = null) {
+  const base = mealReport && typeof mealReport === 'object'
+    ? mealReport
+    : {
+        window: { dayMeta: [] },
+        dailyAmount: 0,
+        saturdayAmount: 0,
+        rows: [],
+        dailyTotals: [],
+        grandTotalEligibleDays: 0,
+        grandTotalAmount: 0,
+        grandTotalEkstraMealAmount: 0,
+        grandTotalCombinedAmount: 0
+      };
+  const dayCount = Array.isArray(base.window?.dayMeta) ? base.window.dayMeta.length : 0;
+  const groupsMap = new Map();
+
+  for (const row of base.rows || []) {
+    const deptName = String(row?.department || '').trim().toUpperCase() || 'TANPA DEPARTEMEN';
+    if (!groupsMap.has(deptName)) {
+      groupsMap.set(deptName, {
+        department: deptName,
+        rows: [],
+        dailyTotals: Array.from({ length: dayCount }, (_, i) => ({
+          work_date: base.window?.dayMeta?.[i]?.dateStr || '',
+          eligibleCount: 0,
+          totalAmount: 0,
+          ekstraMealCount: 0,
+          totalEkstraMealAmount: 0,
+          totalCombinedAmount: 0
+        })),
+        totalEligibleDays: 0,
+        totalAmount: 0,
+        totalEkstraMealAmount: 0,
+        totalCombinedAmount: 0
+      });
+    }
+    const g = groupsMap.get(deptName);
+    g.rows.push(row);
+    g.totalEligibleDays += Number(row.totalEligibleDays || 0);
+    g.totalAmount += Number(row.totalAmount || 0);
+    g.totalEkstraMealAmount += Number(row.totalEkstraMealAmount || 0);
+    g.totalCombinedAmount += Number(row.totalCombinedAmount ?? row.totalAmount ?? 0);
+
+    (row.days || []).forEach((d, idx) => {
+      const dt = g.dailyTotals[idx];
+      if (!dt) return;
+      if (d.eligible) {
+        dt.eligibleCount += 1;
+        dt.totalAmount += Number(d.amount || 0);
+      }
+      if ((d.ekstraMealAmount || 0) > 0) {
+        dt.ekstraMealCount += 1;
+        dt.totalEkstraMealAmount += Number(d.ekstraMealAmount || 0);
+      }
+      dt.totalCombinedAmount += Number(d.amount || 0) + Number(d.ekstraMealAmount || 0);
+    });
+  }
+
+  const departments = [...groupsMap.values()].sort((a, b) => {
+    if (a.department === 'TANPA DEPARTEMEN') return 1;
+    if (b.department === 'TANPA DEPARTEMEN') return -1;
+    return a.department.localeCompare(b.department, 'id');
+  });
+
+  return {
+    departments,
+    global: base
+  };
+}
+
 export function computeEmployeeDirectoryDelta(incomingRows = [], existingEmployees = []) {
   const existingByNik = new Map(existingEmployees.map(e => [compactNik(e.employee_no), e]));
   const incomingKeys = new Set();

@@ -228,8 +228,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid rgba(22, 24, 26, 0.08);
 }
 
@@ -1186,8 +1185,7 @@ textarea:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.62);
 }
 
 .employee-modal-card {
@@ -1733,8 +1731,7 @@ body.candidate-page {
   z-index: 20;
   padding: 14px 0 calc(6px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(8px);
+  background: #ffffff;
 }
 
 .wizard-actions > *, .candidate-actions > * {

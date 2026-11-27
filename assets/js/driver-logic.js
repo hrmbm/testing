@@ -1,6 +1,6 @@
 // Pure Driver Eligibility, Period Window, Schedule & Reconciliation, Checksheet Grid, Tariff Lookup, Payroll & Audit Engine
 import { DEFAULT_OPS_SETTINGS, normalizeOpsSettings, calculateEkstraMeal } from './ops-settings-logic.js';
-import { compactNik, normKey, pad2 } from './attendance-logic.js';
+import { compactNik, normKey, pad2, parseExcelOrTextDate } from './attendance-logic.js';
 
 export const DRIVER_SECTION_CODES = {
   Support: 'S',
@@ -1003,4 +1003,240 @@ export function terbilangRupiah(amount) {
   const val = Math.round(Number(amount) || 0);
   if (val <= 0) return 'Nol Rupiah';
   return `${terbilangCore(val).replace(/\s+/g, ' ').trim()} Rupiah`;
+}
+
+// ============================================================================
+// Driver Manual Schedule Spreadsheet Import & Driver Reference Catalog
+// ============================================================================
+export const DRIVER_SCHEDULE_IMPORT_HEADERS = [
+  'Tanggal',
+  'NIK',
+  'Nama_Driver',
+  'Departemen',
+  'Jam_Mulai',
+  'Jam_Selesai',
+  'Sampai_Pulang',
+  'Kegiatan',
+  'No_Polisi',
+  'Catatan'
+];
+
+export const DRIVER_REF_HEADERS = [
+  'NIK',
+  'Nama_Driver',
+  'Jabatan',
+  'Home_Base',
+  'Departemen_Valid'
+];
+
+export const DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS = [
+  {
+    Tanggal: '2026-11-16',
+    NIK: 'PR 190603',
+    Nama_Driver: 'M. MUQORROBIN',
+    Departemen: 'Support',
+    Jam_Mulai: '07:00',
+    Jam_Selesai: '12:00',
+    Sampai_Pulang: 'TIDAK',
+    Kegiatan: 'Antar Direksi ke Surabaya',
+    No_Polisi: 'N 1234 AB',
+    Catatan: 'Sesi pagi'
+  },
+  {
+    Tanggal: '2026-11-16',
+    NIK: 'PR 190603',
+    Nama_Driver: 'M. MUQORROBIN',
+    Departemen: 'Radin',
+    Jam_Mulai: '13:00',
+    Jam_Selesai: '',
+    Sampai_Pulang: 'YA',
+    Kegiatan: 'Kirim Dokumen ReHolz',
+    No_Polisi: 'N 1234 AB',
+    Catatan: 'Lanjut sampai pulang'
+  }
+];
+
+function readScheduleCell(row, aliases = []) {
+  if (!row || typeof row !== 'object') return '';
+  for (const a of aliases) {
+    if (a in row && row[a] !== undefined && row[a] !== null) return row[a];
+  }
+  const normAliases = aliases.map(a => a.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const k of Object.keys(row)) {
+    const nk = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normAliases.includes(nk) && row[k] !== undefined && row[k] !== null) return row[k];
+  }
+  return '';
+}
+
+function normalizeImportTimeHHMM(raw) {
+  if (raw === null || raw === undefined || raw === '') return '';
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const frac = ((raw % 1) + 1) % 1;
+    const totalMin = Math.round(frac * 1440) % 1440;
+    return `${pad2(Math.floor(totalMin / 60))}:${pad2(totalMin % 60)}`;
+  }
+  const str = String(raw).trim().replace(/\./g, ':');
+  const m = str.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return '';
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return '';
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
+function normalizeDriverSectionName(raw, allowedSections = ['Support', 'Indoor', 'Outdoor', 'Radin']) {
+  const clean = String(raw || '').trim();
+  if (!clean) return allowedSections[0] || 'Support';
+  const low = clean.toLowerCase();
+  const exact = allowedSections.find(s => s.toLowerCase() === low);
+  if (exact) return exact;
+  if (low.includes('radin') || low.includes('reholz')) return 'Radin';
+  if (low.includes('indoor')) return 'Indoor';
+  if (low.includes('outdoor')) return 'Outdoor';
+  if (low.includes('support')) return 'Support';
+  return clean;
+}
+
+export function buildDriverReferenceRows(employees = [], settings = DEFAULT_OPS_SETTINGS) {
+  const cfg = normalizeOpsSettings(settings).driver;
+  const drivers = getEligibleDrivers(employees, settings);
+  const validDepts = (cfg.sections || ['Support', 'Indoor', 'Outdoor', 'Radin']).join(' / ');
+  return drivers.map(d => ({
+    NIK: d.employee_no || '',
+    Nama_Driver: d.full_name || '',
+    Jabatan: d.position || 'SOPIR',
+    Home_Base: d.home_base || 'PASURUAN',
+    Departemen_Valid: validDepts
+  }));
+}
+
+export function parseDriverScheduleImportRows(rawRows = [], employees = [], settings = DEFAULT_OPS_SETTINGS) {
+  const cfg = normalizeOpsSettings(settings).driver;
+  const allowedSections = Array.isArray(cfg.sections) && cfg.sections.length
+    ? cfg.sections
+    : ['Support', 'Indoor', 'Outdoor', 'Radin'];
+
+  const allEmps = Array.isArray(employees) ? employees : [];
+  const empByNik = new Map();
+  const empBySuffix = new Map();
+  const empByName = new Map();
+  for (const e of allEmps) {
+    const ck = compactNik(e.employee_no || '');
+    if (ck) {
+      empByNik.set(ck, e);
+      const suffix = ck.replace(/^[A-Z]+/, '');
+      if (suffix && !empBySuffix.has(suffix)) empBySuffix.set(suffix, e);
+    }
+    const nk = normKey(e.full_name || '');
+    if (nk && !empByName.has(nk)) empByName.set(nk, e);
+  }
+
+  const errors = [];
+  const warnings = [];
+  const grouped = new Map();
+  let activityCount = 0;
+
+  (Array.isArray(rawRows) ? rawRows : []).forEach((rawRow, idx) => {
+    const rowNo = idx + 2;
+    const rawDate = readScheduleCell(rawRow, ['Tanggal', 'Date', 'work_date']);
+    const rawNik = String(readScheduleCell(rawRow, ['NIK', 'employee_no', 'No_Karyawan'])).trim();
+    const rawName = String(readScheduleCell(rawRow, ['Nama_Driver', 'Nama', 'Driver', 'driver_name', 'full_name'])).trim();
+    const rawSection = String(readScheduleCell(rawRow, ['Departemen', 'Department', 'Section', 'Bagian'])).trim();
+    const rawStart = readScheduleCell(rawRow, ['Jam_Mulai', 'Mulai', 'Start_Time', 'start_time']);
+    const rawEnd = readScheduleCell(rawRow, ['Jam_Selesai', 'Selesai', 'End_Time', 'end_time']);
+    const rawUntilHome = String(readScheduleCell(rawRow, ['Sampai_Pulang', 'Pulang', 'Until_Home', 'is_until_home'])).trim();
+    const activity = String(readScheduleCell(rawRow, ['Kegiatan', 'Activity', 'Tujuan', 'Destination'])).trim();
+    const vehicleNo = String(readScheduleCell(rawRow, ['No_Polisi', 'Nopol', 'Vehicle_No', 'vehicle_no'])).trim();
+    const notes = String(readScheduleCell(rawRow, ['Catatan', 'Notes', 'Keterangan'])).trim();
+
+    if (!rawDate && !rawNik && !rawName && !activity) return;
+
+    const workDate = parseExcelOrTextDate(rawDate);
+    if (!workDate) {
+      errors.push(`Baris ${rowNo}: format Tanggal "${rawDate}" tidak valid (gunakan YYYY-MM-DD atau DD/MM/YYYY).`);
+      return;
+    }
+
+    const startTime = normalizeImportTimeHHMM(rawStart);
+    if (!startTime) {
+      errors.push(`Baris ${rowNo}: Jam_Mulai "${rawStart}" tidak valid (gunakan format HH:MM, misal 07:00).`);
+      return;
+    }
+
+    const endTextUp = String(rawEnd ?? '').trim().toUpperCase();
+    const untilUp = rawUntilHome.toUpperCase();
+    const isUntilHome = ['YA', 'YES', 'TRUE', '1', 'PULANG', 'SELESAI'].includes(untilUp) || endTextUp === 'PULANG' || !String(rawEnd ?? '').trim();
+    const endTime = isUntilHome ? '' : normalizeImportTimeHHMM(rawEnd);
+    if (!isUntilHome && !endTime) {
+      errors.push(`Baris ${rowNo}: Jam_Selesai "${rawEnd}" tidak valid (atau isi Sampai_Pulang = YA).`);
+      return;
+    }
+
+    const nikComp = compactNik(rawNik);
+    const nikSuffix = nikComp.replace(/^[A-Z]+/, '');
+    const matchedEmp =
+      (nikComp && empByNik.get(nikComp)) ||
+      (nikSuffix && empBySuffix.get(nikSuffix)) ||
+      (rawName && empByName.get(normKey(rawName))) ||
+      null;
+
+    const finalNik = matchedEmp?.employee_no || rawNik;
+    const finalName = matchedEmp?.full_name || rawName || finalNik;
+    if (!finalNik && !finalName) {
+      errors.push(`Baris ${rowNo}: NIK atau Nama_Driver wajib diisi.`);
+      return;
+    }
+    if (!matchedEmp) {
+      warnings.push(`Baris ${rowNo}: Driver "${finalName || finalNik}" tidak cocok persis dengan direktori karyawan.`);
+    }
+
+    const section = normalizeDriverSectionName(rawSection, allowedSections);
+    const groupKey = `${workDate}|${compactNik(finalNik) || normKey(finalName)}|${section}`;
+
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
+        id: `ds-imp-${workDate.replace(/-/g, '')}-${compactNik(finalNik || finalName).replace(/[^A-Z0-9]/g, '') || idx}-${section.toLowerCase()}`,
+        work_date: workDate,
+        employee_no: finalNik,
+        driver_name: finalName,
+        section,
+        activities: [],
+        vehicle_no: vehicleNo,
+        notes
+      });
+    }
+
+    const entry = grouped.get(groupKey);
+    entry.activities.push({
+      start_time: startTime,
+      end_time: isUntilHome ? '' : endTime,
+      is_until_home: isUntilHome,
+      activity: activity || notes || 'Operasional Driver'
+    });
+    if (vehicleNo && !entry.vehicle_no) entry.vehicle_no = vehicleNo;
+    if (notes && !entry.notes) entry.notes = notes;
+    activityCount++;
+  });
+
+  const rows = [...grouped.values()].map(item => {
+    item.activities.sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const first = item.activities[0];
+    const last = item.activities[item.activities.length - 1];
+    return {
+      ...item,
+      start_time: first?.start_time || '07:00',
+      end_time: last?.is_until_home ? '' : (last?.end_time || ''),
+      destination: item.activities.map(a => a.activity).filter(Boolean).join(' + ')
+    };
+  }).sort((a, b) => (b.work_date || '').localeCompare(a.work_date || '') || (a.driver_name || '').localeCompare(b.driver_name || ''));
+
+  const validation = validateDriverSchedules(rows, allEmps, settings);
+  return {
+    rows,
+    activityCount,
+    errors,
+    warnings,
+    conflicts: validation.conflicts
+  };
 }

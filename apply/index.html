@@ -75,6 +75,7 @@
     normalizeVacancyList,
     normalizeRecruitmentScoringConfig,
     calculateCandidateScore,
+    isQuestionVisible,
     buildStage1WhatsAppUrl
   } from '../assets/js/vacancy-logic.js?v=20261124-hrga-workspace-22';
   import {
@@ -245,11 +246,15 @@
         }
 
         if (f.id === 'location' || f.type === 'system_location') {
+          const cityOpts = Object.keys(DISTRICTS_BY_CITY)
+            .map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`)
+            .join('');
           return `<div class="field" data-step1-field="location">
             <label for="city">Kabupaten / Kota${reqStar}</label>
             <select id="city" ${reqAttr}>
               <option value="">${escHtml(f.placeholder || 'Pilih wilayah')}</option>
-              <option>Pasuruan</option><option>Sidoarjo</option><option>Mojokerto</option><option>Malang</option><option>Area lain</option>
+              ${cityOpts}
+              <option value="Area lain">Area lain</option>
             </select>
           </div>
           <div class="field" id="districtSelectWrap">
@@ -436,17 +441,68 @@
     </div>`;
   }
 
+  function readDynamicControlValues(vacancy) {
+    const details = {};
+    const questions = vacancy?.questions || [];
+    for (const q of questions) {
+      if (q.type === 'radio') {
+        const checked = document.querySelector(`input[name="q_${q.id}"]:checked`);
+        details[q.id] = checked ? checked.value : '';
+      } else if (q.type === 'checkbox') {
+        details[q.id] = [...document.querySelectorAll(`input[name="q_${q.id}"]:checked`)].map(el => el.value);
+      } else {
+        const el = $(`q_${q.id}`);
+        if (el) details[q.id] = el.value.trim();
+      }
+    }
+    return details;
+  }
+
+  function updateConditionalQuestions() {
+    const dynHost = $('dynamicFields');
+    if (!dynHost) return;
+    const vacancy = findVacancyByPosition($('position')?.value || '');
+    const questions = vacancy?.questions || [];
+    if (!questions.length) return;
+    const rawAnswers = readDynamicControlValues(vacancy);
+
+    for (const q of questions) {
+      const box = dynHost.querySelector(`[data-q-id="${CSS.escape(q.id)}"]`);
+      if (!box) continue;
+      const visible = isQuestionVisible(q, rawAnswers, questions);
+      box.classList.toggle('hidden', !visible);
+      box.querySelectorAll('input,select,textarea').forEach(ctrl => {
+        ctrl.disabled = !visible;
+      });
+    }
+  }
+
+  let dynamicDelegationBound = false;
   function renderDynamicFields() {
     const pos = $('position')?.value || '';
     const vacancy = findVacancyByPosition(pos);
     const questions = vacancy?.questions || [];
+    const dynHost = $('dynamicFields');
+    if (!dynHost) return;
+
+    if (!dynamicDelegationBound) {
+      dynHost.addEventListener('change', updateConditionalQuestions);
+      dynHost.addEventListener('input', event => {
+        const box = event.target?.closest?.('[data-q-id]');
+        if (box && ['text', 'textarea', 'number'].includes(box.dataset.qType)) {
+          updateConditionalQuestions();
+        }
+      });
+      dynamicDelegationBound = true;
+    }
 
     if (!questions.length) {
-      $('dynamicFields').innerHTML = '<div class="field"><p style="color:var(--muted);font-size:13.5px;margin:0">Tidak ada pertanyaan tambahan untuk posisi ini. Silakan klik Lanjutkan.</p></div>';
+      dynHost.innerHTML = '<div class="field"><p style="color:var(--muted);font-size:13.5px;margin:0">Tidak ada pertanyaan tambahan untuk posisi ini. Silakan klik Lanjutkan.</p></div>';
       return;
     }
 
-    $('dynamicFields').innerHTML = questions.map(renderQuestionField).join('');
+    dynHost.innerHTML = questions.map(renderQuestionField).join('');
+    updateConditionalQuestions();
   }
 
   function currentStepValid() {
@@ -459,6 +515,7 @@
 
     const customRadioGroups = [...stepEl.querySelectorAll('[data-custom-type="radio"][data-required="true"]')];
     for (const box of customRadioGroups) {
+      if (box.classList.contains('hidden')) continue;
       const fId = box.dataset.customStep1;
       if (!box.querySelector(`input[name="cf_${fId}"]:checked`)) {
         showError('Pilih salah satu jawaban yang tersedia.');
@@ -468,6 +525,7 @@
 
     const customCheckGroups = [...stepEl.querySelectorAll('[data-custom-type="checkbox"][data-required="true"]')];
     for (const box of customCheckGroups) {
+      if (box.classList.contains('hidden')) continue;
       const fId = box.dataset.customStep1;
       if (!box.querySelector(`input[name="cf_${fId}"]:checked`)) {
         showError('Pilih minimal satu opsi yang tersedia.');
@@ -477,6 +535,7 @@
 
     const qRadioGroups = [...stepEl.querySelectorAll('[data-q-type="radio"][data-q-req="true"]')];
     for (const box of qRadioGroups) {
+      if (box.classList.contains('hidden')) continue;
       const qId = box.dataset.qId;
       if (!box.querySelector(`input[name="q_${qId}"]:checked`)) {
         showError('Pilih salah satu jawaban yang tersedia.');
@@ -486,6 +545,7 @@
 
     const qCheckGroups = [...stepEl.querySelectorAll('[data-q-type="checkbox"][data-q-req="true"]')];
     for (const box of qCheckGroups) {
+      if (box.classList.contains('hidden')) continue;
       const qId = box.dataset.qId;
       if (!box.querySelector(`input[name="q_${qId}"]:checked`)) {
         showError('Pilih minimal satu pilihan yang tersedia.');
@@ -537,18 +597,12 @@
   }
 
   function collectDynamicDetails(vacancy) {
-    const details = {};
+    const raw = readDynamicControlValues(vacancy);
     const questions = vacancy?.questions || [];
+    const details = {};
     for (const q of questions) {
-      if (q.type === 'radio') {
-        const checked = document.querySelector(`input[name="q_${q.id}"]:checked`);
-        details[q.id] = checked ? checked.value : '';
-      } else if (q.type === 'checkbox') {
-        details[q.id] = [...document.querySelectorAll(`input[name="q_${q.id}"]:checked`)].map(el => el.value);
-      } else {
-        const el = $(`q_${q.id}`);
-        if (el) details[q.id] = el.value.trim();
-      }
+      if (!isQuestionVisible(q, raw, questions)) continue;
+      details[q.id] = raw[q.id] ?? (q.type === 'checkbox' ? [] : '');
     }
     return details;
   }

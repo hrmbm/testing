@@ -1767,6 +1767,148 @@ test('Lead Register ID lookup handles numeric and UUID string IDs and Stage 1 re
   assert.ok(adminJs.includes('DEMO_DISMISSED_STAGE1_KEY'), 'admin.js must persist dismissed demo Stage 1 leads across refreshes');
 });
 
+test('/apply supports Surabaya & Gresik districts, conditional showWhen branching, and recruitment XLSX export/import', async () => {
+  const {
+    DISTRICTS_BY_CITY,
+    isPrimaryDistrictMatch,
+    isQuestionVisible,
+    calculateVacancyMaxScore,
+    calculateCandidateScore,
+    buildStage1WhatsAppMessage,
+    buildDistrictReferenceRows,
+    buildRecruitmentExportSheets,
+    parseRecruitmentImportRows
+  } = await import('../assets/js/vacancy-logic.js');
+
+  assert.equal(DISTRICTS_BY_CITY.Surabaya.length, 31);
+  assert.equal(DISTRICTS_BY_CITY.Gresik.length, 18);
+  assert.equal(isPrimaryDistrictMatch(['Surabaya - Rungkut'], 'Surabaya', 'Rungkut'), true);
+  assert.equal(isPrimaryDistrictMatch(['Gresik - Driyorejo'], 'Gresik', 'Driyorejo'), true);
+
+  const vacancy = {
+    id: 'branch-pos',
+    name: 'Operator Mesin',
+    active: true,
+    primaryDistricts: ['Surabaya - Rungkut', 'Gresik - Driyorejo'],
+    primaryLocationScore: 20,
+    otherLocationScore: 5,
+    questions: [
+      {
+        id: 'q1',
+        label: 'Punya pengalaman kerja pabrik?',
+        type: 'dropdown',
+        required: true,
+        options: [
+          { label: 'Ya', score: 30 },
+          { label: 'Belum pernah', score: 10 }
+        ]
+      },
+      {
+        id: 'q2',
+        label: 'Jika Ya, sebutkan jenis mesin',
+        type: 'text',
+        required: true,
+        filledScore: 25,
+        showWhen: { questionId: 'q1', operator: 'equals', value: 'Ya' }
+      },
+      {
+        id: 'q3',
+        label: 'Jika Ya + mesin CNC, lama pengalaman?',
+        type: 'dropdown',
+        required: true,
+        showWhen: { questionId: 'q2', operator: 'includes', value: 'CNC' },
+        options: [
+          { label: '> 1 tahun', score: 25 },
+          { label: '< 1 tahun', score: 10 }
+        ]
+      },
+      {
+        id: 'q4',
+        label: 'Jika Belum pernah, bersedia training 2 minggu?',
+        type: 'dropdown',
+        required: true,
+        showWhen: { questionId: 'q1', operator: 'equals', value: 'Belum pernah' },
+        options: [
+          { label: 'Bersedia', score: 15 },
+          { label: 'Tidak', score: 0 }
+        ]
+      }
+    ]
+  };
+
+  // Mutually exclusive branches (Ya path max = 30+25+25 = 80 vs Belum pernah path max = 10+15 = 25) + loc 20 = 100
+  assert.equal(calculateVacancyMaxScore(vacancy), 100);
+
+  // Branch A active + transitive q3 active
+  const ansA = { q1: 'Ya', q2: 'Bubut & CNC Milling', q3: '> 1 tahun', q4: 'Bersedia' };
+  assert.equal(isQuestionVisible(vacancy.questions[1], ansA, vacancy.questions), true);
+  assert.equal(isQuestionVisible(vacancy.questions[2], ansA, vacancy.questions), true);
+  assert.equal(isQuestionVisible(vacancy.questions[3], ansA, vacancy.questions), false);
+
+  const scoreA = calculateCandidateScore(vacancy, 'Surabaya', 'Rungkut', ansA);
+  // Even though ansA has stale q4='Bersedia', q4 is hidden so its 15 pts must NOT count: 20 + 30 + 25 + 25 = 100
+  assert.equal(scoreA.totalScore, 100);
+  assert.equal(scoreA.questionBreakdown.some(item => item.id === 'q4'), false);
+
+  // Branch B active -> q2 & q3 both transitively hidden
+  const ansB = { q1: 'Belum pernah', q2: 'CNC', q3: '> 1 tahun', q4: 'Bersedia' };
+  assert.equal(isQuestionVisible(vacancy.questions[1], ansB, vacancy.questions), false);
+  assert.equal(isQuestionVisible(vacancy.questions[2], ansB, vacancy.questions), false);
+  assert.equal(isQuestionVisible(vacancy.questions[3], ansB, vacancy.questions), true);
+
+  const scoreB = calculateCandidateScore(vacancy, 'Gresik', 'Driyorejo', ansB);
+  assert.equal(scoreB.totalScore, 20 + 10 + 15);
+
+  const waText = buildStage1WhatsAppMessage({
+    position: 'Operator Mesin',
+    name: 'Budi',
+    phone: '0812345',
+    city: 'Surabaya',
+    district: 'Rungkut',
+    source: 'Instagram',
+    experience: ansB
+  }, vacancy);
+  assert.ok(waText.includes('bersedia training 2 minggu'));
+  assert.ok(!waText.includes('sebutkan jenis mesin'));
+
+  // Cycle protection in isQuestionVisible
+  const cyclic = [
+    { id: 'c1', type: 'text', showWhen: { questionId: 'c2', operator: 'equals', value: 'x' } },
+    { id: 'c2', type: 'text', showWhen: { questionId: 'c1', operator: 'equals', value: 'x' } }
+  ];
+  assert.equal(isQuestionVisible(cyclic[0], { c1: 'x', c2: 'x' }, cyclic), false);
+
+  // District reference rows cover all 6 cities (Pasuruan+Sidoarjo+Malang+Mojokerto+Surabaya+Gresik = 154)
+  const refRows = buildDistrictReferenceRows();
+  assert.equal(refRows.length, 154);
+  assert.ok(refRows.some(r => r.Token_Primary_Districts === 'Surabaya - Rungkut'));
+  assert.ok(refRows.some(r => r.Token_Primary_Districts === 'Gresik - Driyorejo'));
+
+  // Recruitment XLSX sheet export/import round-trip preserves branching showWhen
+  const exported = buildRecruitmentExportSheets([vacancy], DISTRICTS_BY_CITY);
+  const reimported = parseRecruitmentImportRows(exported.vacancyRows, exported.questionRows);
+  assert.equal(reimported.errors.length, 0);
+  assert.equal(reimported.vacancies.length, 1);
+  assert.equal(reimported.vacancies[0].questions.length, 4);
+  assert.deepEqual(reimported.vacancies[0].questions[1].showWhen, {
+    questionId: reimported.vacancies[0].questions[0].id,
+    operator: 'equals',
+    value: 'Ya'
+  });
+  assert.equal(calculateVacancyMaxScore(reimported.vacancies[0]), 100);
+
+  // Verify /apply/index.html & admin.js wire these properly and CSS removes backdrop blur
+  const applyHtml = fs.readFileSync('apply/index.html', 'utf8');
+  assert.ok(applyHtml.includes('isQuestionVisible'), '/apply must evaluate conditional visibility dynamically');
+  assert.ok(applyHtml.includes('Object.keys(DISTRICTS_BY_CITY)'), '/apply must derive city dropdown dynamically from DISTRICTS_BY_CITY');
+
+  const appCss = fs.readFileSync('assets/css/app.css', 'utf8');
+  const wsCss = fs.readFileSync('assets/css/workspace.css', 'utf8');
+  assert.ok(!/backdrop-filter:\s*blur/i.test(appCss), 'app.css must not use expensive backdrop-filter blur');
+  assert.ok(!/backdrop-filter:\s*blur/i.test(wsCss), 'workspace.css must not use expensive backdrop-filter blur');
+});
+
+
 
 
 
