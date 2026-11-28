@@ -56,6 +56,8 @@ export function normalizeStationeryItems(rawItems = []) {
   return (rawItems || []).map((it, idx) => {
     const unit = normText(it?.unit || 'PCS') || 'PCS';
     const itemName = String(it?.item_name || '').trim();
+    const rawCap = Number(it?.warehouse_capacity ?? it?.warehouseCapacity ?? 0);
+    const warehouseCapacity = Number.isFinite(rawCap) && rawCap > 0 ? Math.round(rawCap) : 0;
     return {
       ...it,
       id: it?.id || `atk-${String(idx + 1).padStart(3, '0')}`,
@@ -64,6 +66,7 @@ export function normalizeStationeryItems(rawItems = []) {
       unit,
       purchase_unit: normText(it?.purchase_unit || '') || deriveDefaultPurchaseUnit(itemName, unit),
       conversion_qty: Math.max(1, Number(it?.conversion_qty ?? it?.unit_conversion ?? 1) || 1),
+      warehouse_capacity: warehouseCapacity,
       min_purchase_qty: Math.max(1, Number(it?.min_purchase_qty) || 1),
       opening_stock: Number(it?.opening_stock ?? it?.current_stock ?? 0),
       current_stock: Number(it?.current_stock ?? 0),
@@ -348,10 +351,12 @@ export function buildStationeryReports({
 
     const activeDaysBasis = monthPrefix ? 30 : windowDays;
     const avgDailyOut = st.outQty / activeDaysBasis;
-    const targetStock = Math.max(
+    const rawTargetStock = Math.max(
       Number(st.item.min_stock || 0),
       Math.ceil(avgDailyOut * horizonDays * cfg.safetyStockMultiplier)
     );
+    const warehouseCapacity = Math.max(0, Number(st.item.warehouse_capacity) || 0);
+    const targetStock = warehouseCapacity > 0 ? Math.min(rawTargetStock, warehouseCapacity) : rawTargetStock;
     const suggestedPurchase = Math.max(0, Math.ceil(targetStock - periodClosingStock));
 
     const deptBreakdown = {};
@@ -366,6 +371,7 @@ export function buildStationeryReports({
       unit: st.item.unit,
       purchase_unit: st.item.purchase_unit || deriveDefaultPurchaseUnit(st.item.item_name, st.item.unit),
       conversion_qty: Math.max(1, Number(st.item.conversion_qty) || 1),
+      warehouse_capacity: warehouseCapacity,
       min_purchase_qty: Math.max(1, Number(st.item.min_purchase_qty) || 1),
       openingStock: periodOpeningStock,
       inQty: st.inQty,
@@ -430,6 +436,7 @@ export function buildStationeryReports({
       unit: r.unit,
       purchase_unit: r.purchase_unit,
       conversion_qty: r.conversion_qty,
+      warehouse_capacity: r.warehouse_capacity || 0,
       min_purchase_qty: r.min_purchase_qty,
       currentStock: r.currentStock,
       byDept: r.byDept
@@ -633,13 +640,28 @@ export function buildPurchasePlanSuggestions({
   );
   const observedDays = Math.max(1, outMonths.size) * 30;
 
+  const fastMaxRank = Math.max(1, Number(stkCfg.frequencyTiers?.fastMaxRank) || 30);
+
   const mappedRows = globalReport.favoriteItems.map(fav => {
     const ov = manualOverrides?.[fav.id] || {};
     const avgDaily = (fav.totalOut || 0) / observedDays;
-    const periodRequirement = avgDaily > 0 ? Math.ceil(avgDaily * planWindow.periodDays) : 0;
-    const minStock = periodRequirement * 2;
+    const basePeriodRequirement = avgDaily > 0 ? Math.ceil(avgDaily * planWindow.periodDays) : 0;
+    const favRank = Math.max(1, Number(fav.rank) || 999);
+    const isFastTier = favRank <= fastMaxRank;
+    const frequencyMultiplier = isFastTier ? 1.5 : 1;
+    const boostedRequirement = basePeriodRequirement > 0
+      ? (isFastTier ? Math.round(basePeriodRequirement * 1.5) : basePeriodRequirement)
+      : 0;
+    const warehouseCapacity = Math.max(0, Number(fav.warehouse_capacity) || 0);
+    const periodRequirement = warehouseCapacity > 0
+      ? Math.min(boostedRequirement, warehouseCapacity)
+      : boostedRequirement;
+    const rawMinStock = periodRequirement * 2;
+    const minStock = warehouseCapacity > 0 ? Math.min(rawMinStock, warehouseCapacity) : rawMinStock;
     const currentStock = Number(fav.currentStock ?? 0);
-    const deficit = Math.max(0, minStock - currentStock);
+    const remainingCapacity = warehouseCapacity > 0 ? Math.max(0, warehouseCapacity - currentStock) : null;
+    const rawDeficit = Math.max(0, minStock - currentStock);
+    const deficit = warehouseCapacity > 0 ? Math.min(rawDeficit, remainingCapacity) : rawDeficit;
     const conversionQty = Math.max(1, Number(fav.conversion_qty) || 1);
     const minPurchase = ov.minPurchase !== undefined && ov.minPurchase !== ''
       ? Math.max(1, Number(ov.minPurchase) || 1)
@@ -651,14 +673,19 @@ export function buildPurchasePlanSuggestions({
     const convertedDecisionQty = decisionQty !== '' && Number.isFinite(decisionNum)
       ? Math.round(decisionNum * conversionQty * 100) / 100
       : '';
+    const exceedsCapacity = warehouseCapacity > 0 && convertedDecisionQty !== '' && (currentStock + Number(convertedDecisionQty)) > warehouseCapacity;
 
     return {
-      favRank: fav.rank,
+      favRank,
       id: fav.id,
       item_code: fav.item_code,
       item_name: fav.item_name,
       currentStock,
+      warehouseCapacity,
+      remainingCapacity,
       totalGlobalOut: fav.totalOut,
+      basePeriodRequirement,
+      frequencyMultiplier,
       periodRequirement,
       minStock,
       deficit,
@@ -668,6 +695,7 @@ export function buildPurchasePlanSuggestions({
       purchaseUnit: fav.purchase_unit,
       decisionQty,
       convertedDecisionQty,
+      exceedsCapacity,
       note: String(ov.note || '')
     };
   });
@@ -727,6 +755,10 @@ export function buildPurchaseRequisitionWorkspaceRows({
     const convertedDecisionQty = decisionQty !== '' && Number.isFinite(decisionNum)
       ? Math.round(decisionNum * convQty * 100) / 100
       : '';
+    const warehouseCapacity = Math.max(0, Number(r.warehouseCapacity) || 0);
+    const currentStock = Number(r.currentStock || 0);
+    const remainingCapacity = warehouseCapacity > 0 ? Math.max(0, warehouseCapacity - currentStock) : null;
+    const exceedsCapacity = warehouseCapacity > 0 && convertedDecisionQty !== '' && (currentStock + Number(convertedDecisionQty)) > warehouseCapacity;
     const note = ov.note !== undefined ? String(ov.note) : String(r.note || '');
 
     const freqRank = Math.max(1, Number(r.favRank ?? r.rank) || 1);
@@ -737,6 +769,9 @@ export function buildPurchaseRequisitionWorkspaceRows({
       minPurchase,
       decisionQty,
       convertedDecisionQty,
+      warehouseCapacity,
+      remainingCapacity,
+      exceedsCapacity,
       frequency: r.frequency || classifyPurchasePlanFrequency(freqRank, stationerySettings),
       note,
       isNonZeroSuggestion,
@@ -826,8 +861,9 @@ export const STATIONERY_MASTER_IMPORT_HEADERS = [
   'Kode Material',
   'Nama Item',
   'Satuan',
-  'Satuan Minimal Pembelian',
-  'Konversi Satuan',
+  'Satuan Pembelian',
+  'Konversi (1 Sat Beli =)',
+  'Kapasitas Gudang',
   'Saldo Awal'
 ];
 
@@ -835,8 +871,9 @@ export const STATIONERY_MASTER_SAMPLE_ROW = {
   'Kode Material': '10016',
   'Nama Item': 'BOLPOINT HITAM',
   'Satuan': 'PCS',
-  'Satuan Minimal Pembelian': 'PACK',
-  'Konversi Satuan': 36,
+  'Satuan Pembelian': 'PACK',
+  'Konversi (1 Sat Beli =)': 36,
+  'Kapasitas Gudang': 360,
   'Saldo Awal': 0
 };
 
@@ -927,9 +964,11 @@ export function parseStationeryMasterImportRows(rawRows = []) {
     }
     const rawCode = String(getCellCI(raw, ['Kode Material', 'Item Code', 'Kode', 'Code']) || '').trim();
     const unit = normText(getCellCI(raw, ['Satuan', 'Unit', 'Satuan Stock']) || 'PCS') || 'PCS';
-    const purchaseUnit = normText(getCellCI(raw, ['Satuan Minimal Pembelian', 'Purchase Unit', 'Satuan Pembelian', 'Satuan Beli']) || '') || deriveDefaultPurchaseUnit(itemName, unit);
-    const convRaw = getCellCI(raw, ['Konversi Satuan', 'Conversion Qty', 'Isi per Satuan', 'Isi Satuan', 'Konversi']);
+    const purchaseUnit = normText(getCellCI(raw, ['Satuan Pembelian', 'Satuan Minimal Pembelian', 'Purchase Unit', 'Satuan Beli']) || '') || deriveDefaultPurchaseUnit(itemName, unit);
+    const convRaw = getCellCI(raw, ['Konversi (1 Sat Beli =)', 'Konversi (1 Sat. Beli =)', 'Konversi Satuan', 'Conversion Qty', 'Isi per Satuan', 'Isi Satuan', 'Konversi']);
     const conversionQty = Math.max(1, Number(String(convRaw !== '' ? convRaw : 1).replace(/,/g, '.')) || 1);
+    const capRaw = getCellCI(raw, ['Kapasitas Gudang', 'Warehouse Capacity', 'Kapasitas', 'Max Stock', 'Max Capacity']);
+    const warehouseCapacity = Math.max(0, Math.round(Number(String(capRaw !== '' ? capRaw : 0).replace(/,/g, '.')) || 0));
     const openingRaw = getCellCI(raw, ['Saldo Awal', 'Stock Awal', 'Opening Stock', 'Current Stock', 'Stok Awal', 'Stok']);
     const openingStock = Math.max(0, Number(String(openingRaw || 0).replace(/,/g, '.')) || 0);
     const minRaw = getCellCI(raw, ['Min Stock', 'Minimum Stock', 'Minimal Stock', 'Min Stok']);
@@ -943,6 +982,7 @@ export function parseStationeryMasterImportRows(rawRows = []) {
       unit,
       purchase_unit: purchaseUnit,
       conversion_qty: conversionQty,
+      warehouse_capacity: warehouseCapacity,
       opening_stock: openingStock,
       min_stock: minStock,
       min_purchase_qty: minPurchaseQty
@@ -981,6 +1021,9 @@ export function importStationeryMasterDataset({
       existing.unit = r.unit || existing.unit;
       existing.purchase_unit = r.purchase_unit || existing.purchase_unit;
       existing.conversion_qty = Math.max(1, Number(r.conversion_qty ?? existing.conversion_qty ?? 1));
+      if (r.warehouse_capacity !== undefined) {
+        existing.warehouse_capacity = Math.max(0, Math.round(Number(r.warehouse_capacity) || 0));
+      }
       existing.opening_stock = Number(r.opening_stock ?? existing.opening_stock);
       if (replaceExisting) {
         existing.current_stock = Number(r.opening_stock ?? 0);
@@ -999,6 +1042,7 @@ export function importStationeryMasterDataset({
         unit: r.unit || 'PCS',
         purchase_unit: r.purchase_unit || deriveDefaultPurchaseUnit(cleanName, r.unit || 'PCS'),
         conversion_qty: Math.max(1, Number(r.conversion_qty) || 1),
+        warehouse_capacity: Math.max(0, Math.round(Number(r.warehouse_capacity) || 0)),
         min_purchase_qty: Math.max(1, Number(r.min_purchase_qty) || 1),
         opening_stock: Number(r.opening_stock || 0),
         current_stock: Number(r.opening_stock || 0),
@@ -1128,6 +1172,7 @@ export function importStationeryMovementsDataset({
         unit,
         purchase_unit: deriveDefaultPurchaseUnit(r.item_name || '', unit),
         conversion_qty: 1,
+        warehouse_capacity: 0,
         min_purchase_qty: 1,
         opening_stock: 0,
         current_stock: 0,

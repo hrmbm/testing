@@ -183,14 +183,35 @@ function fmtIdr(val) {
   return `Rp ${Math.round(Number(val || 0)).toLocaleString('id-ID')}`;
 }
 
+function showFloatingSavedToast(msg, tone = 'info') {
+  if (typeof document === 'undefined' || !document.body) return;
+  let wrap = document.getElementById('ops-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'ops-toast-wrap';
+    wrap.className = 'ops-toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  const item = document.createElement('div');
+  item.className = `ops-toast-item ops-toast-${tone}`;
+  item.setAttribute('role', 'status');
+  item.textContent = tone === 'ok' ? `✓ ${msg}` : msg;
+  wrap.appendChild(item);
+  setTimeout(() => {
+    item.classList.add('is-leaving');
+    setTimeout(() => item.remove(), 220);
+  }, 4200);
+}
+
 function showInlineBanner(host, msg, tone = 'info') {
+  showFloatingSavedToast(msg, tone);
   if (!host) return;
   const old = host.querySelector('.ops-flash-banner');
   if (old) old.remove();
   const div = document.createElement('div');
   div.className = `ops-flash-banner ops-flash-${tone}`;
   div.setAttribute('role', 'status');
-  div.textContent = msg;
+  div.textContent = tone === 'ok' ? `✓ ${msg}` : msg;
   host.prepend(div);
   setTimeout(() => div.remove(), 6000);
 }
@@ -357,6 +378,7 @@ function extractMaterialMetaMap(items = []) {
     out[code] = {
       purchase_unit: String(it?.purchase_unit || deriveDefaultPurchaseUnit(it?.item_name || '', it?.unit || 'PCS')).trim().toUpperCase(),
       conversion_qty: Math.max(1, Number(it?.conversion_qty ?? 1) || 1),
+      warehouse_capacity: Math.max(0, Math.round(Number(it?.warehouse_capacity ?? 0) || 0)),
       min_purchase_qty: Math.max(1, Number(it?.min_purchase_qty) || 1)
     };
   }
@@ -373,6 +395,7 @@ function mergeMaterialMeta(items = [], metaMap = {}) {
         ...it,
         purchase_unit: meta.purchase_unit || it.purchase_unit,
         conversion_qty: meta.conversion_qty ?? it.conversion_qty,
+        warehouse_capacity: meta.warehouse_capacity ?? it.warehouse_capacity,
         min_purchase_qty: meta.min_purchase_qty ?? it.min_purchase_qty
       };
     })
@@ -2194,27 +2217,11 @@ export async function renderDriverScheduleView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Daftar Jadwal Manual Driver (${state.driverSchedules.length})</h2>
-            <p class="ops-sub">Input manual per kegiatan atau import massal dari Excel/CSV (termasuk sheet referensi Daftar Driver).</p>
+            <p class="ops-sub">Input jadwal harian driver secara manual per kegiatan (import massal tersedia di System Settings &rarr; Data Import).</p>
           </div>
           <div class="ops-actions">
-            <button type="button" class="btn btn-secondary" id="ops-ds-dl-xlsx">Template Excel ↓</button>
-            <button type="button" class="btn btn-secondary" id="ops-ds-dl-csv">Template CSV ↓</button>
             <button type="button" class="btn btn-primary" id="ops-ds-open-modal">+ Tambah Jadwal</button>
           </div>
-        </div>
-
-        <div id="ops-ds-import-bar" class="ops-inline-import-bar">
-          <div class="ops-inline-import-controls">
-            <input id="ops-ds-import-file" class="input" type="file" accept=".xlsx,.xls,.csv" aria-label="Pilih file import jadwal driver">
-            <label class="ops-check" style="margin:0;white-space:nowrap">
-              <input id="ops-ds-import-replace" type="checkbox">
-              <span>Timpa seluruh jadwal lama</span>
-            </label>
-            <button type="button" class="btn btn-primary" id="ops-ds-import-submit" disabled>Import Jadwal Driver</button>
-          </div>
-          <div id="ops-ds-import-preview" class="upload-preview-box hidden"></div>
-          <div id="ops-ds-import-warn" class="form-warning" role="status"></div>
-          <div id="ops-ds-import-error" class="form-error" role="alert"></div>
         </div>
 
         <div class="table-wrap" style="margin-top:12px">
@@ -2253,6 +2260,29 @@ export async function renderDriverScheduleView(host, ctx) {
     </div>
   `;
 
+  const buildTime24Html = (prefix, label, val = '') => {
+    const parts = String(val || '').match(/^(\d{1,2}):(\d{2})$/);
+    const hh = parts ? parts[1].padStart(2, '0') : '';
+    const mm = parts ? parts[2].padStart(2, '0') : '';
+    return `
+      <div class="ops-time24-group" role="group" aria-label="${esc(label)} (24 Jam)">
+        <input type="text" inputmode="numeric" maxlength="2" class="input ops-time24-hh ${prefix}-hh" value="${esc(hh)}" placeholder="JJ" aria-label="${esc(label)} Jam (00-23)">
+        <span class="ops-time24-sep">:</span>
+        <input type="text" inputmode="numeric" maxlength="2" class="input ops-time24-mm ${prefix}-mm" value="${esc(mm)}" placeholder="MM" aria-label="${esc(label)} Menit (00-59)">
+      </div>
+    `;
+  };
+
+  const readTime24Value = (rowEl, prefix) => {
+    const hhRaw = String(rowEl?.querySelector(`.${prefix}-hh`)?.value || '').replace(/\D/g, '');
+    const mmRaw = String(rowEl?.querySelector(`.${prefix}-mm`)?.value || '').replace(/\D/g, '');
+    if (!hhRaw && !mmRaw) return '';
+    if (!hhRaw) return '';
+    const hhNum = Math.min(23, Math.max(0, Number(hhRaw)));
+    const mmNum = mmRaw === '' ? 0 : Math.min(59, Math.max(0, Number(mmRaw)));
+    return `${String(hhNum).padStart(2, '0')}:${String(mmNum).padStart(2, '0')}`;
+  };
+
   const openDriverScheduleModal = ({ preDate = '2026-11-14', preDriver = '', preSection = '' } = {}) => {
     document.getElementById('ops-ds-modal')?.remove();
     const chosenDriver = preDriver || driverList[0]?.employee_no || '';
@@ -2261,8 +2291,8 @@ export async function renderDriverScheduleView(host, ctx) {
     const buildActivityRowHtml = idx => `
       <div class="drv-act-row drv-act-modal-row">
         <label class="ops-field drv-act-desc-wrap"><span>Kegiatan #${idx + 1}</span><input type="text" class="input drv-act-desc" placeholder="Contoh: Mengantar Direksi"></label>
-        <label class="ops-field"><span>Jam Mulai</span><input type="time" class="input drv-act-start" value=""></label>
-        <label class="ops-field"><span>Jam Selesai</span><input type="time" class="input drv-act-end" value=""></label>
+        <div class="ops-field"><span>Jam Mulai (24J)</span>${buildTime24Html('drv-act-start', `Jam Mulai Kegiatan ${idx + 1}`)}</div>
+        <div class="ops-field"><span>Jam Selesai (24J)</span>${buildTime24Html('drv-act-end', `Jam Selesai Kegiatan ${idx + 1}`)}</div>
         <label class="ops-check drv-act-home-wrap"><input type="checkbox" class="drv-act-home"> <span>s/d Selesai / Pulang</span></label>
         <button type="button" class="btn btn-sm btn-secondary drv-act-del" title="Hapus kegiatan">Hapus</button>
       </div>
@@ -2275,7 +2305,7 @@ export async function renderDriverScheduleView(host, ctx) {
       <section class="employee-modal-card ops-modal-wide" role="dialog" aria-modal="true" aria-labelledby="ops-ds-modal-title">
         <div class="employee-modal-head">
           <div>
-            <small>DRIVERS · SCHEDULE INPUT</small>
+            <small>DRIVERS · SCHEDULE INPUT (24 JAM)</small>
             <h2 id="ops-ds-modal-title">Tambah Jadwal Driver</h2>
           </div>
           <button type="button" class="btn btn-sm btn-secondary" id="ops-ds-modal-close" aria-label="Tutup">×</button>
@@ -2298,7 +2328,7 @@ export async function renderDriverScheduleView(host, ctx) {
 
         <div class="drv-activities-box">
           <div class="drv-activities-head">
-            <b>Kegiatan &amp; Estimasi Jam (5 baris awal, isi minimal 1)</b>
+            <b>Kegiatan &amp; Estimasi Jam — Format 24 Jam JJ:MM (5 baris awal)</b>
             <button type="button" class="btn btn-sm btn-secondary" id="ops-ds-add-act">+ Tambah Kegiatan</button>
           </div>
           <div id="ops-ds-act-list" class="drv-act-list ops-modal-scroll">
@@ -2333,37 +2363,102 @@ export async function renderDriverScheduleView(host, ctx) {
     const actList = modal.querySelector('#ops-ds-act-list');
     const errBox = modal.querySelector('#ops-ds-modal-err');
 
-    const bindActRow = rowEl => {
-      const chk = rowEl.querySelector('.drv-act-home');
-      const endInp = rowEl.querySelector('.drv-act-end');
-      chk?.addEventListener('change', () => {
-        if (endInp) {
-          endInp.disabled = chk.checked;
-          if (chk.checked) endInp.value = '';
+    // Delegated ultra-lightweight listeners for all activity rows (2-part 24h inputs + checkbox + delete)
+    actList?.addEventListener('input', e => {
+      const inp = e.target;
+      if (!inp.matches('.ops-time24-hh, .ops-time24-mm')) return;
+      const digits = inp.value.replace(/\D/g, '').slice(0, 2);
+      inp.value = digits;
+      if (digits.length === 2) {
+        const isHour = inp.classList.contains('ops-time24-hh');
+        const maxVal = isHour ? 23 : 59;
+        const clamped = Math.min(maxVal, Math.max(0, Number(digits)));
+        inp.value = String(clamped).padStart(2, '0');
+        if (isHour) {
+          const mmInp = inp.closest('.ops-time24-group')?.querySelector('.ops-time24-mm');
+          if (mmInp && !mmInp.disabled) {
+            mmInp.focus();
+            mmInp.select();
+          }
         }
-      });
-      rowEl.querySelector('.drv-act-del')?.addEventListener('click', () => {
-        if (actList.querySelectorAll('.drv-act-row').length > 1) {
-          rowEl.remove();
-        } else {
-          rowEl.querySelector('.drv-act-desc').value = '';
-          rowEl.querySelector('.drv-act-start').value = '';
-          if (endInp) { endInp.value = ''; endInp.disabled = false; }
-          if (chk) chk.checked = false;
+      }
+    });
+
+    actList?.addEventListener('keydown', e => {
+      const inp = e.target;
+      if (!inp.matches('.ops-time24-hh, .ops-time24-mm')) return;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const isHour = inp.classList.contains('ops-time24-hh');
+        const mod = isHour ? 24 : 60;
+        const cur = inp.value === '' ? (e.key === 'ArrowUp' ? 0 : mod - 1) : Number(inp.value);
+        const next = (cur + (e.key === 'ArrowUp' ? 1 : -1) + mod) % mod;
+        inp.value = String(next).padStart(2, '0');
+      } else if (e.key === ':' && inp.classList.contains('ops-time24-hh')) {
+        e.preventDefault();
+        if (inp.value) inp.value = String(Math.min(23, Math.max(0, Number(inp.value)))).padStart(2, '0');
+        const mmInp = inp.closest('.ops-time24-group')?.querySelector('.ops-time24-mm');
+        if (mmInp && !mmInp.disabled) {
+          mmInp.focus();
+          mmInp.select();
         }
+      }
+    });
+
+    actList?.addEventListener('focusout', e => {
+      const inp = e.target;
+      if (!inp.matches('.ops-time24-hh, .ops-time24-mm')) return;
+      const digits = inp.value.replace(/\D/g, '');
+      const isHour = inp.classList.contains('ops-time24-hh');
+      if (digits !== '') {
+        const clamped = Math.min(isHour ? 23 : 59, Math.max(0, Number(digits)));
+        inp.value = String(clamped).padStart(2, '0');
+      }
+      if (isHour && digits !== '') {
+        const mmInp = inp.closest('.ops-time24-group')?.querySelector('.ops-time24-mm');
+        if (mmInp && mmInp.value === '' && !mmInp.disabled) {
+          mmInp.value = '00';
+        }
+      }
+    });
+
+    actList?.addEventListener('change', e => {
+      const chk = e.target.closest('.drv-act-home');
+      if (!chk) return;
+      const rowEl = chk.closest('.drv-act-row');
+      const endHh = rowEl?.querySelector('.drv-act-end-hh');
+      const endMm = rowEl?.querySelector('.drv-act-end-mm');
+      [endHh, endMm].forEach(el => {
+        if (!el) return;
+        el.disabled = chk.checked;
+        if (chk.checked) el.value = '';
       });
-    };
-    actList.querySelectorAll('.drv-act-row').forEach(bindActRow);
+    });
+
+    actList?.addEventListener('click', e => {
+      const delBtn = e.target.closest('.drv-act-del');
+      if (!delBtn) return;
+      const rowEl = delBtn.closest('.drv-act-row');
+      if (!rowEl) return;
+      if (actList.querySelectorAll('.drv-act-row').length > 1) {
+        rowEl.remove();
+      } else {
+        rowEl.querySelector('.drv-act-desc').value = '';
+        rowEl.querySelectorAll('.ops-time24-hh, .ops-time24-mm').forEach(el => {
+          el.value = '';
+          el.disabled = false;
+        });
+        const chk = rowEl.querySelector('.drv-act-home');
+        if (chk) chk.checked = false;
+      }
+    });
 
     modal.querySelector('#ops-ds-add-act')?.addEventListener('click', () => {
       const nextIdx = actList.querySelectorAll('.drv-act-row').length;
       const tmp = document.createElement('div');
       tmp.innerHTML = buildActivityRowHtml(nextIdx);
       const row = tmp.firstElementChild;
-      if (row) {
-        actList.appendChild(row);
-        bindActRow(row);
-      }
+      if (row) actList.appendChild(row);
     });
 
     modal.querySelector('#ops-ds-add')?.addEventListener('click', async () => {
@@ -2380,9 +2475,9 @@ export async function renderDriverScheduleView(host, ctx) {
       const rawRows = [...actList.querySelectorAll('.drv-act-row')].map((r, idx) => ({
         idx: idx + 1,
         activity: r.querySelector('.drv-act-desc')?.value?.trim() || '',
-        start_time: r.querySelector('.drv-act-start')?.value || '',
+        start_time: readTime24Value(r, 'drv-act-start'),
         is_until_home: Boolean(r.querySelector('.drv-act-home')?.checked),
-        end_time: r.querySelector('.drv-act-end')?.value || ''
+        end_time: readTime24Value(r, 'drv-act-end')
       })).filter(r => r.activity || r.start_time || r.end_time || r.is_until_home);
 
       if (!rawRows.length) {
@@ -2391,11 +2486,11 @@ export async function renderDriverScheduleView(host, ctx) {
       }
       for (const r of rawRows) {
         if (!r.start_time) {
-          errBox.textContent = `Kegiatan #${r.idx}: Jam Mulai wajib diisi.`;
+          errBox.textContent = `Kegiatan #${r.idx}: Jam Mulai (JJ:MM) wajib diisi.`;
           return;
         }
         if (!r.is_until_home && !r.end_time) {
-          errBox.textContent = `Kegiatan #${r.idx}: isi Jam Selesai atau centang "s/d Selesai / Pulang".`;
+          errBox.textContent = `Kegiatan #${r.idx}: isi Jam Selesai (JJ:MM) atau centang "s/d Selesai / Pulang".`;
           return;
         }
       }
@@ -2449,77 +2544,6 @@ export async function renderDriverScheduleView(host, ctx) {
     });
   };
 
-  host.querySelector('#ops-ds-dl-xlsx')?.addEventListener('click', () => {
-    const refRows = buildDriverReferenceRows(allEmployees, state.settings);
-    exportMultiSheetObjectsXlsx('Template_Jadwal_Driver.xlsx', [
-      { name: 'Jadwal_Driver', headers: DRIVER_SCHEDULE_IMPORT_HEADERS, rows: DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS },
-      { name: 'Ref_Daftar_Driver', headers: DRIVER_REF_HEADERS, rows: refRows }
-    ]);
-  });
-
-  host.querySelector('#ops-ds-dl-csv')?.addEventListener('click', () => {
-    downloadOpsCsvObjects(DRIVER_SCHEDULE_IMPORT_HEADERS, DRIVER_SCHEDULE_IMPORT_SAMPLE_ROWS, 'Template_Jadwal_Driver.csv');
-  });
-
-  let rawDsImportRows = [];
-  const dsFileEl = host.querySelector('#ops-ds-import-file');
-  const dsSubmitEl = host.querySelector('#ops-ds-import-submit');
-  const dsPrevEl = host.querySelector('#ops-ds-import-preview');
-  const dsWarnEl = host.querySelector('#ops-ds-import-warn');
-  const dsErrEl = host.querySelector('#ops-ds-import-error');
-  const dsReplaceEl = host.querySelector('#ops-ds-import-replace');
-
-  dsFileEl?.addEventListener('change', async () => {
-    rawDsImportRows = [];
-    dsSubmitEl.disabled = true;
-    dsWarnEl.textContent = '';
-    dsErrEl.textContent = '';
-    dsPrevEl.classList.add('hidden');
-    const file = dsFileEl.files?.[0];
-    if (!file) return;
-    try {
-      const raw = await readOpsSpreadsheetObjects(file);
-      const parsed = parseDriverScheduleImportRows(raw, allEmployees, state.settings);
-      if (!parsed.rows.length) {
-        dsErrEl.textContent = parsed.errors.slice(0, 3).join(' ') || 'Tidak ada jadwal driver yang valid di file ini.';
-        return;
-      }
-      if (parsed.errors.length || parsed.warnings.length || parsed.conflicts.length) {
-        const msgs = [
-          parsed.errors.length ? `${parsed.errors.length} baris dilewati` : '',
-          parsed.warnings.length ? `${parsed.warnings.length} peringatan` : '',
-          parsed.conflicts.length ? `${parsed.conflicts.length} konflik jam (${parsed.conflicts[0].message})` : ''
-        ].filter(Boolean);
-        dsWarnEl.textContent = msgs.join(' · ');
-      }
-      rawDsImportRows = raw;
-      dsSubmitEl.disabled = false;
-      dsPrevEl.classList.remove('hidden');
-      dsPrevEl.innerHTML = `<b>${parsed.rows.length} jadwal (${parsed.activityCount} kegiatan) siap diimport</b><div style="margin-top:6px;max-height:130px;overflow:auto">${parsed.rows.slice(0, 8).map(r => `<div>• ${esc(r.work_date)} · <b>${esc(r.driver_name)}</b> (${esc(r.section)}) — ${esc(r.destination)}</div>`).join('')}${parsed.rows.length > 8 ? `<div>… dan ${parsed.rows.length - 8} jadwal lainnya</div>` : ''}</div>`;
-    } catch (err) {
-      dsErrEl.textContent = formatAppError(err, 'Gagal membaca file jadwal driver.');
-    }
-  });
-
-  dsSubmitEl?.addEventListener('click', async () => {
-    if (!rawDsImportRows.length) return;
-    dsSubmitEl.disabled = true;
-    dsSubmitEl.textContent = 'Importing…';
-    dsErrEl.textContent = '';
-    try {
-      const res = await importDriverScheduleAction(ctx, {
-        rawRows: rawDsImportRows,
-        replaceExisting: Boolean(dsReplaceEl?.checked)
-      });
-      await renderDriverScheduleView(host, ctx);
-      showInlineBanner(host, `Berhasil mengimport ${res.importedCount} jadwal driver (${res.activityCount} kegiatan).`, 'ok');
-    } catch (err) {
-      dsErrEl.textContent = formatAppError(err, 'Gagal mengimport jadwal driver.');
-      dsSubmitEl.disabled = false;
-      dsSubmitEl.textContent = 'Import Jadwal Driver';
-    }
-  });
-
   host.querySelector('#ops-ds-open-modal')?.addEventListener('click', () => {
     openDriverScheduleModal({});
   });
@@ -2548,7 +2572,8 @@ export async function renderDriverScheduleView(host, ctx) {
         }
         invalidateOpsStateCache();
       }
-      renderDriverScheduleView(host, ctx);
+      await renderDriverScheduleView(host, ctx);
+      showInlineBanner(host, 'Jadwal driver dihapus.', 'ok');
     }
   });
 }
@@ -2868,27 +2893,28 @@ export async function renderStationeryInputView(host, ctx) {
 
   const openTransactionModal = () => {
     document.getElementById('ops-atk-modal')?.remove();
-    const buildItemOptionsHtml = () => [
-      `<option value="">-- Pilih Item ATK --</option>`,
-      ...items.map(it =>
-        `<option value="${esc(it.id)}" data-unit="${esc(it.unit)}">${esc(it.item_code)} — ${esc(it.item_name)} (Stok: ${it.current_stock} ${esc(it.unit)})</option>`
-      )
-    ].join('');
+    const indexedItems = items.map(it => ({
+      it,
+      codeLc: String(it.item_code || '').toLowerCase(),
+      nameLc: String(it.item_name || '').toLowerCase(),
+      label: `${it.item_code} — ${it.item_name}`
+    }));
 
     const buildBlankBatchRowHtml = idx => `
       <tr class="atk-batch-row">
         <td class="num">${idx + 1}</td>
         <td>
-          <select class="input atk-batch-item" aria-label="Pilih item ATK baris ${idx + 1}">
-            ${buildItemOptionsHtml()}
-          </select>
+          <div class="atk-combo-wrap">
+            <input type="hidden" class="atk-batch-item" value="">
+            <input type="text" class="input atk-batch-search" value="" placeholder="Ketik kode atau nama item..." autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Cari item ATK baris ${idx + 1}">
+          </div>
         </td>
         <td>
           <input type="number" min="1" step="1" class="input atk-batch-qty" value="" placeholder="0" aria-label="Qty baris ${idx + 1}">
         </td>
         <td class="atk-batch-unit-cell"><span class="pill atk-batch-unit">-</span></td>
         <td>
-          <input type="text" class="input atk-batch-notes" placeholder="Opsional" aria-label="Keterangan baris ${idx + 1}">
+          <input type="text" class="input atk-batch-notes" placeholder="Keterangan opsional" aria-label="Keterangan baris ${idx + 1}">
         </td>
         <td>
           <button type="button" class="btn btn-sm btn-secondary atk-batch-del">Hapus</button>
@@ -2925,7 +2951,7 @@ export async function renderStationeryInputView(host, ctx) {
         </div>
 
         <div class="drv-activities-head" style="margin-top:14px">
-          <b>Daftar Item Transaksi (10 baris awal, isi minimal 1)</b>
+          <b>Daftar Item Transaksi — Ketik item &rarr; &darr;/&uarr; &rarr; Enter (otomatis ke Qty &rarr; Enter lanjut baris)</b>
           <button type="button" class="btn btn-sm btn-secondary" id="ops-atk-add-row">+ Tambah Baris</button>
         </div>
 
@@ -2947,6 +2973,8 @@ export async function renderStationeryInputView(host, ctx) {
           </table>
         </div>
 
+        <div id="ops-atk-combo-menu" class="atk-combo-menu hidden" role="listbox" aria-label="Saran item ATK"></div>
+
         <div id="ops-atk-modal-err" class="form-error" role="alert" style="margin-top:10px"></div>
 
         <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px">
@@ -2957,22 +2985,48 @@ export async function renderStationeryInputView(host, ctx) {
     `;
     document.body.appendChild(modal);
 
+    const batchBody = modal.querySelector('#ops-atk-batch-body');
+    const errBox = modal.querySelector('#ops-atk-modal-err');
+    const comboMenu = modal.querySelector('#ops-atk-combo-menu');
+    let activeSearchInp = null;
+    let currentMatches = [];
+    let activeMatchIdx = 0;
+
+    const closeComboMenu = () => {
+      if (activeSearchInp) activeSearchInp.setAttribute('aria-expanded', 'false');
+      activeSearchInp = null;
+      currentMatches = [];
+      activeMatchIdx = 0;
+      if (comboMenu) {
+        comboMenu.classList.add('hidden');
+        comboMenu.innerHTML = '';
+      }
+    };
+
     const closeModal = () => {
+      closeComboMenu();
       document.removeEventListener('keydown', onEsc);
       modal.remove();
     };
     const onEsc = e => {
-      if (e.key === 'Escape') closeModal();
+      if (e.key === 'Escape') {
+        if (comboMenu && !comboMenu.classList.contains('hidden')) {
+          e.stopPropagation();
+          closeComboMenu();
+          return;
+        }
+        closeModal();
+      }
     };
     document.addEventListener('keydown', onEsc);
     modal.addEventListener('click', e => {
       if (e.target === modal) closeModal();
+      else if (!e.target.closest('.atk-combo-wrap') && !e.target.closest('#ops-atk-combo-menu')) {
+        closeComboMenu();
+      }
     });
     modal.querySelector('#ops-atk-modal-close')?.addEventListener('click', closeModal);
     modal.querySelector('#ops-atk-modal-cancel')?.addEventListener('click', closeModal);
-
-    const batchBody = modal.querySelector('#ops-atk-batch-body');
-    const errBox = modal.querySelector('#ops-atk-modal-err');
 
     const renumberRows = () => {
       batchBody?.querySelectorAll('.atk-batch-row').forEach((tr, i) => {
@@ -2981,40 +3035,216 @@ export async function renderStationeryInputView(host, ctx) {
       });
     };
 
-    const bindBatchRow = rowEl => {
-      const sel = rowEl.querySelector('.atk-batch-item');
-      const unitBadge = rowEl.querySelector('.atk-batch-unit');
-      const qtyInp = rowEl.querySelector('.atk-batch-qty');
-      const notesInp = rowEl.querySelector('.atk-batch-notes');
-      sel?.addEventListener('change', () => {
-        const it = itemById.get(sel.value);
-        if (unitBadge) unitBadge.textContent = it?.unit || '-';
-        if (it && !qtyInp.value) qtyInp.value = '1';
-        if (!sel.value && qtyInp) qtyInp.value = '';
-      });
-      rowEl.querySelector('.atk-batch-del')?.addEventListener('click', () => {
-        if (batchBody.querySelectorAll('.atk-batch-row').length > 1) {
-          rowEl.remove();
-          renumberRows();
-        } else {
-          if (sel) sel.value = '';
-          if (qtyInp) qtyInp.value = '';
-          if (notesInp) notesInp.value = '';
-          if (unitBadge) unitBadge.textContent = '-';
-        }
-      });
-    };
-    batchBody?.querySelectorAll('.atk-batch-row').forEach(bindBatchRow);
-
-    modal.querySelector('#ops-atk-add-row')?.addEventListener('click', () => {
+    const appendBlankRow = () => {
       const idx = batchBody?.querySelectorAll('.atk-batch-row').length || 0;
       const tmp = document.createElement('tbody');
       tmp.innerHTML = buildBlankBatchRowHtml(idx);
       const newRow = tmp.firstElementChild;
-      if (newRow && batchBody) {
-        batchBody.appendChild(newRow);
-        bindBatchRow(newRow);
+      if (newRow && batchBody) batchBody.appendChild(newRow);
+      return newRow;
+    };
+
+    const findComboMatches = query => {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return indexedItems.slice(0, 14).map(x => x.it);
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const scored = [];
+      for (const entry of indexedItems) {
+        const codeMatch = entry.codeLc.includes(q);
+        const tokenMatch = tokens.every(t => entry.nameLc.includes(t) || entry.codeLc.includes(t));
+        if (!codeMatch && !tokenMatch) continue;
+        let rank = 2;
+        if (entry.codeLc.startsWith(q) || entry.nameLc.startsWith(q)) rank = 0;
+        else if (codeMatch || entry.nameLc.includes(q)) rank = 1;
+        scored.push({ rank, it: entry.it });
       }
+      scored.sort((a, b) => a.rank - b.rank || a.it.item_name.localeCompare(b.it.item_name));
+      return scored.slice(0, 15).map(s => s.it);
+    };
+
+    const highlightComboOption = idx => {
+      if (!comboMenu) return;
+      activeMatchIdx = currentMatches.length
+        ? Math.max(0, Math.min(currentMatches.length - 1, idx))
+        : 0;
+      comboMenu.querySelectorAll('.atk-combo-opt').forEach((el, i) => {
+        const active = i === activeMatchIdx;
+        el.classList.toggle('is-active', active);
+        el.setAttribute('aria-selected', active ? 'true' : 'false');
+        if (active) el.scrollIntoView({ block: 'nearest' });
+      });
+    };
+
+    const positionComboMenu = inp => {
+      if (!comboMenu || !inp) return;
+      const rect = inp.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom - 14;
+      const showAbove = spaceBelow < 190 && rect.top > 220;
+      comboMenu.style.left = `${Math.max(10, rect.left)}px`;
+      comboMenu.style.width = `${Math.min(460, Math.max(380, rect.width))}px`;
+      if (showAbove) {
+        comboMenu.style.top = 'auto';
+        comboMenu.style.bottom = `${Math.max(10, window.innerHeight - rect.top + 4)}px`;
+      } else {
+        comboMenu.style.bottom = 'auto';
+        comboMenu.style.top = `${Math.min(window.innerHeight - 160, rect.bottom + 4)}px`;
+      }
+    };
+
+    const renderComboMenuFor = inp => {
+      if (!comboMenu || !inp) return;
+      activeSearchInp = inp;
+      inp.setAttribute('aria-expanded', 'true');
+      currentMatches = findComboMatches(inp.value);
+      activeMatchIdx = 0;
+      if (!currentMatches.length) {
+        comboMenu.innerHTML = '<div class="atk-combo-empty">Item tidak ditemukan</div>';
+      } else {
+        comboMenu.innerHTML = currentMatches.map((it, idx) => `
+          <button type="button" class="atk-combo-opt ${idx === 0 ? 'is-active' : ''}" role="option" aria-selected="${idx === 0 ? 'true' : 'false'}" data-idx="${idx}" data-id="${esc(it.id)}">
+            <span class="atk-combo-opt-main"><code>${esc(it.item_code)}</code> <b>${esc(it.item_name)}</b></span>
+            <span class="atk-combo-opt-stock">Stok: ${it.current_stock} ${esc(it.unit)}</span>
+          </button>
+        `).join('');
+      }
+      positionComboMenu(inp);
+      comboMenu.classList.remove('hidden');
+    };
+
+    const commitItemSelection = (inp, itemObj, { moveToQty = true } = {}) => {
+      if (!inp || !itemObj) return;
+      const rowEl = inp.closest('.atk-batch-row');
+      const hiddenInp = rowEl?.querySelector('.atk-batch-item');
+      const unitBadge = rowEl?.querySelector('.atk-batch-unit');
+      const qtyInp = rowEl?.querySelector('.atk-batch-qty');
+      if (hiddenInp) hiddenInp.value = itemObj.id;
+      inp.value = `${itemObj.item_code} — ${itemObj.item_name}`;
+      inp.dataset.committedLabel = inp.value;
+      if (unitBadge) unitBadge.textContent = itemObj.unit || '-';
+      if (qtyInp && !qtyInp.value) qtyInp.value = '1';
+      closeComboMenu();
+      if (moveToQty && qtyInp) {
+        qtyInp.focus();
+        qtyInp.select();
+      }
+    };
+
+    comboMenu?.addEventListener('mousedown', e => {
+      const optBtn = e.target.closest('.atk-combo-opt');
+      if (!optBtn || !activeSearchInp) return;
+      e.preventDefault();
+      const it = itemById.get(optBtn.dataset.id);
+      if (it) commitItemSelection(activeSearchInp, it, { moveToQty: true });
+    });
+
+    // Single delegated event handling for all 10+ batch rows (zero per-row listeners)
+    batchBody?.addEventListener('focusin', e => {
+      const searchInp = e.target.closest('.atk-batch-search');
+      if (searchInp) renderComboMenuFor(searchInp);
+    });
+
+    batchBody?.addEventListener('input', e => {
+      const searchInp = e.target.closest('.atk-batch-search');
+      if (!searchInp) return;
+      const rowEl = searchInp.closest('.atk-batch-row');
+      const hiddenInp = rowEl?.querySelector('.atk-batch-item');
+      const unitBadge = rowEl?.querySelector('.atk-batch-unit');
+      if (searchInp.value !== searchInp.dataset.committedLabel) {
+        if (hiddenInp) hiddenInp.value = '';
+        if (unitBadge) unitBadge.textContent = '-';
+      }
+      renderComboMenuFor(searchInp);
+    });
+
+    batchBody?.addEventListener('keydown', e => {
+      const searchInp = e.target.closest('.atk-batch-search');
+      if (searchInp) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (comboMenu?.classList.contains('hidden')) renderComboMenuFor(searchInp);
+          else highlightComboOption(activeMatchIdx + 1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          highlightComboOption(activeMatchIdx - 1);
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const chosen = currentMatches[activeMatchIdx] || currentMatches[0];
+          if (chosen) {
+            commitItemSelection(searchInp, chosen, { moveToQty: true });
+          } else {
+            const qtyInp = searchInp.closest('.atk-batch-row')?.querySelector('.atk-batch-qty');
+            qtyInp?.focus();
+          }
+          return;
+        }
+        if (e.key === 'Tab' && !e.shiftKey) {
+          const hiddenInp = searchInp.closest('.atk-batch-row')?.querySelector('.atk-batch-item');
+          if (!hiddenInp?.value && searchInp.value.trim() && currentMatches.length) {
+            e.preventDefault();
+            commitItemSelection(searchInp, currentMatches[activeMatchIdx] || currentMatches[0], { moveToQty: true });
+          } else {
+            closeComboMenu();
+          }
+          return;
+        }
+        if (e.key === 'Escape' && comboMenu && !comboMenu.classList.contains('hidden')) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeComboMenu();
+        }
+        return;
+      }
+
+      const qtyInp = e.target.closest('.atk-batch-qty');
+      if (qtyInp && e.key === 'Enter') {
+        e.preventDefault();
+        const notesInp = qtyInp.closest('.atk-batch-row')?.querySelector('.atk-batch-notes');
+        notesInp?.focus();
+        notesInp?.select();
+        return;
+      }
+
+      const notesInp = e.target.closest('.atk-batch-notes');
+      if (notesInp && e.key === 'Enter') {
+        e.preventDefault();
+        const rowEl = notesInp.closest('.atk-batch-row');
+        let nextRow = rowEl?.nextElementSibling;
+        if (!nextRow) nextRow = appendBlankRow();
+        const nextSearch = nextRow?.querySelector('.atk-batch-search');
+        nextSearch?.focus();
+      }
+    });
+
+    batchBody?.addEventListener('click', e => {
+      const delBtn = e.target.closest('.atk-batch-del');
+      if (!delBtn) return;
+      const rowEl = delBtn.closest('.atk-batch-row');
+      if (!rowEl) return;
+      if (activeSearchInp && rowEl.contains(activeSearchInp)) closeComboMenu();
+      if (batchBody.querySelectorAll('.atk-batch-row').length > 1) {
+        rowEl.remove();
+        renumberRows();
+      } else {
+        const hiddenInp = rowEl.querySelector('.atk-batch-item');
+        const searchInp = rowEl.querySelector('.atk-batch-search');
+        const qtyInp = rowEl.querySelector('.atk-batch-qty');
+        const notesInp = rowEl.querySelector('.atk-batch-notes');
+        const unitBadge = rowEl.querySelector('.atk-batch-unit');
+        if (hiddenInp) hiddenInp.value = '';
+        if (searchInp) { searchInp.value = ''; searchInp.dataset.committedLabel = ''; }
+        if (qtyInp) qtyInp.value = '';
+        if (notesInp) notesInp.value = '';
+        if (unitBadge) unitBadge.textContent = '-';
+      }
+    });
+
+    modal.querySelector('#ops-atk-add-row')?.addEventListener('click', () => {
+      const added = appendBlankRow();
+      added?.querySelector('.atk-batch-search')?.focus();
     });
 
     modal.querySelector('#ops-atk-submit')?.addEventListener('click', async () => {
@@ -3024,16 +3254,30 @@ export async function renderStationeryInputView(host, ctx) {
       const department = modal.querySelector('#ops-atk-dept')?.value || 'HR GA';
 
       const selectedRows = [...(batchBody?.querySelectorAll('.atk-batch-row') || [])]
-        .map((tr, i) => ({
-          rowNo: i + 1,
-          item_id: tr.querySelector('.atk-batch-item')?.value || '',
-          qty: Number(tr.querySelector('.atk-batch-qty')?.value || 0),
-          notes: tr.querySelector('.atk-batch-notes')?.value?.trim() || ''
-        }))
-        .filter(r => r.item_id !== '');
+        .map((tr, i) => {
+          let itemId = tr.querySelector('.atk-batch-item')?.value || '';
+          const typedVal = tr.querySelector('.atk-batch-search')?.value?.trim() || '';
+          if (!itemId && typedVal) {
+            const direct = findComboMatches(typedVal);
+            if (direct.length === 1) itemId = direct[0].id;
+          }
+          return {
+            rowNo: i + 1,
+            item_id: itemId,
+            typedVal,
+            qty: Number(tr.querySelector('.atk-batch-qty')?.value || 0),
+            notes: tr.querySelector('.atk-batch-notes')?.value?.trim() || ''
+          };
+        })
+        .filter(r => r.item_id !== '' || r.typedVal !== '');
 
       if (!selectedRows.length) {
         errBox.textContent = 'Pilih minimal 1 item ATK untuk disimpan.';
+        return;
+      }
+      const unresolvedRow = selectedRows.find(r => !r.item_id);
+      if (unresolvedRow) {
+        errBox.textContent = `Baris #${unresolvedRow.rowNo}: pilih item "${unresolvedRow.typedVal}" dari daftar saran terlebih dahulu.`;
         return;
       }
       const badQtyRow = selectedRows.find(r => !Number.isFinite(r.qty) || r.qty <= 0);
@@ -3099,6 +3343,10 @@ export async function renderStationeryInputView(host, ctx) {
         errBox.textContent = formatAppError(err, 'Transaksi ditolak.');
       }
     });
+
+    setTimeout(() => {
+      batchBody?.querySelector('.atk-batch-search')?.focus();
+    }, 30);
   };
 
   host.querySelector('#ops-atk-open-modal')?.addEventListener('click', openTransactionModal);
@@ -3834,8 +4082,8 @@ export async function renderStationeryReportsView(host, ctx) {
                       <b>${esc(r.item_name)}</b>
                       ${r.isManualAdded ? '<div class="ops-sub-note">Ditambahkan manual</div>' : ''}
                     </td>
-                    <td class="num"><b>${r.currentStock}</b></td>
-                    <td class="num"><b>${r.periodRequirement}</b></td>
+                    <td class="num"><b>${r.currentStock}</b>${r.warehouseCapacity > 0 ? `<div class="ops-sub-note">Kap: ${r.warehouseCapacity}</div>` : ''}</td>
+                    <td class="num"><b>${r.periodRequirement}</b>${r.frequencyMultiplier === 1.5 ? '<div class="ops-sub-note">×1,5 Fast</div>' : ''}</td>
                     <td class="num">${r.minStock}</td>
                     <td>${esc(r.unit)}</td>
                     <td class="num">
@@ -3843,12 +4091,12 @@ export async function renderStationeryReportsView(host, ctx) {
                     </td>
                     <td>${esc(r.purchaseUnit)}</td>
                     <td class="num">
-                      <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" data-conv="${r.conversionQty}" data-unit="${esc(r.unit)}" data-punit="${esc(r.purchaseUnit)}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
+                      <input type="number" min="0" step="1" class="input atk-plan-input ops-plan-dec-inp" data-item-id="${esc(r.id)}" data-conv="${r.conversionQty}" data-unit="${esc(r.unit)}" data-punit="${esc(r.purchaseUnit)}" data-cap="${r.warehouseCapacity || 0}" data-stock="${r.currentStock || 0}" value="${esc(r.decisionQty)}" placeholder="" aria-label="Purchase qty decision for ${esc(r.item_name)}">
                     </td>
                     <td>${esc(r.purchaseUnit)}</td>
                     <td class="num atk-convert-cell" data-conv-cell="${esc(r.id)}">
                       ${r.convertedDecisionQty !== ''
-                        ? `<b>${r.convertedDecisionQty} ${esc(r.unit)}</b><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`
+                        ? `<b>${r.convertedDecisionQty} ${esc(r.unit)}</b><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>${r.exceedsCapacity ? `<div class="ops-sub-note" style="color:#b91c1c;font-weight:700">Melebihi kapasitas (${r.warehouseCapacity})</div>` : ''}`
                         : `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(r.purchaseUnit)} = ${r.conversionQty} ${esc(r.unit)}</div>`}
                     </td>
                     <td><span class="status-pill ${freqClass(r.frequency)}">${esc(r.frequency)}</span></td>
@@ -3918,6 +4166,7 @@ export async function renderStationeryReportsView(host, ctx) {
                   <th>Nama Item</th>
                   <th class="num">${esc(plan.window.requirementColumnLabel)}</th>
                   <th class="num">Min Stock</th>
+                  <th class="num">Kapasitas Gudang</th>
                   <th style="width:90px">Unit</th>
                 </tr>
               </thead>
@@ -3926,12 +4175,13 @@ export async function renderStationeryReportsView(host, ctx) {
                   <tr data-plan-id="${esc(r.id)}">
                     <td><b>#${r.priority ?? r.rank}</b></td>
                     <td><code>#${r.favRank ?? r.rank}</code></td>
-                    <td><b>${esc(r.item_name)}</b></td>
+                    <td><b>${esc(r.item_name)}</b>${r.frequencyMultiplier === 1.5 ? ' <span class="pill teal">×1.5</span>' : ''}</td>
                     <td class="num"><b>${r.periodRequirement}</b></td>
                     <td class="num">${r.minStock}</td>
+                    <td class="num">${r.warehouseCapacity > 0 ? r.warehouseCapacity : '<span class="ops-muted">Tak Terbatas</span>'}</td>
                     <td>${esc(r.unit)}</td>
                   </tr>
-                `).join('') : '<tr><td colspan="6" class="empty">No items match the current filter.</td></tr>'}
+                `).join('') : '<tr><td colspan="7" class="empty">No items match the current filter.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -4035,11 +4285,14 @@ export async function renderStationeryReportsView(host, ctx) {
       const convQty = Math.max(1, Number(inp.dataset.conv) || 1);
       const unitLbl = inp.dataset.unit || 'PCS';
       const pUnitLbl = inp.dataset.punit || 'PACK';
+      const cap = Math.max(0, Number(inp.dataset.cap) || 0);
+      const curStock = Number(inp.dataset.stock) || 0;
       const cell = host.querySelector(`[data-conv-cell="${CSS.escape(itemId)}"]`);
       if (cell) {
         if (inp.value !== '' && Number.isFinite(Number(inp.value))) {
           const totalConverted = Math.round(Math.max(0, Number(inp.value)) * convQty * 100) / 100;
-          cell.innerHTML = `<b>${totalConverted} ${esc(unitLbl)}</b><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>`;
+          const overCap = cap > 0 && (curStock + totalConverted) > cap;
+          cell.innerHTML = `<b>${totalConverted} ${esc(unitLbl)}</b><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>${overCap ? `<div class="ops-sub-note" style="color:#b91c1c;font-weight:700">Melebihi kapasitas (${cap})</div>` : ''}`;
         } else {
           cell.innerHTML = `<span class="ops-muted">—</span><div class="ops-sub-note">1 ${esc(pUnitLbl)} = ${convQty} ${esc(unitLbl)}</div>`;
         }
@@ -4245,16 +4498,31 @@ export async function renderStationeryMaterialsView(host, ctx) {
     ? state.stationeryDepartments
     : normalizeStationeryDepartments(SEED_STATIONERY_DEPARTMENTS, state.settings.stationery.canonicalSlocs);
   const searchQ = (host.dataset.matSearch || '').trim().toLowerCase();
+  const lastSavedMatId = host.dataset.matSavedId || '';
+  const lastSavedDeptId = host.dataset.deptSavedId || '';
+  const matPage = Number(host.dataset.matPage || 1) || 1;
+  const matPageSize = host.dataset.matPageSize === 'all' ? 'all' : (Number(host.dataset.matPageSize) || 25);
+
+  document.getElementById('ops-mat-edit-modal')?.remove();
+  document.getElementById('ops-dept-edit-modal')?.remove();
 
   const nextMatCode = generateNextMaterialCode(items);
   const nextDeptCode = generateNextDepartmentCode(departments);
   const unitOptions = ['PCS', 'PACK', 'RIM', 'BOX', 'SET', 'BOTOL', 'ROLL', 'BUAH'];
+  const buildUnitSelectOptions = selectedVal => {
+    const val = String(selectedVal || 'PCS').trim().toUpperCase();
+    return [
+      ...unitOptions.map(u => `<option value="${u}" ${val === u ? 'selected' : ''}>${u}</option>`),
+      !unitOptions.includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''
+    ].join('');
+  };
 
   const filteredItems = searchQ
     ? items.filter(it => it.item_name.toLowerCase().includes(searchQ) || it.item_code.includes(searchQ))
     : items;
+  const pagedItems = paginateRows(filteredItems, matPage, matPageSize);
 
-  const persistMaterialsState = async () => {
+  const persistDepartmentsState = async () => {
     state.settings.stationery.canonicalSlocs = state.stationeryDepartments.map(d => d.name);
     saveStoredDepartments(state.stationeryDepartments);
     if (ctx.isDemoMode) {
@@ -4264,10 +4532,25 @@ export async function renderStationeryMaterialsView(host, ctx) {
         { key: STATIONERY_DEPTS_KEY, value: state.stationeryDepartments },
         { key: OPS_SETTINGS_KEY, value: state.settings }
       ]);
-      if (error) {
-        showInlineBanner(host, `Gagal menyimpan pengaturan departemen: ${formatAppError(error)}`, 'error');
-        return;
+      if (error) throw error;
+      invalidateOpsStateCache();
+    }
+  };
+
+  const persistMaterialUpdate = async updatedList => {
+    state.stationeryItems = normalizeStationeryItems(updatedList);
+    const nextMeta = extractMaterialMetaMap(state.stationeryItems);
+    saveStoredMaterialMeta(nextMeta);
+    if (ctx.isDemoMode) {
+      saveDemoOpsState(state);
+    } else if (ctx.supabase) {
+      const targetItem = state.stationeryItems.find(it => it.id === host.dataset.matSavedId);
+      if (targetItem) {
+        const { error: itemErr } = await ctx.supabase.from('stationery_items').upsert(toSqlStationeryItemRow(targetItem), { onConflict: 'id' });
+        if (itemErr) throw itemErr;
       }
+      const { error: metaErr } = await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
+      if (metaErr) throw metaErr;
       invalidateOpsStateCache();
     }
   };
@@ -4278,6 +4561,7 @@ export async function renderStationeryMaterialsView(host, ctx) {
         <div class="ops-head">
           <div>
             <h2>Material Management</h2>
+            <p class="ops-sub">Kelola master material ATK, kapasitas gudang, konversi pembelian, dan daftar departemen.</p>
           </div>
           <div class="ops-actions">
             <button type="button" class="btn btn-secondary" id="mat-reset-stock-btn">Reset Stok &amp; Transaksi ATK (0)</button>
@@ -4304,18 +4588,22 @@ export async function renderStationeryMaterialsView(host, ctx) {
             <label class="ops-field">
               <span>Satuan</span>
               <select id="mat-add-unit" class="input">
-                ${unitOptions.map(u => `<option value="${u}">${u}</option>`).join('')}
+                ${buildUnitSelectOptions('PCS')}
               </select>
             </label>
             <label class="ops-field">
-              <span>Satuan Minimal Pembelian</span>
+              <span>Satuan Pembelian</span>
               <select id="mat-add-punit" class="input">
-                ${unitOptions.map(u => `<option value="${u}" ${u === 'PACK' ? 'selected' : ''}>${u}</option>`).join('')}
+                ${buildUnitSelectOptions('PACK')}
               </select>
             </label>
             <label class="ops-field">
-              <span>Isi per Satuan Beli (Konversi)</span>
+              <span>Konversi (1 Sat Beli =)</span>
               <input id="mat-add-conv" type="number" min="1" step="1" class="input" value="1" placeholder="Contoh: 36">
+            </label>
+            <label class="ops-field">
+              <span>Kapasitas Gudang (0 = Tak Terbatas)</span>
+              <input id="mat-add-cap" type="number" min="0" step="1" class="input" value="0" placeholder="Contoh: 360">
             </label>
             <div class="ops-field ops-field-end">
               <button type="button" class="btn btn-primary" id="mat-add-save">Tambah Material</button>
@@ -4334,43 +4622,40 @@ export async function renderStationeryMaterialsView(host, ctx) {
             <table>
               <thead>
                 <tr>
-                  <th style="width:110px">Kode Material</th>
+                  <th style="width:120px">Kode Material</th>
                   <th>Nama Item</th>
-                  <th style="width:110px">Satuan</th>
-                  <th style="width:150px">Satuan Pembelian</th>
-                  <th style="width:210px">Konversi (1 Sat. Beli =)</th>
-                  <th style="width:90px">Aksi</th>
+                  <th style="width:96px">Satuan</th>
+                  <th style="width:140px">Satuan Pembelian</th>
+                  <th style="width:170px">Konversi (1 Sat Beli =)</th>
+                  <th class="num" style="width:150px">Kapasitas Gudang</th>
+                  <th style="width:150px">Aksi</th>
                 </tr>
               </thead>
-              <tbody>
-                ${filteredItems.map(it => `
-                  <tr data-mat-id="${esc(it.id)}">
-                    <td><code>${esc(it.item_code)}</code></td>
-                    <td><input type="text" class="input mat-row-name atk-mat-name-input" value="${esc(it.item_name)}" aria-label="Nama item ${esc(it.item_code)}"></td>
-                    <td>
-                      <select class="input mat-row-unit" aria-label="Satuan ${esc(it.item_code)}">
-                        ${unitOptions.map(u => `<option value="${u}" ${it.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
-                        ${!unitOptions.includes(it.unit) ? `<option value="${esc(it.unit)}" selected>${esc(it.unit)}</option>` : ''}
-                      </select>
-                    </td>
-                    <td>
-                      <select class="input mat-row-punit" aria-label="Satuan pembelian ${esc(it.item_code)}">
-                        ${unitOptions.map(u => `<option value="${u}" ${it.purchase_unit === u ? 'selected' : ''}>${u}</option>`).join('')}
-                        ${!unitOptions.includes(it.purchase_unit) ? `<option value="${esc(it.purchase_unit)}" selected>${esc(it.purchase_unit)}</option>` : ''}
-                      </select>
-                    </td>
-                    <td>
-                      <div class="mat-conv-inline">
-                        <input type="number" min="1" step="1" class="input mat-row-conv atk-plan-input" value="${Math.max(1, Number(it.conversion_qty) || 1)}" aria-label="Konversi satuan ${esc(it.item_code)}">
-                        <span class="mat-conv-unit-lbl">${esc(it.unit)}</span>
-                      </div>
-                    </td>
-                    <td><button type="button" class="btn btn-sm btn-secondary mat-row-save" data-id="${esc(it.id)}">Simpan</button></td>
-                  </tr>
-                `).join('')}
+              <tbody id="mat-tbody">
+                ${pagedItems.items.length ? pagedItems.items.map(it => {
+                  const isSaved = it.id === lastSavedMatId;
+                  const capVal = Math.max(0, Number(it.warehouse_capacity) || 0);
+                  return `
+                    <tr data-mat-id="${esc(it.id)}" class="${isSaved ? 'is-row-saved' : ''}">
+                      <td><code>${esc(it.item_code)}</code></td>
+                      <td><b>${esc(it.item_name)}</b></td>
+                      <td>${esc(it.unit)}</td>
+                      <td>${esc(it.purchase_unit)}</td>
+                      <td><b>${Math.max(1, Number(it.conversion_qty) || 1)}</b> ${esc(it.unit)}</td>
+                      <td class="num">${capVal > 0 ? `<b>${capVal}</b> ${esc(it.unit)}` : '<span class="ops-muted">Tak Terbatas</span>'}</td>
+                      <td>
+                        <div class="ops-inline-actions">
+                          <button type="button" class="btn btn-sm btn-secondary mat-edit-btn" data-id="${esc(it.id)}" aria-label="Edit ${esc(it.item_name)}">Edit</button>
+                          ${isSaved ? '<span class="pill green mat-saved-pill">✓ Tersimpan</span>' : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('') : '<tr><td colspan="7" class="empty">Tidak ada material yang cocok dengan pencarian.</td></tr>'}
               </tbody>
             </table>
           </div>
+          <div id="mat-pagination-slot">${buildOpsPaginationHtml(pagedItems)}</div>
         </div>
       ` : `
         <div class="card ops-card">
@@ -4396,24 +4681,28 @@ export async function renderStationeryMaterialsView(host, ctx) {
             <table>
               <thead>
                 <tr>
-                  <th style="width:140px">Kode Departemen</th>
+                  <th style="width:160px">Kode Departemen</th>
                   <th>Nama Departemen</th>
-                  <th style="width:160px">Aksi</th>
+                  <th style="width:210px">Aksi</th>
                 </tr>
               </thead>
-              <tbody>
-                ${departments.map(d => `
-                  <tr data-dept-id="${esc(d.id)}">
-                    <td><input type="text" maxlength="3" class="input dept-row-code atk-dept-code-input" value="${esc(d.dept_code)}" aria-label="Kode departemen ${esc(d.name)}"></td>
-                    <td><input type="text" class="input dept-row-name atk-dept-name-input" value="${esc(d.name)}" aria-label="Nama departemen ${esc(d.dept_code)}"></td>
-                    <td>
-                      <div class="ops-inline-actions">
-                        <button type="button" class="btn btn-sm btn-secondary dept-row-save" data-id="${esc(d.id)}">Simpan</button>
-                        <button type="button" class="btn btn-sm btn-secondary dept-row-del" data-id="${esc(d.id)}">Hapus</button>
-                      </div>
-                    </td>
-                  </tr>
-                `).join('')}
+              <tbody id="dept-tbody">
+                ${departments.map(d => {
+                  const isSaved = d.id === lastSavedDeptId;
+                  return `
+                    <tr data-dept-id="${esc(d.id)}" class="${isSaved ? 'is-row-saved' : ''}">
+                      <td><code>${esc(d.dept_code)}</code></td>
+                      <td><b>${esc(d.name)}</b></td>
+                      <td>
+                        <div class="ops-inline-actions">
+                          <button type="button" class="btn btn-sm btn-secondary dept-edit-btn" data-id="${esc(d.id)}" aria-label="Edit ${esc(d.name)}">Edit</button>
+                          <button type="button" class="btn btn-sm btn-secondary dept-row-del" data-id="${esc(d.id)}" aria-label="Hapus ${esc(d.name)}">Hapus</button>
+                          ${isSaved ? '<span class="pill green mat-saved-pill">✓ Tersimpan</span>' : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -4421,6 +4710,12 @@ export async function renderStationeryMaterialsView(host, ctx) {
       `}
     </div>
   `;
+
+  bindOpsPagination(host.querySelector('#mat-pagination-slot'), pagedItems, (nextPage, nextSize) => {
+    host.dataset.matPage = String(nextPage);
+    host.dataset.matPageSize = String(nextSize);
+    renderStationeryMaterialsView(host, ctx);
+  });
 
   host.querySelectorAll('[data-mat-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -4457,16 +4752,19 @@ export async function renderStationeryMaterialsView(host, ctx) {
   let matSearchTimer = null;
   host.querySelector('#mat-search')?.addEventListener('input', e => {
     host.dataset.matSearch = e.target.value || '';
+    host.dataset.matPage = '1';
     clearTimeout(matSearchTimer);
     matSearchTimer = setTimeout(() => renderStationeryMaterialsView(host, ctx), 160);
   });
 
   host.querySelector('#mat-add-save')?.addEventListener('click', async () => {
+    const btn = host.querySelector('#mat-add-save');
     const rawCode = host.querySelector('#mat-add-code')?.value?.trim() || nextMatCode;
     const rawName = host.querySelector('#mat-add-name')?.value?.trim().toUpperCase() || '';
     const unit = host.querySelector('#mat-add-unit')?.value || 'PCS';
     const pUnit = host.querySelector('#mat-add-punit')?.value || deriveDefaultPurchaseUnit(rawName, unit);
     const convQty = Math.max(1, Number(host.querySelector('#mat-add-conv')?.value || 1) || 1);
+    const warehouseCapacity = Math.max(0, Math.round(Number(host.querySelector('#mat-add-cap')?.value || 0) || 0));
     if (!/^\d{5}$/.test(rawCode)) {
       showInlineBanner(host, 'Kode Material harus tepat 5 angka.', 'error');
       return;
@@ -4486,79 +4784,244 @@ export async function renderStationeryMaterialsView(host, ctx) {
       unit,
       purchase_unit: pUnit,
       conversion_qty: convQty,
+      warehouse_capacity: warehouseCapacity,
       min_purchase_qty: 1,
       opening_stock: 0,
       current_stock: 0,
       min_stock: 2,
       is_active: true
     };
-    state.stationeryItems = [...items, newItem];
-    const nextMeta = extractMaterialMetaMap(state.stationeryItems);
-    saveStoredMaterialMeta(nextMeta);
-    if (ctx.isDemoMode) {
-      saveDemoOpsState(state);
-    } else if (ctx.supabase) {
-      const { error } = await ctx.supabase.from('stationery_items').insert(toSqlStationeryItemRow(newItem));
-      if (error) {
-        showInlineBanner(host, `Gagal menyimpan material: ${formatAppError(error)}`, 'error');
-        return;
-      }
-      await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
-      invalidateOpsStateCache();
-    }
-    await renderStationeryMaterialsView(host, ctx);
-    showInlineBanner(host, `Material "${rawCode} — ${rawName}" berhasil ditambahkan.`, 'ok');
-  });
-
-  host.querySelectorAll('.mat-row-unit').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const tr = sel.closest('tr');
-      const lbl = tr?.querySelector('.mat-conv-unit-lbl');
-      if (lbl) lbl.textContent = sel.value || 'PCS';
-    });
-  });
-
-  host.querySelectorAll('.mat-row-save').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.id;
-      const tr = btn.closest('tr');
-      const nextName = tr?.querySelector('.mat-row-name')?.value?.trim().toUpperCase() || '';
-      const nextUnit = tr?.querySelector('.mat-row-unit')?.value || 'PCS';
-      const nextPUnit = tr?.querySelector('.mat-row-punit')?.value || 'PCS';
-      const nextConv = Math.max(1, Number(tr?.querySelector('.mat-row-conv')?.value || 1) || 1);
-      if (!nextName) {
-        showInlineBanner(host, 'Nama Item tidak boleh kosong.', 'error');
-        return;
-      }
-      state.stationeryItems = items.map(it => it.id === id ? {
-        ...it,
-        item_name: nextName,
-        unit: nextUnit,
-        purchase_unit: nextPUnit,
-        conversion_qty: nextConv
-      } : it);
-      const nextMeta = extractMaterialMetaMap(state.stationeryItems);
-      saveStoredMaterialMeta(nextMeta);
-      if (ctx.isDemoMode) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+    try {
+      host.dataset.matSavedId = newItem.id;
+      if (ctx.isDemoMode || !ctx.supabase) {
+        state.stationeryItems = [...items, newItem];
+        const nextMeta = extractMaterialMetaMap(state.stationeryItems);
+        saveStoredMaterialMeta(nextMeta);
         saveDemoOpsState(state);
-      } else if (ctx.supabase) {
-        const updatedItem = state.stationeryItems.find(it => it.id === id);
-        if (updatedItem) {
-          const { error: itemErr } = await ctx.supabase.from('stationery_items').upsert(toSqlStationeryItemRow(updatedItem), { onConflict: 'id' });
-          if (itemErr) {
-            showInlineBanner(host, `Gagal menyimpan material: ${formatAppError(itemErr)}`, 'error');
-            return;
-          }
-        }
+      } else {
+        const { error } = await ctx.supabase.from('stationery_items').insert(toSqlStationeryItemRow(newItem));
+        if (error) throw error;
+        state.stationeryItems = [...items, newItem];
+        const nextMeta = extractMaterialMetaMap(state.stationeryItems);
+        saveStoredMaterialMeta(nextMeta);
         await savePortalSettingsBatch(ctx.supabase, [{ key: STATIONERY_MATERIAL_META_KEY, value: nextMeta }]);
         invalidateOpsStateCache();
       }
       await renderStationeryMaterialsView(host, ctx);
-      showInlineBanner(host, `Perubahan material "${nextName}" (1 ${nextPUnit} = ${nextConv} ${nextUnit}) disimpan.`, 'ok');
+      showInlineBanner(host, `Material "${rawCode} — ${rawName}" berhasil ditambahkan.`, 'ok');
+    } catch (err) {
+      showInlineBanner(host, formatAppError(err, 'Gagal menambahkan material.'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Tambah Material'; }
+    }
+  });
+
+  const openEditMaterialModal = item => {
+    document.getElementById('ops-mat-edit-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'ops-mat-edit-modal';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <section class="employee-modal-card" role="dialog" aria-modal="true" aria-labelledby="ops-mat-edit-title">
+        <div class="employee-modal-head">
+          <div>
+            <small>MATERIAL MANAGEMENT · EDIT</small>
+            <h2 id="ops-mat-edit-title">Edit Material ATK</h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="ops-mat-edit-close" aria-label="Tutup">×</button>
+        </div>
+
+        <div class="ops-form-grid" style="margin-top:12px">
+          <label class="ops-field">
+            <span>Kode Material (5 Angka)</span>
+            <input id="mat-edit-code" type="text" maxlength="5" class="input" value="${esc(item.item_code)}">
+          </label>
+          <label class="ops-field" style="grid-column:1 / -1">
+            <span>Nama Item</span>
+            <input id="mat-edit-name" type="text" class="input" value="${esc(item.item_name)}">
+          </label>
+          <label class="ops-field">
+            <span>Satuan</span>
+            <select id="mat-edit-unit" class="input">${buildUnitSelectOptions(item.unit)}</select>
+          </label>
+          <label class="ops-field">
+            <span>Satuan Pembelian</span>
+            <select id="mat-edit-punit" class="input">${buildUnitSelectOptions(item.purchase_unit)}</select>
+          </label>
+          <label class="ops-field">
+            <span>Konversi (1 Sat Beli = <span id="mat-edit-conv-unit">${esc(item.unit)}</span>)</span>
+            <input id="mat-edit-conv" type="number" min="1" step="1" class="input" value="${Math.max(1, Number(item.conversion_qty) || 1)}">
+          </label>
+          <label class="ops-field">
+            <span>Kapasitas Gudang (0 = Tak Terbatas)</span>
+            <input id="mat-edit-cap" type="number" min="0" step="1" class="input" value="${Math.max(0, Number(item.warehouse_capacity) || 0)}">
+          </label>
+        </div>
+
+        <div id="ops-mat-edit-err" class="form-error" role="alert" style="margin-top:10px"></div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px">
+          <button type="button" class="btn btn-secondary" id="ops-mat-edit-cancel">Batal</button>
+          <button type="button" class="btn btn-primary" id="ops-mat-edit-save">Simpan Perubahan</button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+      document.removeEventListener('keydown', onEsc);
+      modal.remove();
+    };
+    const onEsc = e => { if (e.key === 'Escape') closeModal(); };
+    document.addEventListener('keydown', onEsc);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    modal.querySelector('#ops-mat-edit-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#ops-mat-edit-cancel')?.addEventListener('click', closeModal);
+    modal.querySelector('#mat-edit-unit')?.addEventListener('change', e => {
+      const lbl = modal.querySelector('#mat-edit-conv-unit');
+      if (lbl) lbl.textContent = e.target.value || 'PCS';
     });
+
+    const saveBtn = modal.querySelector('#ops-mat-edit-save');
+    const errBox = modal.querySelector('#ops-mat-edit-err');
+    saveBtn?.addEventListener('click', async () => {
+      errBox.textContent = '';
+      const nextCode = modal.querySelector('#mat-edit-code')?.value?.trim() || '';
+      const nextName = modal.querySelector('#mat-edit-name')?.value?.trim().toUpperCase() || '';
+      const nextUnit = modal.querySelector('#mat-edit-unit')?.value || 'PCS';
+      const nextPUnit = modal.querySelector('#mat-edit-punit')?.value || 'PCS';
+      const nextConv = Math.max(1, Number(modal.querySelector('#mat-edit-conv')?.value || 1) || 1);
+      const nextCap = Math.max(0, Math.round(Number(modal.querySelector('#mat-edit-cap')?.value || 0) || 0));
+
+      if (!/^\d{5}$/.test(nextCode)) {
+        errBox.textContent = 'Kode Material harus tepat 5 angka.';
+        return;
+      }
+      if (!nextName) {
+        errBox.textContent = 'Nama Item tidak boleh kosong.';
+        return;
+      }
+      if (items.some(it => it.id !== item.id && it.item_code === nextCode)) {
+        errBox.textContent = `Kode Material ${nextCode} sudah digunakan item lain.`;
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Menyimpan...';
+      try {
+        host.dataset.matSavedId = item.id;
+        const updatedList = items.map(it => it.id === item.id ? {
+          ...it,
+          item_code: nextCode,
+          item_name: nextName,
+          unit: nextUnit,
+          purchase_unit: nextPUnit,
+          conversion_qty: nextConv,
+          warehouse_capacity: nextCap
+        } : it);
+        await persistMaterialUpdate(updatedList);
+        closeModal();
+        await renderStationeryMaterialsView(host, ctx);
+        showInlineBanner(host, `Material "${nextCode} — ${nextName}" berhasil diperbarui (Kapasitas Gudang: ${nextCap > 0 ? `${nextCap} ${nextUnit}` : 'Tak Terbatas'}).`, 'ok');
+      } catch (err) {
+        errBox.textContent = formatAppError(err, 'Gagal menyimpan perubahan material.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Simpan Perubahan';
+      }
+    });
+
+    setTimeout(() => modal.querySelector('#mat-edit-name')?.focus(), 25);
+  };
+
+  const openEditDeptModal = dept => {
+    document.getElementById('ops-dept-edit-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'ops-dept-edit-modal';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <section class="employee-modal-card" role="dialog" aria-modal="true" aria-labelledby="ops-dept-edit-title">
+        <div class="employee-modal-head">
+          <div>
+            <small>MATERIAL MANAGEMENT · EDIT DEPARTEMEN</small>
+            <h2 id="ops-dept-edit-title">Edit Departemen</h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="ops-dept-edit-close" aria-label="Tutup">×</button>
+        </div>
+
+        <div class="ops-form-grid" style="margin-top:12px">
+          <label class="ops-field">
+            <span>Kode Departemen (3 Angka)</span>
+            <input id="dept-edit-code" type="text" maxlength="3" class="input" value="${esc(dept.dept_code)}">
+          </label>
+          <label class="ops-field">
+            <span>Nama Departemen</span>
+            <input id="dept-edit-name" type="text" class="input" value="${esc(dept.name)}">
+          </label>
+        </div>
+
+        <div id="ops-dept-edit-err" class="form-error" role="alert" style="margin-top:10px"></div>
+
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px">
+          <button type="button" class="btn btn-secondary" id="ops-dept-edit-cancel">Batal</button>
+          <button type="button" class="btn btn-primary" id="ops-dept-edit-save">Simpan Perubahan</button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+      document.removeEventListener('keydown', onEsc);
+      modal.remove();
+    };
+    const onEsc = e => { if (e.key === 'Escape') closeModal(); };
+    document.addEventListener('keydown', onEsc);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    modal.querySelector('#ops-dept-edit-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#ops-dept-edit-cancel')?.addEventListener('click', closeModal);
+
+    const saveBtn = modal.querySelector('#ops-dept-edit-save');
+    const errBox = modal.querySelector('#ops-dept-edit-err');
+    saveBtn?.addEventListener('click', async () => {
+      errBox.textContent = '';
+      const code = modal.querySelector('#dept-edit-code')?.value?.trim() || '';
+      const name = modal.querySelector('#dept-edit-name')?.value?.trim().toUpperCase() || '';
+      if (!/^\d{3}$/.test(code) || !name) {
+        errBox.textContent = 'Kode Departemen (3 angka) dan Nama Departemen wajib valid.';
+        return;
+      }
+      if (departments.some(d => d.id !== dept.id && (d.dept_code === code || d.name === name))) {
+        errBox.textContent = 'Kode atau Nama Departemen sudah digunakan.';
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Menyimpan...';
+      try {
+        host.dataset.deptSavedId = dept.id;
+        state.stationeryDepartments = departments.map(d => d.id === dept.id ? { ...d, dept_code: code, name } : d);
+        await persistDepartmentsState();
+        closeModal();
+        await renderStationeryMaterialsView(host, ctx);
+        showInlineBanner(host, `Departemen "${code} — ${name}" berhasil diperbarui.`, 'ok');
+      } catch (err) {
+        errBox.textContent = formatAppError(err, 'Gagal menyimpan perubahan departemen.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Simpan Perubahan';
+      }
+    });
+
+    setTimeout(() => modal.querySelector('#dept-edit-name')?.focus(), 25);
+  };
+
+  // Single delegated click listener for Daftar Material
+  host.querySelector('#mat-tbody')?.addEventListener('click', e => {
+    const editBtn = e.target.closest('.mat-edit-btn');
+    if (!editBtn) return;
+    const item = items.find(it => it.id === editBtn.dataset.id);
+    if (item) openEditMaterialModal(item);
   });
 
   host.querySelector('#dept-add-save')?.addEventListener('click', async () => {
+    const btn = host.querySelector('#dept-add-save');
     const code = host.querySelector('#dept-add-code')?.value?.trim() || nextDeptCode;
     const name = host.querySelector('#dept-add-name')?.value?.trim().toUpperCase() || '';
     if (!/^\d{3}$/.test(code)) {
@@ -4573,41 +5036,44 @@ export async function renderStationeryMaterialsView(host, ctx) {
       showInlineBanner(host, 'Kode atau Nama Departemen sudah terdaftar.', 'error');
       return;
     }
-    state.stationeryDepartments = [...departments, { id: `dept-${code}`, dept_code: code, name }];
-    await persistMaterialsState();
-    await renderStationeryMaterialsView(host, ctx);
-    showInlineBanner(host, `Departemen "${code} — ${name}" berhasil ditambahkan.`, 'ok');
-  });
-
-  host.querySelectorAll('.dept-row-save').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.id;
-      const tr = btn.closest('tr');
-      const code = tr?.querySelector('.dept-row-code')?.value?.trim() || '';
-      const name = tr?.querySelector('.dept-row-name')?.value?.trim().toUpperCase() || '';
-      if (!/^\d{3}$/.test(code) || !name) {
-        showInlineBanner(host, 'Kode Departemen (3 angka) dan Nama wajib valid.', 'error');
-        return;
-      }
-      state.stationeryDepartments = departments.map(d => d.id === id ? { ...d, dept_code: code, name } : d);
-      await persistMaterialsState();
+    const newDept = { id: `dept-${code}`, dept_code: code, name };
+    if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+    try {
+      host.dataset.deptSavedId = newDept.id;
+      state.stationeryDepartments = [...departments, newDept];
+      await persistDepartmentsState();
       await renderStationeryMaterialsView(host, ctx);
-      showInlineBanner(host, `Departemen "${code} — ${name}" diperbarui.`, 'ok');
-    });
+      showInlineBanner(host, `Departemen "${code} — ${name}" berhasil ditambahkan.`, 'ok');
+    } catch (err) {
+      showInlineBanner(host, formatAppError(err, 'Gagal menambahkan departemen.'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Tambah Departemen'; }
+    }
   });
 
-  host.querySelectorAll('.dept-row-del').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.id;
+  // Single delegated click listener for Daftar Departemen
+  host.querySelector('#dept-tbody')?.addEventListener('click', async e => {
+    const editBtn = e.target.closest('.dept-edit-btn');
+    if (editBtn) {
+      const dept = departments.find(d => d.id === editBtn.dataset.id);
+      if (dept) openEditDeptModal(dept);
+      return;
+    }
+    const delBtn = e.target.closest('.dept-row-del');
+    if (delBtn) {
+      const id = delBtn.dataset.id;
       if (departments.length <= 1) {
         showInlineBanner(host, 'Minimal harus tersisa 1 departemen.', 'warn');
         return;
       }
-      state.stationeryDepartments = departments.filter(d => d.id !== id);
-      await persistMaterialsState();
-      await renderStationeryMaterialsView(host, ctx);
-      showInlineBanner(host, 'Departemen berhasil dihapus.', 'ok');
-    });
+      try {
+        state.stationeryDepartments = departments.filter(d => d.id !== id);
+        await persistDepartmentsState();
+        await renderStationeryMaterialsView(host, ctx);
+        showInlineBanner(host, 'Departemen berhasil dihapus.', 'ok');
+      } catch (err) {
+        showInlineBanner(host, formatAppError(err, 'Gagal menghapus departemen.'), 'error');
+      }
+    }
   });
 }
 

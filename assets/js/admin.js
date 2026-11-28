@@ -279,7 +279,7 @@ const DEMO_RECRUITMENT_SETTINGS_KEY = 'hrga_demo_recruitment_v1';
 const DEMO_STAGE1_LEADS_KEY = 'hrga_demo_stage1_leads_v1';
 const DEMO_DISMISSED_STAGE1_KEY = 'hrga_demo_dismissed_stage1_v1';
 const DEMO_DISMISSED_INVITED_KEY = 'hrga_dismissed_invited_v1';
-const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'opsSettings', 'systemImport']);
+const ROOT_ADMIN_VIEWS = new Set(['userManagement', 'contractSettings', 'recruitmentSettings', 'opsSettings', 'stationeryMaterials', 'systemImport']);
 let employeeSubTab = 'directory';
 let lastEmployeeDelta = null;
 
@@ -5014,7 +5014,7 @@ function renderSystemImport(opsCtx = null) {
       rawAtkMasterRows = raw;
       atkMasterSubmit.disabled = false;
       atkMasterPreview.classList.remove('hidden');
-      atkMasterPreview.innerHTML = `<b>${rows.length} master item ATK siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <code>${esc(r.raw_code || 'AUTO')}</code> <b>${esc(r.item_name)}</b> — Saldo Awal: ${r.opening_stock} ${esc(r.unit)} (1 ${esc(r.purchase_unit)} = ${r.conversion_qty || 1} ${esc(r.unit)})</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} item lainnya</div>` : ''}</div>`;
+      atkMasterPreview.innerHTML = `<b>${rows.length} master item ATK siap diimport</b><div style="margin-top:6px;max-height:140px;overflow:auto">${rows.slice(0, 8).map(r => `<div>• <code>${esc(r.raw_code || 'AUTO')}</code> <b>${esc(r.item_name)}</b> — Saldo Awal: ${r.opening_stock} ${esc(r.unit)} · 1 ${esc(r.purchase_unit)} = ${r.conversion_qty || 1} ${esc(r.unit)} · Kapasitas: ${r.warehouse_capacity > 0 ? `${r.warehouse_capacity} ${esc(r.unit)}` : 'Tak Terbatas'}</div>`).join('')}${rows.length > 8 ? `<div>… dan ${rows.length - 8} item lainnya</div>` : ''}</div>`;
     } catch (err) {
       atkMasterError.textContent = formatAppError(err, 'Gagal membaca file Master ATK.');
     }

@@ -903,20 +903,21 @@ test('Stationery multi-item batch input, 5-digit Material/3-digit Dept codes, Re
 });
 
 test('ATK Master & Stock Movement spreadsheet import computes chronological IN/OUT balances cleanly and flows into reports', () => {
-  // Exact 6-column ATK Master Item & Stock Awal schema (no manual Min Stock)
+  // Exact 7-column ATK Master Item & Stock Awal schema including warehouse capacity
   assert.deepEqual(STATIONERY_MASTER_IMPORT_HEADERS, [
     'Kode Material',
     'Nama Item',
     'Satuan',
-    'Satuan Minimal Pembelian',
-    'Konversi Satuan',
+    'Satuan Pembelian',
+    'Konversi (1 Sat Beli =)',
+    'Kapasitas Gudang',
     'Saldo Awal'
   ]);
   assert.deepEqual(Object.keys(STATIONERY_MASTER_SAMPLE_ROW), STATIONERY_MASTER_IMPORT_HEADERS);
 
-  // 1. Parse and import Master ATK (Clean Replace) using 6 exact columns
+  // 1. Parse and import Master ATK (Clean Replace) supporting both new 7-col headers and legacy aliases
   const rawMaster = [
-    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Minimal Pembelian': 'PACK', 'Konversi Satuan': 36, 'Saldo Awal': 50 },
+    { 'Kode Material': '10001', 'Nama Item': 'BOLPOINT HITAM', 'Satuan': 'PCS', 'Satuan Pembelian': 'PACK', 'Konversi (1 Sat Beli =)': 36, 'Kapasitas Gudang': 250, 'Saldo Awal': 50 },
     { 'Kode Material': '', 'Nama Item': 'KERTAS HVS A4', 'Satuan': 'RIM', 'Satuan Minimal Pembelian': 'RIM', 'Konversi Satuan': 1, 'Saldo Awal': 5 }
   ];
   const parsedMaster = parseStationeryMasterImportRows(rawMaster);
@@ -924,6 +925,8 @@ test('ATK Master & Stock Movement spreadsheet import computes chronological IN/O
   assert.equal(parsedMaster.rows.length, 2);
   assert.equal(parsedMaster.rows[0].opening_stock, 50);
   assert.equal(parsedMaster.rows[0].conversion_qty, 36);
+  assert.equal(parsedMaster.rows[0].warehouse_capacity, 250);
+  assert.equal(parsedMaster.rows[1].warehouse_capacity, 0);
 
   const masterRes = importStationeryMasterDataset({
     existingItems: SEED_STATIONERY_ITEMS,
@@ -933,6 +936,7 @@ test('ATK Master & Stock Movement spreadsheet import computes chronological IN/O
   });
   assert.equal(masterRes.items.length, 2);
   assert.equal(masterRes.ledger.length, 0);
+  assert.equal(masterRes.items[0].warehouse_capacity, 250);
   assert.equal(masterRes.items[1].item_code, '10002');
 
   // 2. Parse and import chronological Stock Movements (mix of ISO, DD/MM/YYYY, Excel serial date, existing + new items, auto-seed opening stock)
@@ -1402,13 +1406,81 @@ test('Driver schedule import parser & department-separated meal report + print-o
 
   // Check UI separation: screen renders stf-meal-dept-card without global screen table; Global is print-only
   const opsViewsText = fs.readFileSync('assets/js/ops-views.js', 'utf8');
+  const adminJsText = fs.readFileSync('assets/js/admin.js', 'utf8');
+  const indexHtmlText = fs.readFileSync('index.html', 'utf8');
   assert.ok(opsViewsText.includes('stf-meal-dept-card'), 'Meal screen view must separate tables by department');
   assert.ok(opsViewsText.includes('ops-srep-print-global'), 'Global meal report must be available via Print Global action');
-  assert.ok(opsViewsText.includes('ops-ds-import-submit'), 'Driver Schedule screen must include inline import controls');
+  assert.ok(!opsViewsText.includes('ops-ds-import-bar'), 'Driver Schedule inline import must be removed from operational view');
+  assert.ok(adminJsText.includes('import-ds-submit'), 'Driver Schedule import must live in System Settings -> Data Import');
+
+  const accessGroupSlice = indexHtmlText.slice(indexHtmlText.indexOf('id="group-access"'));
+  const stationeryGroupSlice = indexHtmlText.slice(indexHtmlText.indexOf('id="group-stationery"'), indexHtmlText.indexOf('id="group-access"'));
+  assert.ok(accessGroupSlice.includes('data-view="stationeryMaterials"'), 'Material Management must live under SYSTEM SETTINGS');
+  assert.ok(!stationeryGroupSlice.includes('data-view="stationeryMaterials"'), 'Material Management must not remain under Stationery & ATK');
 });
 
+test('Purchase plan applies 1.5x rounded multiplier for Fast/Very Fast Moving items and respects warehouse capacity limits', () => {
+  const customItems = normalizeStationeryItems([
+    { id: 'vf-cap', item_code: '10001', item_name: 'ITEM VERY FAST CAPPED', unit: 'PCS', purchase_unit: 'PACK', conversion_qty: 10, current_stock: 15, warehouse_capacity: 25 },
+    { id: 'fm-uncap', item_code: '10002', item_name: 'ITEM FAST UNLIMITED', unit: 'PCS', purchase_unit: 'PCS', conversion_qty: 1, current_stock: 0, warehouse_capacity: 0 },
+    { id: 'sm-slow', item_code: '10003', item_name: 'ITEM SLOW', unit: 'PCS', purchase_unit: 'PCS', conversion_qty: 1, current_stock: 0, warehouse_capacity: 0 }
+  ]);
+  // 1 month = 30 observedDays, 1w period = 7 days
+  // vf-cap: out 22 -> avgDaily=22/30 -> ceil(22/30 * 7) = ceil(5.13)=6 -> 1.5x rounded = 9; minStock raw = 18; warehouseCapacity=25 -> minStock=18, currentStock=15, remainingCap=10 -> deficit=3
+  // Suppose current_stock=20 -> remainingCap=5, rawMinStock=18 -> deficit=0. Let's make out=60 -> base=14 -> 1.5x=21 -> rawMin=42 capped to 25; current=15, deficit capped to remainingCap=10!
+  const ledger = [
+    { id: 'm1', item_id: 'vf-cap', tx_type: 'OUT', qty: 60, sloc: 'HR GA', tx_date: '2026-11-05' },
+    { id: 'm2', item_id: 'fm-uncap', tx_type: 'OUT', qty: 20, sloc: 'HR GA', tx_date: '2026-11-06' }, // ceil(20/30*7)=ceil(4.66)=5 -> round(5*1.5)=8 (rank 2 -> Very Fast / Fast)
+    { id: 'm3', item_id: 'sm-slow', tx_type: 'OUT', qty: 20, sloc: 'FINANCE', tx_date: '2026-11-07' } // rank 3 -> set fastMaxRank: 2 so rank 3 is Slow Moving -> multiplier 1x -> 5
+  ];
 
+  const customSettings = {
+    stationery: {
+      frequencyTiers: {
+        veryFastMaxRank: 1,
+        fastMaxRank: 2,
+        slowMaxRank: 5
+      }
+    }
+  };
 
+  const plan = buildPurchasePlanSuggestions({
+    items: customItems,
+    ledger,
+    purchasePeriod: '1w',
+    referenceDate: '2026-11-24',
+    settings: customSettings,
+    manualOverrides: {
+      'vf-cap': { decisionQty: '2' } // 2 PACK * 10 = 20 PCS; 15 + 20 = 35 > warehouseCapacity 25 => exceedsCapacity: true
+    }
+  });
 
+  const rowVf = plan.rows.find(r => r.id === 'vf-cap');
+  assert.equal(rowVf.basePeriodRequirement, 14);
+  assert.equal(rowVf.frequencyMultiplier, 1.5);
+  assert.equal(rowVf.periodRequirement, 21); // round(14 * 1.5) = 21 <= 25
+  assert.equal(rowVf.minStock, 25); // 21*2=42 capped at warehouseCapacity 25
+  assert.equal(rowVf.remainingCapacity, 10); // 25 - 15
+  assert.equal(rowVf.deficit, 10); // never causes currentStock + deficit > 25
+  assert.equal(rowVf.exceedsCapacity, true);
 
+  const rowFast = plan.rows.find(r => r.id === 'fm-uncap');
+  assert.equal(rowFast.basePeriodRequirement, 5);
+  assert.equal(rowFast.frequencyMultiplier, 1.5);
+  assert.equal(rowFast.periodRequirement, Math.round(5 * 1.5)); // 8
+  assert.equal(rowFast.minStock, 16);
 
+  const rowSlow = plan.rows.find(r => r.id === 'sm-slow');
+  assert.equal(rowSlow.basePeriodRequirement, 5);
+  assert.equal(rowSlow.frequencyMultiplier, 1);
+  assert.equal(rowSlow.periodRequirement, 5);
+  assert.equal(rowSlow.minStock, 10);
+
+  const prWs = buildPurchaseRequisitionWorkspaceRows({
+    planRows: plan.rows,
+    rowOverrides: { 'vf-cap': { decisionQty: '2' } }
+  });
+  const prVf = prWs.rows.find(r => r.id === 'vf-cap');
+  assert.equal(prVf.warehouseCapacity, 25);
+  assert.equal(prVf.exceedsCapacity, true);
+});

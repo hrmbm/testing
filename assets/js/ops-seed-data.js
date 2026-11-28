@@ -142,6 +142,7 @@ export const SEED_STATIONERY_ITEMS = ATK_COMPACT_121.map(([no, item_name, unit])
   unit,
   purchase_unit: deriveDefaultPurchaseUnit(item_name, unit),
   conversion_qty: 1,
+  warehouse_capacity: 0,
   min_purchase_qty: 1,
   opening_stock: 0,
   current_stock: 0,

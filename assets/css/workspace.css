@@ -2762,6 +2762,7 @@ table th[data-no-sort="true"]::after {
  * ============================================================================ */
 .ops-stack table thead th::after,
 .ops-card table thead th::after,
+.atk-batch-table thead th::after,
 .drv-pdf-table thead th::after,
 .cs-grid-table thead th::after,
 .ops-print-modal-card table thead th::after {
@@ -4667,8 +4668,190 @@ table th[data-no-sort="true"]::after {
   color: var(--teal-dark);
 }
 
+/* ============================================================================
+ * Ergonomic Floating Save Toasts, Row-Saved Highlights, 24h Time Pair & ATK Combobox
+ * ============================================================================ */
+.ops-toast-wrap {
+  position: fixed;
+  top: 12px;
+  left: calc(50% + 130px);
+  transform: translateX(-50%);
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: min(460px, calc(100vw - 32px));
+  pointer-events: none;
+}
 
+@media (max-width: 960px) {
+  .ops-toast-wrap {
+    left: 50%;
+  }
+}
 
+.ops-toast-item {
+  pointer-events: auto;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  animation: opsToastIn 0.16s ease-out;
+}
 
+@keyframes opsToastIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
+.ops-toast-ok {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
 
+.ops-toast-warn {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.ops-toast-error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.ops-toast-info {
+  background: #f0f9ff;
+  border-color: #7dd3fc;
+  color: #075985;
+}
+
+tr.is-row-saved td {
+  background: #ecfdf5;
+  transition: background-color 0.25s ease;
+}
+
+.mat-saved-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* 2-part 24-hour (JJ : MM) time input pair */
+.ops-time24-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ops-time24-hh,
+.ops-time24-mm {
+  width: 50px;
+  min-width: 50px;
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.ops-time24-sep {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--ink-2);
+  user-select: none;
+}
+
+/* Ergonomic keyboard-first ATK item combobox & fixed portal menu */
+.atk-combo-wrap {
+  position: relative;
+  min-width: 240px;
+}
+
+.atk-combo-wrap .atk-batch-search {
+  width: 100%;
+}
+
+.atk-combo-menu {
+  position: fixed;
+  z-index: 1800;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  padding: 4px;
+}
+
+.atk-combo-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.atk-combo-opt:hover,
+.atk-combo-opt.is-active {
+  background: #e6f4f6;
+  color: #0d5c6b;
+}
+
+.atk-combo-opt-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atk-combo-opt-main code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--canvas);
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+
+.atk-combo-opt-stock {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atk-combo-empty {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+}
